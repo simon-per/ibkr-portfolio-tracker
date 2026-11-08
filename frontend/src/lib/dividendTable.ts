@@ -1,4 +1,4 @@
-import type { DividendSecurityRow } from './api'
+import type { CompanyDividendTrack, DividendSecurityRow } from './api'
 import { compareNullsLast } from './nullsLast'
 
 /**
@@ -19,8 +19,11 @@ import { compareNullsLast } from './nullsLast'
  * renders.
  */
 export type DividendSortKey =
-  | 'symbol' | 'net' | 'yield' | 'fwdYield' | 'payouts' | 'share' | 'forecast' | 'next'
-  | 'growth' | 'yoc'
+  | 'symbol' | 'net' | 'yield' | 'payouts' | 'share' | 'forecast' | 'next'
+  | 'growth' | 'yoc' | 'dpsCagr' | 'streak' | 'payout'
+
+/** Each held listing's company dividend record, by security id (`/dividend-track`). */
+export type DividendTrackMap = Readonly<Record<string, CompanyDividendTrack>>
 
 export type DividendSortDirection = 'asc' | 'desc'
 
@@ -34,18 +37,22 @@ function sortValue(
   row: DividendSecurityRow,
   key: DividendSortKey,
   showForecast: boolean,
+  track: DividendTrackMap | undefined,
 ): number | string | null {
+  const own = track?.[String(row.security_id)]
   switch (key) {
     case 'symbol': return row.symbol
     case 'net': return row.net_eur
-    case 'yield': return row.trailing_yield_pct
-    case 'fwdYield': return row.forward_yield_pct
+    case 'yield': return row.forward_yield_pct
     case 'payouts': return row.payouts
     case 'share': return row.share_pct
     case 'forecast': return showForecast && row.forecast_net_eur > 0 ? row.forecast_net_eur : null
     case 'next': return showForecast ? row.next_pay_date : null
     case 'growth': return row.per_share_growth_pct ?? null
     case 'yoc': return row.yield_on_cost_pct
+    case 'dpsCagr': return own?.dps_cagr_5y ?? null
+    case 'streak': return own?.raise_years ?? null
+    case 'payout': return own?.payout_ratio ?? null
   }
 }
 
@@ -54,9 +61,11 @@ export function sortDividendRows(
   column: DividendSortKey,
   direction: DividendSortDirection,
   showForecast: boolean,
+  track?: DividendTrackMap,
 ): DividendSecurityRow[] {
+  const value = (row: DividendSecurityRow) => sortValue(row, column, showForecast, track)
   return [...rows].sort((a, b) =>
-    compareNullsLast(sortValue(a, column, showForecast), sortValue(b, column, showForecast), direction)
+    compareNullsLast(value(a), value(b), direction)
       || a.symbol.localeCompare(b.symbol) || a.security_id - b.security_id,
   )
 }

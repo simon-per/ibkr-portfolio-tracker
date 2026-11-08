@@ -6,9 +6,8 @@ function row(security_id: number, symbol: string, extra: Partial<DividendSecurit
   return {
     security_id, symbol, exchange: null, description: symbol,
     payouts: 1, gross_eur: 0, withholding_eur: 0, net_eur: 0,
-    forecast_payouts: 0, forecast_net_eur: 0, trailing_yield_pct: null,
-    forward_yield_pct: null, per_share_growth_pct: null, trailing_yield_partial: false,
-    days_held_in_ttm: 365, yield_on_cost_pct: null, share_pct: null, next_pay_date: null,
+    forecast_payouts: 0, forecast_net_eur: 0,
+    forward_yield_pct: null, per_share_growth_pct: null, yield_on_cost_pct: null, share_pct: null, next_pay_date: null,
     source: 'ibkr', forecast_basis: null, forecast_samples: null, forecast_cadence_days: null,
     forecast_lag_days: null, forecast_lag_samples: null, forecast_method: null,
     forecast_withholding_pct: null, forecast_withholding_source: null,
@@ -28,7 +27,16 @@ describe('sortDividendRows', () => {
   it('sorts a figure either way with the unknown last both times', () => {
     expect(symbols(sortDividendRows(rows, 'growth', 'desc', true))).toEqual(['AAA', 'CCC', 'BBB'])
     expect(symbols(sortDividendRows(rows, 'growth', 'asc', true))).toEqual(['CCC', 'AAA', 'BBB'])
-    expect(symbols(sortDividendRows(rows, 'fwdYield', 'asc', true))).toEqual(['AAA', 'CCC', 'BBB'])
+    expect(symbols(sortDividendRows(rows, 'yield', 'asc', true))).toEqual(['AAA', 'CCC', 'BBB'])
+  })
+
+  it("sorts by a payer's own record, the rows without one last", () => {
+    const track = { 1: { dps_cagr_5y: 0.05, raise_years: 3, payout_ratio: 0.4 },
+      3: { dps_cagr_5y: 0.09, raise_years: 10, payout_ratio: null } }
+    expect(symbols(sortDividendRows(rows, 'dpsCagr', 'desc', true, track))).toEqual(['CCC', 'AAA', 'BBB'])
+    expect(symbols(sortDividendRows(rows, 'streak', 'asc', true, track))).toEqual(['AAA', 'CCC', 'BBB'])
+    expect(symbols(sortDividendRows(rows, 'payout', 'asc', true, track))).toEqual(['AAA', 'BBB', 'CCC'])
+    expect(symbols(sortDividendRows(rows, 'payout', 'desc', true))).toEqual(['AAA', 'BBB', 'CCC'])
   })
 
   it('sorts net and leaves the input alone', () => {

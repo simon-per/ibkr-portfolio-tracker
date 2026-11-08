@@ -609,6 +609,48 @@ def key_stats(
     }
 
 
+def raise_streak(points: Sequence[tuple]) -> Optional[int]:
+    """
+    How many fiscal years in a row, newest back, paid more per share than the year
+    before: (period_end, dividends per share) pairs, oldest first. A year without a
+    figure, a year that is not a year after the one before it (within `YOY_SLACK_DAYS`),
+    or a year that paid no more ends it. None when the newest year has no positive
+    figure: a company that paid nothing has no streak, not a streak of 0.
+    """
+    if not points or points[-1][1] is None or points[-1][1] <= 0:
+        return None
+    streak = 0
+    for (before_date, before), (year_date, value) in reversed(
+        list(zip(points, points[1:]))
+    ):
+        if before is None or value is None or before <= 0:
+            break
+        if abs((_years_before(year_date, 1) - before_date).days) > YOY_SLACK_DAYS:
+            break
+        if value <= before:
+            break
+        streak += 1
+    return streak
+
+
+def dividend_track(rows: Sequence[CompanyFinancial]) -> Dict[str, Any]:
+    """
+    A company's own dividend record from its filings (review item FD4): the 5-year
+    growth of the fiscal years' dividends per share, the raise streak over them
+    (`raise_streak`), and the payout ratio as `key_stats` reads it (TTM dividends per
+    share over TTM diluted EPS) — one definition of each, shared with the Company tab.
+    """
+    annual = [
+        (p.period_end, p.series.get("dividends_per_share"))
+        for p in _series_points(rows, "annual")
+    ]
+    return {
+        "dps_cagr_5y": growth_at(annual, len(annual) - 1, 5) if annual else None,
+        "raise_years": raise_streak(annual),
+        "payout_ratio": key_stats(rows)["payout_ratio"],
+    }
+
+
 def build_series(
     rows: Sequence[CompanyFinancial], period: str, range_key: str, prices: Prices = ()
 ) -> Dict[str, Any]:
@@ -883,6 +925,24 @@ class CompanyFinancialsService:
             "next_eps_estimate": yahoo["next_eps_estimate"],
             "yahoo_as_of": utc_iso(yahoo["as_of"]) if yahoo["as_of"] is not None else None,
         }
+
+    async def dividend_track(self) -> Dict[int, Dict[str, Any]]:
+        """
+        ``{security_id: {dps_cagr_5y, raise_years, payout_ratio}}`` for every held listing
+        of a company with stored filings (`dividend_track`), every listing of a company
+        carrying its figures. A listing with no SEC filer behind it — a fund, a company
+        that files abroad — is absent, and the Dividends table prints a dash.
+        """
+        companies = await self.repo.companies()
+        out: Dict[int, Dict[str, Any]] = {}
+        for cik, listings in (await self._held_members(companies)).items():
+            rows = await self.repo.rows_for(cik)
+            if not rows:
+                continue
+            track = dividend_track(rows)
+            for listing in listings:
+                out[listing.id] = track
+        return out
 
     async def get_financials(
         self,

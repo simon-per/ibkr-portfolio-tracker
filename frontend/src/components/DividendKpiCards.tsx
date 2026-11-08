@@ -21,6 +21,19 @@ export interface DividendKpiTrend {
   forecast: number[]
   /** `forecast` per 1,000 of money in, on the same days; absent while money in is unknown. */
   perMoneyIn?: IncomePerMoneyIn | null
+  /** The forecast's next round level and how far it is (`forecastMilestones`). */
+  milestone?: { next: number; toGo: number } | null
+}
+
+/** "Next €400 · €35.16 to go" under the "Next 12 months" figure (review item FD3). */
+function NextMilestone({ next, toGo, curSym }: { next: number; toGo: number; curSym: string }) {
+  return (
+    <div className="mt-1 text-xs text-muted-foreground" data-next-milestone="">
+      Next <span className="font-semibold text-foreground">{dividendAmount(next, curSym)}</span>
+      {' · '}
+      <span className="whitespace-nowrap tabular-nums">{dividendAmount(toGo, curSym)} to go</span>
+    </div>
+  )
 }
 
 /**
@@ -162,7 +175,12 @@ export function DividendKpiCards({ growth, isLoading, trend }: DividendKpiCardsP
           flatBand: FLAT_BAND_PCT,
         }}
         sparkline={trend?.forecast}
-        footer={trend?.perMoneyIn && <PerMoneyIn data={trend.perMoneyIn} curSym={curSym} />}
+        footer={(trend?.milestone || trend?.perMoneyIn) && (
+          <>
+            {trend.milestone && <NextMilestone {...trend.milestone} curSym={curSym} />}
+            {trend.perMoneyIn && <PerMoneyIn data={trend.perMoneyIn} curSym={curSym} />}
+          </>
+        )}
       />
 
       <KpiCard

@@ -28,6 +28,7 @@ from app.schemas.company_financials import (
     CompanyFinancialsResponse,
     CompanyFinancialsSeries,
     CompanyFinancialsSeriesSet,
+    CompanyDividendTrack,
 )
 from app.services.company_financials_service import PERIODS, CompanyFinancialsService
 
@@ -254,3 +255,13 @@ async def test_the_pe_reads_the_held_listings_newest_close(db, currency, expecte
     # No price is stored for a company not held.
     apple = await service.get_financials(await db.get(SecCompany, 320193))
     assert apple["key_stats"]["pe_ratio"] is None
+
+
+@pytest.mark.asyncio
+async def test_the_dividend_track_declares_every_key_the_service_returns(db):
+    await _seed(db)
+    track = await CompanyFinancialsService(db).dividend_track()
+    assert list(track) == [1], "the held listing, and not the constituent nobody holds"
+    for record in track.values():
+        assert set(record) == _fields(CompanyDividendTrack)
+        CompanyDividendTrack.model_validate(record)

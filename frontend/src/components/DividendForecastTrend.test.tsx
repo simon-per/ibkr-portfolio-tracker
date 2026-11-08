@@ -120,7 +120,33 @@ describe('DividendForecastTrend', () => {
     expect(section.textContent).toContain('+24%')    // 372 over the start day's 300
   })
 
-  it('renders nothing until there are two days to connect', async () => {
+  it('lists the change month by month in the open card, adding up to the header', async () => {
+    const breakdown = (shares: number, raises: number, timing: number) => ({
+      since: '2026-08-28', shares, raises, timing, newly_forecast: 0, fx: 0, unattributed: 0,
+    })
+    mount({
+      ...HISTORY,
+      points: [
+        point('2026-08-28', 300, { breakdown: breakdown(0, 0, 0) }),
+        point('2026-09-30', 323, { breakdown: breakdown(17, 3, 3) }),
+        point('2026-10-31', 367, { breakdown: breakdown(55, 4, 8) }),
+      ],
+    })
+    const section = await screen.findByRole('region', { name: 'Dividend forecast over time' })
+    expect(section.textContent).toContain('+€55.00 from buys')
+    expect(screen.queryByRole('table', { name: /by month/i })).toBeNull()
+    fireEvent.click(screen.getByRole('button', { expanded: false }))
+
+    const rows = screen.getAllByRole('row').slice(1).map((r) =>
+      Array.from(r.querySelectorAll('td')).map((td) => td.textContent))
+    // Newest first; October's +38 from buys and September's +17 make the header's +55.
+    expect(rows).toEqual([
+      ['Oct 26', '+€44.00', '+€38.00', '+€1.00', '+€5.00'],
+      ['Sep 26', '+€23.00', '+€17.00', '+€3.00', '+€3.00'],
+    ])
+  })
+
+    it('renders nothing until there are two days to connect', async () => {
     const spy = vi.spyOn(api, 'getDividendForecastHistory')
     mount({ ...HISTORY, points: [point('2026-10-13', 360)] })
     await vi.waitFor(() => expect(spy).toHaveBeenCalled())

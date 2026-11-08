@@ -9,7 +9,20 @@
 
 `GET /api/dividends/breakdown?year=&forecast=&period=` → `DividendService.get_dividend_breakdown()`, rendered by
 `DividendsTab.tsx`: net dividends by month **stacked by symbol**, a year filter (All time + the years
-with data), a Forecast toggle, and a per-stock table (payouts, net, projected, trailing-12M yield).
+with data), a Forecast toggle, and a per-stock table (payouts, net, projected, yield).
+
+**One yield per row** (review item FD2, 2026-11-08): `forward_yield_pct`, next-12-month forecast over
+market value, headed *Yield*. A trailing-12M yield sat beside it until then and read low for any
+holding whose shares had been added inside the year (a year's income over today's position: AVGO
+0.10% against 0.75% forward), and on a phone the two shared the card's one delta slot, so the
+forward one never showed. `trailing_yield_pct`, `trailing_yield_partial` and `days_held_in_ttm` left
+the schema with it.
+
+**Each payer's own record** (review item FD4, 2026-11-08): *5Y* (the company's dividend per share,
+5-year growth over its fiscal years), *Streak* (years in a row raised) and *Payout* (TTM dividends
+over TTM EPS), from the stored SEC filings through `/api/company-financials/dividend-track`
+(docs/company-financials.md). *Growth* beside them is the payment IBKR made against the one a year
+earlier; these are the company's history. A fund, or a company filing abroad, has a dash.
 Unlike `/summary` it **never enqueues a sync**, so it cannot reach Yahoo (rule 1) — everything comes
 from `dividend_payments`, `taxlots`, `market_prices` and `exchange_rates`.
 
@@ -202,6 +215,15 @@ the dividend stayed *pending* beside the money that had arrived, and no lag was 
 is why the Asian payers sat on "ex-date · pay date unknown" for good. Keyed on the payment row's own
 currency so the matcher decides from the rows alone. 75 stays under a quarterly cycle, and the
 one-to-one match takes the nearest estimate, so the previous quarter is never swallowed.
+**IBKR's own pairs come first** (review item D4, 2026-11-08): a payment IBKR booked against an
+ex-date in `dividend_date_pairs` pairs with the estimate on that ex-date (within
+`EXACT_PAIR_SLACK_DAYS`, 3), with no window; proximity is the fallback for a payment the log does not
+cover. A Korean year-end pays 105-110 days after its ex-date, past 75, so proximity alone left it
+unpaired — two entries for one dividend — or handed its cash to the next quarter's estimate.
+`exact_pairs` is a required keyword of the matcher and of `_splice_by_era`, so every reader that
+splices (breakdown, summary card, XIRR inflows, DA-1 income, ledger) loads it through
+`load_exact_date_pairs`, and `_cash_has_landed` asks the same two questions of one date
+(`tests/test_dividend_exact_pairing.py`, with an AST walk refusing `exact_pairs=None` in app code).
 Never by amount: one side is gross and the other net, so equal amounts are exactly what cannot be
 relied on. One-to-one is what makes the window safe for a monthly payer, whose cycle is shorter than
 the window — each IBKR payment consumes at most one estimate, so earlier months survive.
@@ -299,7 +321,7 @@ accruals `_forecast_inputs` reads, with or without a forecast, so no figure move
 Every reader of an estimate row, decided:
 
 - **The breakdown** — months, `ttm_series`, `annual[]` net and `withholding_eur`, TTM/YTD and the
-  paces, per-security `net_eur` and the trailing yield: the split. A per-security row's
+  paces and per-security `net_eur`: the split. A per-security row's
   `gross_eur`/`withholding_eur` stay the recorded figures, and the phone card leaves an estimate
   row's withholding out (`source === 'estimate'`: absent, not 0.00).
 - **The pending-estimate tail of the calendar**: the split (it already deducted the ladder rate,
@@ -501,16 +523,6 @@ a monthly payer 11 payouts a year instead of 12, and 91 days walked a quarterly 
 the 14th to the 13th. A gap near a calendar period snaps to it (`CALENDAR_PERIODS`), keeping the
 schedule's own day and clamping at month end; anything else keeps day-stepping.
 
-**`days_held_in_ttm` is the union of the lot intervals inside the trailing year**, not
-`as_of - min(open_date)`. Those agree only while a holding is unbroken, and diverge in the one case
-the flag exists for: sell out entirely, rebuy months later, and the older form still reported a full
-year because the *first* purchase was a year ago — so a yield built from two partial stretches of
-income was presented unqualified. Intervals are `[open_date, close_date)`, matching the
-exclude-on-close convention, and overlapping lots are merged so three lots open across one month
-count as one month held rather than three. Pinned from all three sides in
-`tests/test_dividend_breakdown.py`: the gap case, the overlap case, and a continuously-held position
-that must keep reporting full coverage.
-
 **Judge staleness from *now*, not from the horizon.** The stopped-payer guard compares against `as_of`,
 because the distance to a future horizon is a property of the question. Otherwise asking about 2027 made
 every payer look stopped and returned an empty year.
@@ -592,10 +604,24 @@ Yahoo's `amount_per_share` sizes only what IBKR never paid — the history befor
 **A split guard:** an IBKR rate more than 1.5× away from Yahoo's for the same dividend keeps Yahoo's,
 because Yahoo restates history for a split and IBKR's cash line keeps the pre-split rate. An **unpaired**
 IBKR payment joins as amount-only evidence (`HistPayment.cadence=False`): it sizes, it never bends
-the schedule. An **open accrual** is the newest amount of all (`gross / quantity`), replacing the Yahoo
-row of the same ex-date or joining as amount-only evidence — so a declared raise carries into every
-later projection the day IBKR lists it. Every amount converts at **one** rate per currency (the newest
-cached), so an exchange-rate move cannot make a level payer look varying.
+the schedule. An **open accrual** is the newest amount of all (IBKR's declared `grossRate`, else
+`gross / quantity`), replacing the Yahoo row of the same ex-date or otherwise joining the history — so
+a declared raise carries into every later projection the day IBKR lists it. It joins as a **scheduled**
+payment when it fills the ex-dated series' next open slot (no scheduled payment within half a cycle,
+`takes_open_slot`) and its ex-date has passed: that is the row Yahoo will write for it. Joined
+amount-only, a varying payer's slot was sized from a year earlier until Yahoo's row landed, and the
+level jumped that day as "raises" (review item D1, 2026-11-08: Korean payers declare a month after
+the ex-date; `tests/test_dividend_accrual_schedule.py` pins "accrual only" == "accrual + Yahoo row").
+An extra payment between two slots, a pay-dated IBKR-only series and an ex-date still ahead stay
+amount-only. Every amount converts at
+**one** rate per currency (the newest cached), so an exchange-rate move cannot make a level payer look
+varying — **the accrual included**: it is stored in the payment's own currency and converted when read
+(review item D2, 2026-11-08). Its EUR columns froze the rate of the day it was stored, so an unchanged
+dividend read as a raise or a cut (±1% on Mastercard, two days running) in the level, the per-share
+growth, the raises feed and the calendar's tag; and `gross / quantity` read the rate back off a gross
+rounded to the cent. A row stored before the native columns existed falls back to its EUR until the
+next sync replaces it (`accrual_gross_per_share`, `accrual_net_eur`;
+`tests/test_dividend_accrual_native.py`).
 
 **Steady or varying, decided from the payments at read time — nothing is stored or hand-classified**
 (`dividend_forecast.is_steady`). Over the last ≤ 8 regular payments within ~2 years: a *drop* is a
@@ -618,8 +644,12 @@ is > 2× the median of its neighbours within a year, nothing at least half its s
 side, AND something shows it was a one-off: it sat off the schedule (within half a cycle of another
 payment), or the same payment a year apart *exists and was small* and the next payment fell back.
 Those last conditions are not decoration: NVDA's step to 0.25 passes the first two tests exactly as a
-special would — only what came after can tell them apart, so the newest on-schedule payment is never
-called special by inference. And without a year-apart payment to compare, a fund's first December in
+special would — only what came after can tell them apart, so the newest on-schedule payment of a
+**steady** payer is never called special by inference. A **varying** payer's newest is (review item D3,
+2026-11-08) when the same payment a year earlier exists and was small: its slots repeat their own a
+year on, so taken as regular, Samsung's quarter of twelve times the usual was forecast again the next
+September (about 4.5% of the next twelve months). Judged with it included, so a steady payer's jump
+stays a raise. And without a year-apart payment to compare, a fund's first December in
 the history would look special and read every winter-starting fund low, so it stays regular.
 
 **Each projected payment says how it was sized:** `upcoming[].amount_source` and the row's
@@ -816,8 +846,9 @@ that most needs seeing: a payment overdue by months. `_open_accruals` filtered a
 
 **The matcher is one function now.** `_splice_by_era` wants the estimates to *drop* and
 `_measured_pay_lags` wants the ex→pay distances to *keep*, off the identical pairing — per security,
-nearest-first, one-to-one, bounded, never by amount. `match_estimates_to_ibkr` is that pairing, with
-`max_lag_days` a parameter precisely because the callers may legitimately diverge on it. A second
+nearest-first, one-to-one, bounded, never by amount, IBKR's own pairs first.
+`match_estimates_to_ibkr` is that pairing, with `max_lag_days` a parameter precisely because the
+callers may legitimately diverge on it. A second
 copy of this is the failure mode at the top of CLAUDE.md.
 
 The handoff — **projection → yfinance row / accrual → actual cash** — is pinned as a table over
@@ -844,8 +875,10 @@ until 2026-09-19.
   An enabled section listing nothing means everything has been paid, so an empty list still clears.
 - **Ingested unconditionally**, like the Cash Report, so ticking the section in the portal is the
   whole setup — no flag, no redeploy, and an empty table is the supported default.
-- Amounts convert at the **newest cached** rate, not at the pay date: that date is in the future and
-  has no rate. Same `_latest_fx_to_eur` the forecast already sizes projections with, and a currency
+- Amounts are stored **in the payment's own currency** (`gross_rate`, `gross_amount`,
+  `withholding_tax`, `net_amount`) and converted when read, at the rate the forecast sizes everything
+  else with (D2 above). The `_eur` columns keep the same amounts at the **newest cached** rate of the
+  day the row was stored, not at the pay date: that date is in the future and has no rate. Same `_latest_fx_to_eur` the forecast already sizes projections with, and a currency
   with no cached rate is skipped and warned about rather than stored unconverted. "Newest" is
   bounded like every FX read (`fx_policy.newest_published_rate`, `FX_MAX_CARRY_DAYS`, issue #56): a
   currency whose newest published rate is older is skipped and counted too, and the forecast leaves
@@ -886,7 +919,7 @@ implementation beside the forecast, which is this file's opening warning. `yfina
 **Weighting is arithmetic, not code.** A market-value-weighted average of per-security yields *is*
 Σ(income)/Σ(value) — `Σ (Vᵢ/V × Dᵢ/Vᵢ) == Σ Dᵢ / V`, every non-payer entering at zero. So the service
 divides two figures it already holds and nothing is weighted by hand. `forward_yield_pct` on each
-breakdown row is the audit of the headline; the *Fwd yield* column on the Dividends tab shows it.
+breakdown row is the audit of the headline; the *Yield* column on the Dividends tab shows it.
 
 Four rules, each of which would be a wrong number the other way:
 
@@ -916,7 +949,8 @@ describe different positions the moment the position size changes inside the win
 - **Adding to a holding** divides a small position's income by the finished position's cost, so the
   figure reads far too low. Live on **nine of fifteen rows** when it was found — MCO showed 0.35%
   against a real forward 0.84%, SPGI 0.53% against 0.93% — and *unbadged*, because the `†`
-  partial-coverage marker was only ever on the trailing yield column, never on yield on cost.
+  partial-coverage marker was only ever on the trailing yield column (removed 2026-11-08, FD2),
+  never on yield on cost.
 - **Selling and rebuying** is the same defect at its most extreme: the income was earned on shares
   bought cheaply and then divided by the cost of the shares that replaced them, so the result is
   neither the old holding's yield nor the new one's. Under the current definition a rebuy at a higher
@@ -988,7 +1022,7 @@ Each of these was a wrong number before it was a rule:
 
 **Data-quality notes are not rendered** (owner's call, 2026-10-14: "a lot of bloat, which is not
 relevant data"). The API still carries every flag — `yoy_vs_partial`, `prev_year_partial`,
-`ttm_crosses_era`, `mom_crosses_era`, `partial` on a year, `trailing_yield_partial`,
+`ttm_crosses_era`, `mom_crosses_era`, `partial` on a year,
 `forecast_samples`, `basis: gross_estimate`, `source`, `ttm_coverage_start` — but the tab draws no
 dagger, asterisk, `n=` badge, era note or provenance line for them, and `DeltaChip` has no
 `caveat` prop any more. What stays is what changes how a figure is read today: `est.` on anything
@@ -1217,6 +1251,17 @@ that it keeps growing, and have the breakdown available without it being the lou
   book's per-share growth is not repeated there (it is the table's Growth column per
   payer) — the owner's call on 2026-10-14, the whole line being an estimate;
   `reconstructed` and `growth.per_share` are still served.
+- **The open card lists the change month by month** (`forecastMonths`, review item FD1,
+  2026-11-08): per calendar month, buys, raises and the other parts together, newest first —
+  each month's last snapshot's cumulative breakdown less the previous month's (the chain's
+  start day is the anchor and lists nothing). No server change: the months add up exactly to
+  the newest breakdown, which is what the header prints since the start
+  (`dividendForecastTrend.test.ts` pins the sum).
+- **Milestones** (`lib/dividendMilestones.ts`, review item FD3, 2026-11-08): a dot on the line
+  where the forecast first reached each round level since the start, and *Next X · Y to go* under
+  the Next 12 months tile. The levels are multiples of 1, 2 or 5 times a power of ten, the largest
+  at most a third of today's figure, so three to six sit below it. No date is projected for the
+  next one: a forecast of a forecast.
 - **Today is the breakdown's live figure, not the newest snapshot** (since 2026-10-14).
   The KPI tile shows `growth.next_12m_eur`, recomputed on every read; the card showed the
   last stored row under the same label, so the two disagreed whenever the forecast had
@@ -1293,13 +1338,13 @@ projection is sized from (`regular_payments`, one preparation for both).
   under `app/`, and `dividendGrowth.test.ts` refuses a second declaration or a
   per-share change compared against a number of its own anywhere else in `src/`.
 - **An announced raise is tagged on the calendar** (`upcoming[].per_share_change_pct`,
-  GitHub issue #74, 2026-10-18): an open accrual's gross per share (`gross / quantity`
-  through `accrual_gross_per_share_eur`, the reading the forecast sizes it with, turned
-  back into the payment currency at the forecast's sizing rate) against the stated rate
+  GitHub issue #74, 2026-10-18): an open accrual's gross per share in the payment's own
+  currency (`accrual_gross_per_share`, the reading the forecast sizes it with — no
+  exchange rate enters the tag) against the stated rate
   (`per_share_native`) of the last regular IBKR payment before its ex-date — a `special`
   or `bonus` row is never that base. Absent, never 0: no regular payment before it, a
   last payment whose rate never parsed (not an older rate), another currency, no cached
-  rate, or an accrual the forecast's own rule calls special (`is_special_near` — an
+  rate for a row stored before its native amounts, or an accrual the forecast's own rule calls special (`is_special_near` — an
   accrual carries no kind, so `special_payments` over the same history decides, on the
   history entry the accrual was matched into). Every other `upcoming` entry is null.
   Signed; the calendar shows "+x%" only for a raise by `payoutVerdict`. A split between

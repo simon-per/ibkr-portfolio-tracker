@@ -651,7 +651,8 @@ async def test_the_ledger_dividend_total_agrees_with_the_dividends_reader(db):
     spliced, _ = DividendService._splice_by_era(
         await __import__(
             "app.repositories.dividend_repository", fromlist=["DividendRepository"]
-        ).DividendRepository(db).get_computed_dividends()
+        ).DividendRepository(db).get_computed_dividends(),
+        exact_pairs=None,
     )
     # Every reader's net since issue #61: an estimate's is its gross less the ladder
     # withholding, so the ledger lists the amount the Dividends tab counts.
@@ -696,7 +697,9 @@ async def test_the_repository_boundary_agrees_with_the_splice_helper(db):
 
     repo = DividendRepository(db)
     from_repo = await repo.earliest_ibkr_payment_date()
-    _, from_helper = DividendService._splice_by_era(await repo.get_computed_dividends())
+    _, from_helper = DividendService._splice_by_era(
+        await repo.get_computed_dividends(), exact_pairs=None
+    )
 
     assert from_repo == from_helper == IBKR_ERA_START - timedelta(days=7)
 

@@ -594,9 +594,10 @@ class DividendSecurityRow(BaseModel):
     net_eur: float
     forecast_payouts: int
     forecast_net_eur: float
-    trailing_yield_pct: Optional[float] = None  # TTM net / current market value
-    # The forward counterpart: the security's projection for the NEXT 12 MONTHS over
-    # its current market value. Weight these by market value and they average to
+    # The security's projection for the NEXT 12 MONTHS over its current market value —
+    # the table's one yield (review item FD2, 2026-11-08: a trailing yield beside it
+    # divided a year's income by today's position and read low whenever shares were
+    # added). Weight these by market value and they average to
     # `DividendForwardYield.pct`, which is what makes that headline auditable.
     # Deliberately unwindowed, unlike `forecast_net_eur` above — see the service.
     forward_yield_pct: Optional[float] = None
@@ -605,11 +606,6 @@ class DividendSecurityRow(BaseModel):
     # held and of exchange rates. None without a year of history to compare across,
     # or without a live projection.
     per_share_growth_pct: Optional[float] = None
-    # True when the position wasn't held for the whole trailing year, so the yield
-    # above divides a partial year's income by a full position value and reads low.
-    # Not annualized: scaling up would invent income the schedule may not support.
-    trailing_yield_partial: bool = False
-    days_held_in_ttm: Optional[int] = None
     # The projected next-12-month rate over what the position cost — the same numerator
     # as `forward_yield_pct`, so the two differ only by their denominator and the gap
     # between them is the holding's own appreciation.

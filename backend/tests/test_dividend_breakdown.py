@@ -440,36 +440,6 @@ async def test_the_two_sources_do_not_halve_the_inferred_cadence():
 
 
 @pytest.mark.asyncio
-async def test_a_recently_bought_holding_flags_its_partial_trailing_yield():
-    """
-    trailing_yield_pct divides trailing-12M income by the FULL position value, so a
-    holding bought weeks ago reads a fraction of its real yield — SBI showed 1.0%
-    off a single payment. Badged rather than annualized: scaling up would invent
-    income the schedule may not support.
-    """
-    engine, session = await _make_session()
-    try:
-        session.add(_lot(1, date(2026, 3, 20), "10"))          # ~6 weeks before AS_OF
-        session.add(_lot(2, date(2024, 1, 5), "10"))           # long held
-        await _seed_payment(session, 1, date(2026, 4, 10), "3.00", "ibkr")
-        await _seed_payment(session, 2, date(2026, 4, 10), "3.00", "ibkr")
-        await session.commit()
-
-        out = await DividendService(session).get_dividend_breakdown(
-            include_forecast=False, as_of=AS_OF
-        )
-        rows = {r["security_id"]: r for r in out["securities"]}
-
-        assert rows[1]["trailing_yield_partial"] is True
-        assert rows[1]["days_held_in_ttm"] < 90
-        assert rows[2]["trailing_yield_partial"] is False
-        assert rows[2]["days_held_in_ttm"] >= 350
-    finally:
-        await session.close()
-        await engine.dispose()
-
-
-@pytest.mark.asyncio
 async def test_a_forecast_reports_how_thin_its_inference_is():
     """
     forecast_basis said net-vs-estimate but nothing about sample count, so SBI's
@@ -779,12 +749,10 @@ async def test_yield_on_cost_is_not_dragged_down_by_adding_to_a_holding():
         # fixture grows the position tenfold rather than by half.
         assert row["yield_on_cost_pct"] == 400.00
         assert round(30 / 100 * 100, 2) == 30.00           # what it used to report
-        # Over market value the same projection reads 400 / (10 x 20).
+        # Over market value the same projection reads 400 / (10 x 20) — where trailing
+        # income over the same value read 30 / 200 = 15%, the column FD2 removed.
         assert row["forward_yield_pct"] == 200.00
-        # Trailing income spans only 334 of the 350 days the flag requires, so the
-        # *trailing* yield stays badged. Yield on cost no longer needs that caveat.
-        assert row["trailing_yield_partial"] is True
-        assert row["trailing_yield_pct"] == 15.00          # 30 realised over 200
+        assert "trailing_yield_pct" not in row
     finally:
         await session.close()
         await engine.dispose()
@@ -889,90 +857,6 @@ async def test_the_forward_yield_declares_a_gross_estimate_contribution():
         ))["forward_yield"]
         assert fy["basis"] == "mixed"
         assert 0 < fy["gross_estimate_eur"] < fy["annual_eur"]
-    finally:
-        await session.close()
-        await engine.dispose()
-
-
-# ---------------------------------------------------------------------------
-# `days_held_in_ttm` is the union of the lot intervals inside the trailing year, not
-# `as_of - min(open_date)`. The older form answered "how long ago was this first bought",
-# which is the same thing only while the holding is unbroken — and diverges in exactly the
-# case the flag exists for.
-# ---------------------------------------------------------------------------
-
-
-@pytest.mark.asyncio
-async def test_a_gap_between_selling_and_rebuying_is_not_counted_as_held():
-    """
-    Sold out and rebought months later: the old measure reported a full year because the
-    FIRST purchase was a year ago, so a yield built from two partial stretches of income
-    was presented unqualified. Under-reporting in the case that most needs the badge.
-    """
-    engine, session = await _make_session()
-    try:
-        # Held for ~2 months, out for ~7, back for ~1. Roughly 90 days inside the window.
-        session.add(_lot(1, AS_OF - timedelta(days=330), "10",
-                         close_date=AS_OF - timedelta(days=270)))
-        session.add(_lot(1, AS_OF - timedelta(days=30), "10"))
-        session.add(_price(1, "20"))
-        await session.flush()
-        await _seed_payment(session, 1, AS_OF - timedelta(days=300), "5.00", "ibkr")
-        await _seed_payment(session, 1, AS_OF - timedelta(days=20), "5.00", "ibkr")
-        await session.commit()
-
-        row = (await DividendService(session).get_dividend_breakdown(
-            include_forecast=False, as_of=AS_OF,
-        ))["securities"][0]
-
-        # 60 days in the first stretch + 30 in the second. The old form gave 330.
-        assert row["days_held_in_ttm"] == 90
-        assert row["trailing_yield_partial"] is True
-    finally:
-        await session.close()
-        await engine.dispose()
-
-
-@pytest.mark.asyncio
-async def test_overlapping_lots_do_not_double_count_a_day():
-    """Three lots open across the same stretch is one stretch held, not three."""
-    engine, session = await _make_session()
-    try:
-        for _ in range(3):
-            session.add(_lot(1, AS_OF - timedelta(days=100), "5"))
-        session.add(_price(1, "20"))
-        await session.flush()
-        await _seed_payment(session, 1, AS_OF - timedelta(days=20), "5.00", "ibkr")
-        await session.commit()
-
-        row = (await DividendService(session).get_dividend_breakdown(
-            include_forecast=False, as_of=AS_OF,
-        ))["securities"][0]
-        assert row["days_held_in_ttm"] == 100
-    finally:
-        await session.close()
-        await engine.dispose()
-
-
-@pytest.mark.asyncio
-async def test_a_continuously_held_position_still_reports_full_coverage():
-    """
-    The direction that must not regress: a holding bought years ago and never sold is
-    fully covered, and switching to an interval union must not start badging it.
-    """
-    engine, session = await _make_session()
-    try:
-        session.add(_lot(1, AS_OF - timedelta(days=800), "10"))
-        session.add(_price(1, "20"))
-        await session.flush()
-        await _seed_payment(session, 1, AS_OF - timedelta(days=20), "5.00", "ibkr")
-        await session.commit()
-
-        row = (await DividendService(session).get_dividend_breakdown(
-            include_forecast=False, as_of=AS_OF,
-        ))["securities"][0]
-        assert row["days_held_in_ttm"] == 365
-        assert row["trailing_yield_partial"] is False
     finally:
         await session.close()
         await engine.dispose()

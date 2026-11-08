@@ -173,7 +173,7 @@ function activityAvatar(row: ActivityRow, className: string) {
  * text ("Deposit", "Transfer") rather than leaving the card headless.
  * The desktop table can print an em dash in a cell; a card cannot.
  */
-function activityColumns(deps: {
+export function activityColumns(deps: {
   /** The response's own base currency: the amounts were converted into it. */
   baseCurrency: string
 }): Column<ActivityRow>[] {

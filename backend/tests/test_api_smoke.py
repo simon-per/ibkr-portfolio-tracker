@@ -115,6 +115,7 @@ READ_ENDPOINTS = [
     "/api/logos/2",
     "/api/logos/isin/NL0010273215",
     "/api/company-financials/companies",
+    "/api/company-financials/dividend-track",
     "/api/company-financials/937966",
     "/api/company-financials/937966?period=quarterly&range=5y",
     "/api/company-financials/937966?period=annual&range=max",
@@ -595,6 +596,11 @@ def test_company_financials_serve_their_contract_through_the_real_stack(client):
     # No write route: a POST is not a route at all.
     assert client.post("/api/company-financials/937966").status_code in (401, 405)
 
+    # Each held listing's company dividend record (review item FD4), keyed by security id:
+    # ASML's listing has figures but no dividend per share, so every figure is absent.
+    track = client.get("/api/company-financials/dividend-track").json()
+    assert track == {"1": {"dps_cagr_5y": None, "raise_years": None, "payout_ratio": None}}
+
 
 @pytest.mark.parametrize("path", CRYPTO_READ_ENDPOINTS)
 def test_crypto_read_endpoint_responds_to_the_admin_key(client, monkeypatch, path):
@@ -863,14 +869,13 @@ def test_the_shapes_that_broke_production_serialize(client):
     # The tax report's honesty fields survive the HTTP layer. holdings_snapshot_total
     # is nullable now — a failed snapshot is a missing wealth-tax base, not a zero
     # one — so the route must not coerce None to 0.0 or drop the flag.
-    # The two qualifying fields on a security row must survive DividendSecurityRow —
-    # a Pydantic model drops what it does not declare, and both exist precisely to
-    # stop a figure being read as more solid than it is.
+    # The qualifying fields on a security row must survive DividendSecurityRow — a
+    # Pydantic model drops what it does not declare, and they exist precisely to stop a
+    # figure being read as more solid than it is. One yield per row (review item FD2):
+    # the trailing one and its coverage flag are gone from the wire.
     for row in bd["securities"]:
-        assert "trailing_yield_partial" in row and isinstance(
-            row["trailing_yield_partial"], bool
-        )
         assert "forecast_samples" in row and "forecast_cadence_days" in row
+        assert not {"trailing_yield_pct", "trailing_yield_partial", "days_held_in_ttm"} & set(row)
         # The forward yield's per-security audit. Nullable by design — a row with no
         # projection or no price has no rate, which is not a rate of zero.
         assert row["forward_yield_pct"] is None or isinstance(

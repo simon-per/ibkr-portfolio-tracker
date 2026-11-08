@@ -124,7 +124,7 @@ def test_the_matcher_returns_the_pairs_the_splice_used_to_compute_inline():
     ibkr = [Row(1, "ibkr", date(2026, 2, 18), date(2026, 2, 18))]
     near = Row(1, "yfinance_estimate", date(2026, 2, 9))
     far = Row(1, "yfinance_estimate", date(2026, 1, 2))
-    pairs = match_estimates_to_ibkr([near, far], ibkr)
+    pairs = match_estimates_to_ibkr([near, far], ibkr, exact_pairs=None)
     assert [(e.ex_date, r.pay_date) for e, r in pairs] == [
         (date(2026, 2, 9), date(2026, 2, 18))
     ]
@@ -135,8 +135,8 @@ def test_a_wider_window_is_a_parameter_because_the_two_callers_want_different_on
     days out only mis-dates a projection, so the ceiling is the caller's to choose."""
     ibkr = [Row(1, "ibkr", date(2026, 3, 20), date(2026, 3, 20))]
     est = [Row(1, "yfinance_estimate", date(2026, 2, 5))]   # 43 days — Asian-payer shaped
-    assert match_estimates_to_ibkr(est, ibkr) == []
-    assert len(match_estimates_to_ibkr(est, ibkr, max_lag_days=60)) == 1
+    assert match_estimates_to_ibkr(est, ibkr, exact_pairs=None) == []
+    assert len(match_estimates_to_ibkr(est, ibkr, exact_pairs=None, max_lag_days=60)) == 1
 
 
 # --- the measured lag -------------------------------------------------------------
@@ -1083,23 +1083,23 @@ def _krw(security_id, source, ex_date, pay_date=None, currency="KRW"):
 def test_a_korean_payment_33_days_after_its_ex_date_pairs():
     est = [_krw(1, "yfinance_estimate", date(2026, 8, 28))]
     ibkr = [_krw(1, "ibkr", date(2026, 9, 30), date(2026, 9, 30))]
-    assert len(match_estimates_to_ibkr(est, ibkr)) == 1
+    assert len(match_estimates_to_ibkr(est, ibkr, exact_pairs=None)) == 1
 
 
 def test_a_dollar_payment_33_days_after_keeps_the_narrow_window():
     est = [_krw(1, "yfinance_estimate", date(2026, 8, 28), currency="USD")]
     ibkr = [_krw(1, "ibkr", date(2026, 9, 30), date(2026, 9, 30), currency="USD")]
-    assert match_estimates_to_ibkr(est, ibkr) == []
+    assert match_estimates_to_ibkr(est, ibkr, exact_pairs=None) == []
 
 
 def test_the_wider_window_never_reaches_the_previous_quarter():
     prev = _krw(1, "yfinance_estimate", date(2026, 5, 28))
     this = _krw(1, "yfinance_estimate", date(2026, 8, 28))
     ibkr = [_krw(1, "ibkr", date(2026, 9, 30), date(2026, 9, 30))]
-    pairs = match_estimates_to_ibkr([prev, this], ibkr)
+    pairs = match_estimates_to_ibkr([prev, this], ibkr, exact_pairs=None)
     assert [e.ex_date for e, _ in pairs] == [date(2026, 8, 28)]
     # Alone, the previous quarter is out of reach too: 125 days.
-    assert match_estimates_to_ibkr([prev], ibkr) == []
+    assert match_estimates_to_ibkr([prev], ibkr, exact_pairs=None) == []
 
 
 @pytest.mark.asyncio

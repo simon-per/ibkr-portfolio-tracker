@@ -51,6 +51,7 @@ from app.services.dividend_forecast import (
     payout_level,
     per_share_growth,
     project_dividends,
+    takes_open_slot,
 )
 from app.services.yahoo_eligibility import yahoo_eligible
 from app.services.yahoo_minor_units import minor_unit_scale, reported_currency_of
@@ -165,13 +166,6 @@ def yahoo_dividend_rows(
         })
     return rows, skipped
 
-# Below this many days held inside the trailing year, a trailing-12M yield divides
-# a partial year's income by a full position value and so reads low. 350 rather
-# than 365 to absorb a lot opened a few days into the window without flagging
-# every long-held position.
-TTM_FULL_COVERAGE_DAYS = 350
-
-
 # How far an ex-date may precede its pay-date for the two sources to be treated as the
 # same dividend at the era boundary. Mastercard's 29-day lag is the widest this account
 # has — CLAUDE.md cites it as exceeding a whole monthly cycle — so 30 covers every real
@@ -238,10 +232,31 @@ ACCRUAL_MATCH_DAYS = 15
 WHT_ADJUSTMENT_MAX_LOOKBACK_DAYS = 185
 
 
+# How far Yahoo's ex-date may sit from the one IBKR booked for the same dividend and the
+# two still be read as one. A day or two of disagreement between sources is ordinary; no
+# payer pays twice within it.
+EXACT_PAIR_SLACK_DAYS = 3
+
+
+ExactPairs = Dict[int, List[Tuple[date, date]]]
+
+
+async def load_exact_date_pairs(db) -> ExactPairs:
+    """``{security_id: [(ex_date, pay_date), ...]}`` from IBKR's accrual log
+    (`dividend_date_pairs`) — what every caller of `match_estimates_to_ibkr` passes."""
+    from app.models.dividend_date_pair import DividendDatePair
+
+    out: ExactPairs = defaultdict(list)
+    for r in (await db.execute(select(DividendDatePair))).scalars().all():
+        out[r.security_id].append((r.ex_date, r.pay_date))
+    return out
+
+
 def match_estimates_to_ibkr(
     estimates: Iterable,
     ibkr_rows: Iterable,
     *,
+    exact_pairs: Optional[ExactPairs],
     max_lag_days: Optional[int] = None,
 ) -> List[Tuple[Any, Any]]:
     """
@@ -268,6 +283,15 @@ def match_estimates_to_ibkr(
     mis-dates a projection, so the two may legitimately diverge later. Left as None it
     is decided per IBKR row by `max_pay_lag_days` from the payment's currency.
 
+    **IBKR's own pairs come first** (``exact_pairs``, from `dividend_date_pairs`,
+    `load_exact_date_pairs`): a payment IBKR booked against an ex-date pairs with the
+    estimate on that ex-date (within `EXACT_PAIR_SLACK_DAYS`), with no window at all.
+    Proximity is the fallback for a payment IBKR's log does not cover. A Korean
+    year-end pays 105-110 days after its ex-date, past any window that is still safe
+    for a quarterly payer, so proximity alone left it unpaired: two entries for one
+    dividend (review item D4). Required, so no caller can leave it out; ``None`` says a
+    caller has none, which tests do.
+
     Returns ``[(estimate, ibkr_row), ...]`` in IBKR pay-date order.
     """
     consumed: set = set()
@@ -277,7 +301,30 @@ def match_estimates_to_ibkr(
         key=lambda p: (p.ex_date or p.pay_date),
         reverse=True,  # nearest to the pay date first
     )
-    for row in sorted(ibkr_rows, key=lambda p: (p.pay_date or p.ex_date)):
+    rows = sorted(ibkr_rows, key=lambda p: (p.pay_date or p.ex_date))
+
+    booked = {
+        (sid, pay): ex for sid, prs in (exact_pairs or {}).items() for ex, pay in prs
+    }
+    unpaired = []
+    for row in rows:
+        ex_booked = booked.get((row.security_id, row.pay_date or row.ex_date))
+        if ex_booked is None:
+            unpaired.append(row)
+            continue
+        near = [
+            est for est in candidates
+            if id(est) not in consumed and est.security_id == row.security_id
+            and abs(((est.ex_date or est.pay_date) - ex_booked).days) <= EXACT_PAIR_SLACK_DAYS
+        ]
+        if not near:
+            unpaired.append(row)
+            continue
+        est = min(near, key=lambda e: abs(((e.ex_date or e.pay_date) - ex_booked).days))
+        consumed.add(id(est))
+        pairs.append((est, row))
+
+    for row in unpaired:
         pay = row.pay_date or row.ex_date
         window = (max_lag_days if max_lag_days is not None
                   else max_pay_lag_days(getattr(row, "currency", None)))
@@ -290,6 +337,7 @@ def match_estimates_to_ibkr(
                 consumed.add(id(est))
                 pairs.append((est, row))
                 break
+    pairs.sort(key=lambda pair: pair[1].pay_date or pair[1].ex_date)
     return pairs
 
 
@@ -310,19 +358,58 @@ _IBKR_WHT_COUNTRY_RE = re.compile(r"\s-\s*([A-Z]{2})\s+TAX\b", re.IGNORECASE)
 SPECIAL_DIVIDEND_KINDS = frozenset({"special", "bonus"})
 
 
-def accrual_gross_per_share_eur(accrual: Dict) -> Optional[Decimal]:
+def accrual_gross_per_share(accrual: Dict, fx_to_eur: Dict[str, Decimal]) -> Optional[Decimal]:
     """
-    An open accrual's gross per share, in EUR at the rate it was stored at (the newest
-    cached one): ``gross / quantity``, or None when either is missing.
+    An open accrual's gross per share in the payment's own currency: IBKR's declared
+    ``grossRate``, else ``gross / quantity``; None when there is neither.
 
     One reading of an announced amount for the forecast, which sizes the declared
     dividend with it, and the calendar's raise tag, which compares it with the last
     regular payment — so the tag and the projection cannot be two different amounts.
+
+    **Native, because the EUR it was stored in froze the rate of the day it was
+    stored** (review item D2): every other amount in the forecast is converted at the
+    newest rate, so an unchanged dividend read as a raise or a cut whenever the rate had
+    moved since. A row stored before the native columns existed has only that EUR; it is
+    turned back through ``fx_to_eur``, which is what every reading did until then, and
+    the next sync replaces it.
     """
-    qty, gross = accrual.get("quantity"), accrual.get("gross_eur")
-    if not qty or qty <= 0 or not gross or gross <= 0:
+    rate = accrual.get("gross_rate")
+    if rate is not None and rate > 0:
+        return rate
+    qty = accrual.get("quantity")
+    if not qty or qty <= 0:
         return None
-    return gross / qty
+    gross = accrual.get("gross")
+    if gross is not None:
+        return gross / qty if gross > 0 else None
+    gross_eur = accrual.get("gross_eur")
+    fx = fx_to_eur.get(accrual.get("currency") or "")
+    if not gross_eur or gross_eur <= 0 or fx is None:
+        return None
+    return gross_eur / qty / fx
+
+
+def accrual_gross_per_share_eur(
+    accrual: Dict, fx_to_eur: Dict[str, Decimal]
+) -> Optional[Decimal]:
+    """`accrual_gross_per_share` at ``fx_to_eur``'s rate; None without one."""
+    native = accrual_gross_per_share(accrual, fx_to_eur)
+    fx = fx_to_eur.get(accrual.get("currency") or "")
+    return native * fx if native is not None and fx is not None else None
+
+
+def accrual_net_eur(accrual: Dict, fx_to_eur: Dict[str, Decimal]) -> Decimal:
+    """
+    An open accrual's net in EUR at ``fx_to_eur``'s rate — the stored EUR only for a row
+    without its native net (stored before 2026-11-08) or a currency with no rate today,
+    which is still the amount IBKR announced at a rate that held when it was stored.
+    """
+    net = accrual.get("net")
+    fx = fx_to_eur.get(accrual.get("currency") or "")
+    if net is not None and fx is not None:
+        return net * fx
+    return accrual["net_eur"]
 
 
 def parse_ibkr_dividend_description(
@@ -1170,13 +1257,17 @@ class DividendService:
             # statement, 2026-10-04: TSMC gross 259, tax 54.39, net 204.61), the opposite
             # of the cash ledger's WHTAX lines; this flipped it negative until then. abs()
             # rather than trusting either sign, since the net is what matters downstream.
-            wht = abs(a.get("tax") or Decimal("0")) * rate
-            net = a.get("net_amount")
-            net_eur = net * rate if net is not None else gross - wht
+            gross_native = a.get("gross_amount") or Decimal("0")
+            wht_native = abs(a.get("tax") or Decimal("0"))
+            net_native = a.get("net_amount")
+            if net_native is None:
+                net_native = gross_native - wht_native
+            net_eur = net_native * rate
             if net_eur <= 0:
                 # A reversal or a zero accrual is not an upcoming payment.
                 continue
             seen.add(key)
+            gross_rate = a.get("gross_rate")
             rows.append({
                 "security_id": security_id,
                 "ex_date": a.get("ex_date"),
@@ -1184,8 +1275,13 @@ class DividendService:
                 "currency": currency,
                 "quantity": a.get("quantity"),
                 "gross_amount_eur": gross,
-                "withholding_tax_eur": wht,
+                "withholding_tax_eur": wht_native * rate,
                 "net_amount_eur": net_eur,
+                # In the payment's own currency, converted when read (review item D2).
+                "gross_rate": gross_rate if gross_rate is not None and gross_rate > 0 else None,
+                "gross_amount": gross_native,
+                "withholding_tax": wht_native,
+                "net_amount": net_native,
                 "last_seen_at": now,
             })
 
@@ -1245,19 +1341,17 @@ class DividendService:
         await self.db.flush()
         return {"dividend_date_pairs": added}
 
-    async def _exact_date_pairs(self) -> Dict[int, List[Tuple[date, date]]]:
+    async def _exact_date_pairs(self) -> ExactPairs:
         """``{security_id: [(ex_date, pay_date), ...]}`` from IBKR's accrual log."""
-        from app.models.dividend_date_pair import DividendDatePair
-
-        out: Dict[int, List[Tuple[date, date]]] = defaultdict(list)
-        for r in (await self.db.execute(select(DividendDatePair))).scalars().all():
-            out[r.security_id].append((r.ex_date, r.pay_date))
-        return out
+        return await load_exact_date_pairs(self.db)
 
     async def _open_accruals(self) -> Dict[int, List[Dict]]:
         """
-        ``{security_id: [{ex_date, pay_date, currency, net_eur, quantity, gross_eur,
-        wht_eur}, ...]}`` for every open accrual.
+        ``{security_id: [{ex_date, pay_date, currency, quantity, gross_rate, gross, wht,
+        net, gross_eur, wht_eur, net_eur}, ...]}`` for every open accrual: the amounts in
+        the payment's own currency (None on a row stored before 2026-11-08), and in EUR
+        at the rate of the day the row was stored. Read through `accrual_gross_per_share`
+        and `accrual_net_eur`, which convert at today's rate.
 
         Empty whenever the Flex section is not enabled, which is the supported default —
         the caller then dates its projections from a measured lag instead and labels them
@@ -1285,12 +1379,16 @@ class DividendService:
                 "pay_date": r.pay_date,
                 # The payment's own currency: the raise tag compares per share in it.
                 "currency": r.currency,
-                "net_eur": r.net_amount_eur,
-                # What the forecast sizes from (gross / quantity) and the withholding
-                # ladder's first rung (tax / gross).
+                # What the forecast sizes from (the rate, else gross / quantity) and the
+                # withholding ladder's first rung (tax / gross).
                 "quantity": r.quantity,
+                "gross_rate": r.gross_rate,
+                "gross": r.gross_amount,
+                "wht": r.withholding_tax,
+                "net": r.net_amount,
                 "gross_eur": r.gross_amount_eur,
                 "wht_eur": r.withholding_tax_eur,
+                "net_eur": r.net_amount_eur,
             })
         return out
 
@@ -1412,7 +1510,12 @@ class DividendService:
                 or (p.net_amount_eur or Decimal("0")) > 0)
 
     @staticmethod
-    def _splice_by_era(payments: List, *, boundary: Optional[date] = None) -> tuple:
+    def _splice_by_era(
+        payments: List,
+        *,
+        exact_pairs: Optional[ExactPairs],
+        boundary: Optional[date] = None,
+    ) -> tuple:
         """
         Honest mix of the two sources: yfinance estimates strictly BEFORE the first
         IBKR payment date, authoritative IBKR rows from there on.
@@ -1429,6 +1532,8 @@ class DividendService:
         by ``EX_TO_PAY_MAX_LAG_DAYS`` on both sides, because the duplicate match below
         needs the IBKR row that pairs with a windowed estimate — which can fall outside
         the window even when the estimate does not.
+
+        ``exact_pairs`` is `load_exact_date_pairs`, passed on to the matcher.
         """
         ibkr_rows = [p for p in payments if p.source == IBKR_SOURCE]
         if boundary is None:
@@ -1461,7 +1566,8 @@ class DividendService:
         # the reason they are a shared function live on `match_estimates_to_ibkr`.
         consumed = {
             id(est) for est, _ in match_estimates_to_ibkr(
-                [p for p in kept if p.source != IBKR_SOURCE], ibkr_rows
+                [p for p in kept if p.source != IBKR_SOURCE], ibkr_rows,
+                exact_pairs=exact_pairs,
             )
         }
 
@@ -1505,7 +1611,8 @@ class DividendService:
         ibkr_rows = [p for p in raw_payments if p.source == IBKR_SOURCE]
         lags: Dict[int, List[int]] = defaultdict(list)
         if ibkr_rows:
-            for est, row in match_estimates_to_ibkr(estimates, ibkr_rows):
+            for est, row in match_estimates_to_ibkr(estimates, ibkr_rows,
+                                                    exact_pairs=exact_pairs):
                 if row.security_id in exact_pairs:
                     continue
                 ex = est.ex_date or est.pay_date
@@ -1826,7 +1933,8 @@ class DividendService:
         ibkr_rows = [p for p in raw_payments if p.source == IBKR_SOURCE and self._is_income(p)]
         fx_to_eur = await self._latest_fx_to_eur(
             {s.currency for s in securities.values() if s.currency}
-            | {p.currency for p in ibkr_rows if p.currency},
+            | {p.currency for p in ibkr_rows if p.currency}
+            | {a["currency"] for acc in accruals_by_sec.values() for a in acc if a.get("currency")},
             as_of,
         )
 
@@ -1857,6 +1965,7 @@ class DividendService:
         paired = match_estimates_to_ibkr(
             [p for sid, rows in schedule_source.items() for p in rows],
             [p for p in ibkr_rows if p.security_id in schedule_source],
+            exact_pairs=date_pairs,
         )
         ibkr_for_estimate = {id(est): row for est, row in paired}
         paired_ibkr = {id(row) for _, row in paired}
@@ -1959,15 +2068,21 @@ class DividendService:
         # An open accrual is the newest amount there is: IBKR has declared it. It
         # replaces the figure of the dividend it records when that is already in the
         # history (Yahoo writes the ex-date a day after it passes), and otherwise joins
-        # it as amount-only evidence, so a declared raise carries into every later
-        # projection the day IBKR lists it — TSMC's 7.00 a share instead of the 4.78
-        # the old median kept repeating after it.
+        # it, so a declared raise carries into every later projection the day IBKR lists
+        # it — TSMC's 7.00 a share instead of the 4.78 the old median kept repeating
+        # after it. It joins as a SCHEDULED payment when it fills the ex-dated series'
+        # next open slot (`takes_open_slot`): that is the row Yahoo will write for it,
+        # and joining it amount-only sized the slot from a year earlier until then, so
+        # the level and the raises jumped the day Yahoo's row landed (review item D1,
+        # Samsung's dividend declared a month after its ex-date). Anything else — an
+        # extra payment between two slots, a pay-dated IBKR-only series, an ex-date
+        # still ahead — stays amount-only evidence.
         for sid, accruals in accruals_by_sec.items():
             if sid not in securities:
                 continue
             for a in accruals:
                 ex = a.get("ex_date")
-                ps = accrual_gross_per_share_eur(a)     # EUR at the newest cached rate
+                ps = accrual_gross_per_share_eur(a, fx_to_eur)  # at the newest cached rate
                 if ex is None or ps is None:
                     continue
                 entries = hist_by_sec[sid]
@@ -1982,7 +2097,9 @@ class DividendService:
                         special=entries[same].special, cadence=entries[same].cadence,
                     )
                 else:
-                    entries.append(HistPayment(on_date=ex, per_share_eur=ps, cadence=False))
+                    scheduled = (sid in schedule_source and ex <= as_of
+                                 and takes_open_slot(entries, ex))
+                    entries.append(HistPayment(on_date=ex, per_share_eur=ps, cadence=scheduled))
 
         # Gross to expected net, one rate per security from the ladder. Applied once
         # here, so every projection — forward, overdue, two years out — carries the
@@ -2013,7 +2130,9 @@ class DividendService:
         of withholding tax; gross and withholding totals are reported separately.
         """
         raw_payments = await self.repo.get_computed_dividends()
-        payments, ibkr_from = self._splice_by_era(raw_payments)
+        payments, ibkr_from = self._splice_by_era(
+            raw_payments, exact_pairs=await self._exact_date_pairs()
+        )
         payments = [p for p in payments if self._is_income(p)]
         # An estimate's net is its gross less the ladder withholding, the same split the
         # Dividends tab uses, so the card and the tab carry one net per month.
@@ -2404,7 +2523,15 @@ class DividendService:
         raw_payments = await self.repo.get_computed_dividends()
         if replay:
             raw_payments = [p for p in raw_payments if self._known_by(p, as_of)]
-        all_payments, ibkr_from = self._splice_by_era(raw_payments)
+        # IBKR's own (ex-date, pay date) pairs: they pair the two sources' records of
+        # one dividend here, and size and date the projections below.
+        exact_pairs = await self._exact_date_pairs()
+        if replay:
+            exact_pairs = {
+                sid: [(ex, pay) for ex, pay in pairs if pay <= as_of]
+                for sid, pairs in exact_pairs.items()
+            }
+        all_payments, ibkr_from = self._splice_by_era(raw_payments, exact_pairs=exact_pairs)
         all_payments = [p for p in all_payments if self._is_income(p)]
 
         securities = {
@@ -2578,14 +2705,8 @@ class DividendService:
         horizon_end = max(win_end or date.min, date(as_of.year + 1, 12, 31))
 
         if include_forecast:
-            # IBKR's own (ex-date, pay date) pairs, and the open accruals read above. Read
-            # first: both size the projections as well as dating them.
-            exact_pairs = await self._exact_date_pairs()
-            if replay:
-                exact_pairs = {
-                    sid: [(ex, pay) for ex, pay in pairs if pay <= as_of]
-                    for sid, pairs in exact_pairs.items()
-                }
+            # IBKR's own (ex-date, pay date) pairs and the open accruals, both read above,
+            # size the projections as well as dating them.
             (hist_by_sec, basis_by_sec, lots_by_sec, shares_at, ex_dated, wht_by_sec,
              sizing_fx) = await self._forecast_inputs(
                 raw_payments, securities, as_of, net_factor,
@@ -2831,17 +2952,16 @@ class DividendService:
                 if not before:
                     return None
                 last = max(before, key=lambda p: p.pay_date or p.ex_date)
-                per_share_eur = accrual_gross_per_share_eur(a)
-                currency = a.get("currency")
-                rate = sizing_fx.get(currency) if currency else None
-                if (per_share_eur is None or rate is None or currency != last.currency
+                # Both in the payment's own currency: no exchange rate enters the tag.
+                per_share = accrual_gross_per_share(a, sizing_fx)
+                if (per_share is None or a.get("currency") != last.currency
                         or not last.per_share_native or last.per_share_native <= 0):
                     return None
                 # The accrual's own entry in the history `_forecast_inputs` built: the
                 # nearest within the window it was matched into that history with.
                 if is_special_near(hist_by_sec.get(sid, []), on, ACCRUAL_MATCH_DAYS):
                     return None
-                return self._pct(per_share_eur / rate, last.per_share_native)
+                return self._pct(per_share, last.per_share_native)
 
             for sid, accruals in accruals_by_sec.items():
                 if shares_at(sid, as_of) <= 0:
@@ -2849,7 +2969,7 @@ class DividendService:
                 for a in accruals:
                     if a["pay_date"] > next_12m_end:
                         continue
-                    amt = base_fx.convert(a["net_eur"], a["pay_date"])
+                    amt = base_fx.convert(accrual_net_eur(a, sizing_fx), a["pay_date"])
                     upcoming.append({
                         "date": a["pay_date"].isoformat(),
                         "ex_date": a["ex_date"].isoformat() if a["ex_date"] else None,
@@ -2878,16 +2998,27 @@ class DividendService:
                 elif (p.ex_date or p.pay_date) is not None:
                     est_ex_by_sec[p.security_id].append(p.ex_date or p.pay_date)
 
+            # The ex-dates IBKR booked a payment against that has landed: the matcher's
+            # first rule, asked of one date below.
+            booked_paid: Dict[int, List[date]] = defaultdict(list)
+            for sid, prs in exact_pairs.items():
+                landed = {pay for pay, _ in ibkr_pays_by_sec.get(sid, ())}
+                booked_paid[sid].extend(b_ex for b_ex, b_pay in prs if b_pay in landed)
+
             def _cash_has_landed(sid: int, ex: date) -> bool:
                 """
-                True when an IBKR payment sits inside the lag window after ``ex`` —
-                the same test `match_estimates_to_ibkr` makes, asked of one date.
+                True when IBKR booked a landed payment against ``ex``, or an IBKR
+                payment sits inside the lag window after it — the same two tests
+                `match_estimates_to_ibkr` makes, asked of one date.
 
                 One implementation for both pending tails deliberately. Two copies
                 of this window would be free to drift, and the drifted one would go
                 on looking right: a dividend still shown as owed after the cash
                 arrived, or dropped before it did.
                 """
+                if any(abs((b - ex).days) <= EXACT_PAIR_SLACK_DAYS
+                       for b in booked_paid.get(sid, ())):
+                    return True
                 return any(ex < pay <= ex + timedelta(days=window)
                            for pay, window in ibkr_pays_by_sec.get(sid, ()))
 
@@ -3234,62 +3365,6 @@ class DividendService:
             "per_share": self._book_per_share_growth(ps_growth, next_12m_by_sec, next_12m),
         }
 
-        # Trailing-12-month yield: spliced net over the current market value.
-        # Positions are a decoration here — their failure must not 500 the view.
-        ttm_start = as_of - timedelta(days=365)
-        ttm_net: Dict[int, Decimal] = defaultdict(Decimal)
-        for p in all_payments:
-            d = p.pay_date or p.ex_date
-            if ttm_start <= d <= as_of:
-                ttm_net[p.security_id] += base_fx.convert(income.net(p), d)
-
-        # How much of that trailing year the position was actually held for. A
-        # holding bought seven weeks ago divides seven weeks of income by a full
-        # position value, so its yield reads a fraction of the truth — SBI showed
-        # 1.0% off a single payment. The figure is not wrong to compute, but it is
-        # wrong to present unqualified, so report the coverage and let the UI badge
-        # it, the same way `yoy_vs_partial` handles the first year of income.
-        # One aggregate rather than reusing the forecast's lot map, which only
-        # exists when include_forecast is set — this figure must be right either way.
-        #
-        # Measured as the UNION of the lot intervals clipped to the window, not as
-        # `as_of - min(open_date)`. That older form asked "how long ago was this security
-        # first bought", which answers the question only while the holding is unbroken:
-        # sell out entirely and rebuy months later and it still reports a full year, so a
-        # yield built from two partial stretches of income was presented unqualified —
-        # the flag under-reporting in exactly the case that most needs it.
-        #
-        # Intervals are [open_date, close_date) because a lot sold on D is not held at D's
-        # close, the same convention as `_calculate_daily_value` and the attribution gates.
-        lot_spans = (await self.db.execute(
-            select(TaxLot.security_id, TaxLot.open_date, TaxLot.close_date)
-        )).all()
-        spans_by_sec: Dict[int, List] = defaultdict(list)
-        for sid, opened, closed in lot_spans:
-            if opened is None:
-                continue
-            span_start = max(opened, ttm_start)
-            span_end = min(closed, as_of) if closed else as_of
-            if span_end > span_start:
-                spans_by_sec[sid].append((span_start, span_end))
-
-        ttm_days_held: Dict[int, int] = {}
-        for sid, spans in spans_by_sec.items():
-            # Overlapping lots must not double-count a day: three lots open across the
-            # same month is one month held, not three.
-            total_days = 0
-            cur_start = cur_end = None
-            for span_start, span_end in sorted(spans):
-                if cur_end is None:
-                    cur_start, cur_end = span_start, span_end
-                elif span_start <= cur_end:
-                    cur_end = max(cur_end, span_end)
-                else:
-                    total_days += (cur_end - cur_start).days
-                    cur_start, cur_end = span_start, span_end
-            if cur_end is not None:
-                total_days += (cur_end - cur_start).days
-            ttm_days_held[sid] = total_days
         # This call must stay the LAST database access in the method. It is allowed to
         # fail into "yields omitted" only because nothing queries afterwards: a
         # DBAPI-level error leaves the AsyncSession needing a rollback, so any later
@@ -3483,7 +3558,6 @@ class DividendService:
             sec = securities.get(sid)
             mv = mv_by_sec.get(sid)
             cost = cost_by_sec.get(sid)
-            ttm = ttm_net.get(sid, Decimal("0"))
             sec_rows.append({
                 "security_id": sid,
                 "symbol": _symbol(sid),
@@ -3499,12 +3573,11 @@ class DividendService:
                 "net_eur": round(float(row["net"]), 2),
                 "forecast_payouts": row["forecast_payouts"],
                 "forecast_net_eur": round(float(row["forecast_net"]), 2),
-                "trailing_yield_pct": (
-                    share_pct(ttm, mv) if is_valuable(mv) and ttm > 0 else None
-                ),
-                # The forward counterpart, and the audit of the portfolio-level figure:
-                # weight each of these by its share of market value and the result is
-                # `forward_yield.pct` exactly.
+                # The row's one yield (review item FD2, 2026-11-08: the trailing yield
+                # beside it divided a year's income by today's position and read low
+                # whenever shares had been added), and the audit of the portfolio-level
+                # figure: weight each of these by its share of market value and the
+                # result is `forward_yield.pct` exactly.
                 #
                 # Deliberately the security's NEXT-12-MONTH projection, not the
                 # window-limited `forecast_net_eur` beside it — asked in August with
@@ -3527,14 +3600,6 @@ class DividendService:
                     if sid in ps_growth and next_12m_by_sec.get(sid, Decimal("0")) > 0
                     else None
                 ),
-                # True when the position wasn't held for the whole trailing year, so
-                # a partial year's income is being divided by a full position value
-                # and the yield reads low. Badged, not silently annualized: scaling
-                # up would invent income the schedule may not support.
-                "trailing_yield_partial": (
-                    ttm_days_held.get(sid, 0) < TTM_FULL_COVERAGE_DAYS
-                ),
-                "days_held_in_ttm": ttm_days_held.get(sid),
                 # The FORWARD annual rate over what the position cost — which is what
                 # "yield on cost" means, and what the portfolio-level card divides.
                 #

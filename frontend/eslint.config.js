@@ -21,13 +21,22 @@ export default defineConfig([
     },
     rules: {
       // Everything that is not a component lives in its own module (providers apart from
-      // their hooks, storage readers in lib/), except the two table descriptors: each
-      // closes over helpers its component also renders with, and the table family test
-      // imports the exact array the component renders. Accepted cost: editing
-      // PositionsList.tsx or LookThroughTab.tsx reloads the page instead of hot-swapping.
+      // their hooks, storage readers in lib/), except the table descriptors: each closes
+      // over helpers its component also renders with, and the table family test imports
+      // the exact array the component renders (every set, since review item U1). Accepted
+      // cost: editing a file that exports one reloads the page instead of hot-swapping.
       'react-refresh/only-export-components': [
         'error',
-        { allowConstantExport: true, allowExportNames: ['positionColumns', 'lookthroughColumns'] },
+        {
+          allowConstantExport: true,
+          allowExportNames: [
+            'positionColumns', 'lookthroughColumns', 'fundColumns', 'dividendColumns',
+            'activityColumns', 'drillDownColumns', 'drawdownColumns', 'projectionColumns',
+            'metricsColumns', 'EARNINGS_COLUMNS', 'DIVIDEND_INCOME_COLUMNS',
+            'BY_COUNTRY_COLUMNS', 'REALIZED_COLUMNS', 'HOLDINGS_COLUMNS',
+            'forecastMonthColumns',
+          ],
+        },
       ],
     },
   },

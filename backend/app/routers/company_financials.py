@@ -7,7 +7,7 @@ route**: the figures arrive through the weekly EDGAR pass and
 EDGAR, Yahoo or IBKR.
 """
 
-from typing import List, Literal
+from typing import Dict, List, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -16,6 +16,7 @@ from app.database import get_db
 from app.models.company_financials import SecCompany
 from app.routers._params import DbId
 from app.schemas.company_financials import (
+    CompanyDividendTrack,
     CompanyFinancialsCompany,
     CompanyFinancialsResponse,
 )
@@ -32,6 +33,13 @@ router = APIRouter()
 async def list_companies(db: AsyncSession = Depends(get_db)):
     """Held companies and the Nasdaq-100's with stored SEC figures, one per company."""
     return await CompanyFinancialsService(db).list_companies()
+
+
+@router.get("/dividend-track", response_model=Dict[int, CompanyDividendTrack])
+async def dividend_track(db: AsyncSession = Depends(get_db)):
+    """Each held listing's company dividend record from its filings, by security id.
+    Declared before `/{cik}`, which would otherwise take the path and refuse it."""
+    return await CompanyFinancialsService(db).dividend_track()
 
 
 @router.get("/{cik}", response_model=CompanyFinancialsResponse)

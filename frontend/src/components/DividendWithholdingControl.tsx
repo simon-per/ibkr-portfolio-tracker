@@ -1,6 +1,7 @@
 import { useState, type FormEvent } from 'react'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { api } from '@/lib/api'
+import { readsAssumedWithholding } from '@/lib/queryCache'
 import { formatDividendWithholdingPct } from '@/lib/dividendWithholding'
 import { Button } from '@/components/ui/button'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
@@ -18,7 +19,7 @@ export function DividendWithholdingControl({ appliedPct }: DividendWithholdingCo
     mutationFn: (withholdingPct: number) => api.updateDividendWithholding(withholdingPct),
     onSuccess: async (updated) => {
       queryClient.setQueryData(['settings'], updated)
-      await queryClient.invalidateQueries({ queryKey: ['dividends', 'breakdown'] })
+      await queryClient.invalidateQueries({ predicate: readsAssumedWithholding })
       setOpen(false)
     },
   })

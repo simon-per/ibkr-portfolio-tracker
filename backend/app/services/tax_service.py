@@ -35,7 +35,7 @@ from app.models.cash_flow import CashFlow, DEPOSIT_WITHDRAW
 from app.repositories.app_settings_repository import AppSettingsRepository
 from app.services.cash_service import CashService
 from app.services.currency_service import CurrencyService
-from app.services.dividend_service import DividendService
+from app.services.dividend_service import DividendService, load_exact_date_pairs
 from app.services.native_amounts import NativeToBase, cash_flow_in_base
 from app.services.percentages import share_pct
 from app.services.realized_trades import realized_from_sell_trades
@@ -116,7 +116,9 @@ class TaxService:
             )
         )
         all_rows = (await self.db.execute(stmt)).all()
-        kept, ibkr_from = DividendService._splice_by_era([dp for dp, _ in all_rows])
+        kept, ibkr_from = DividendService._splice_by_era(
+            [dp for dp, _ in all_rows], exact_pairs=await load_exact_date_pairs(self.db)
+        )
         kept_ids = {p.id for p in kept}
         rows = [(dp, sec) for dp, sec in all_rows if dp.id in kept_ids]
 

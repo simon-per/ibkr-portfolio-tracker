@@ -17,14 +17,17 @@ from app.models.dividend_withholding_adjustment import DividendWithholdingAdjust
 from app.models.dividend_accrual import DividendAccrual
 from app.repositories.dividend_repository import DividendRepository
 from app.services.dividend_service import DividendService
+from app.models.dividend_date_pair import DividendDatePair
 from tests.memory_db import memory_engine
 
 
 async def _make_session():
     # The accruals because the summary reads an estimate's net through the withholding
-    # ladder (issue #61), whose first rung is an open accrual.
+    # ladder (issue #61), whose first rung is an open accrual; IBKR's (ex, pay) pairs
+    # because the era splice pairs the two sources' records by them first.
     tables = [Security.__table__, TaxLot.__table__, DividendPayment.__table__, AppSetting.__table__,
-              DividendWithholdingAdjustment.__table__, DividendAccrual.__table__]
+              DividendWithholdingAdjustment.__table__, DividendAccrual.__table__,
+              DividendDatePair.__table__]
     engine = await memory_engine(tables=tables)
     session = AsyncSession(engine, expire_on_commit=False)
     session.add(Security(

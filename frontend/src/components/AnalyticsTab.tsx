@@ -683,7 +683,7 @@ function SegmentsCard({
 
 // --------------------------------------------------------------------------- drawdowns
 
-function drawdownColumns(benchmarkName: string | null): Column<DrawdownEpisode>[] {
+export function drawdownColumns(benchmarkName: string | null): Column<DrawdownEpisode>[] {
   return [
     { key: 'peak', header: 'Peak', shortHeader: 'Peak', mobile: 'title', cell: (e) => formatDate(e.peakDate) },
     { key: 'trough', header: 'Trough', shortHeader: 'Trough', mobile: 'meta', cell: (e) => formatDate(e.troughDate) },

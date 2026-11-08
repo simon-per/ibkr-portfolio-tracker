@@ -227,6 +227,17 @@ class CompanyFinancialsProfile(BaseModel):
     yahoo_as_of: Optional[str] = Field(None, description="When Yahoo's figures were read, UTC.")
 
 
+class CompanyDividendTrack(BaseModel):
+    """One held listing's company dividend record (`/dividend-track`, review item FD4)."""
+
+    #: The fiscal years' dividends per share, 5-year compound growth (0.08 is 8%).
+    dps_cagr_5y: Optional[float] = None
+    #: Fiscal years in a row, newest back, that paid more per share than the one before.
+    raise_years: Optional[int] = None
+    #: TTM dividends per share over TTM diluted EPS (0.35 is 35%).
+    payout_ratio: Optional[float] = None
+
+
 class CompanyFinancialsResponse(BaseModel):
     cik: int = Field(..., description="The SEC Central Index Key; the path's id.")
     security_id: Optional[int] = Field(

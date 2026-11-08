@@ -104,7 +104,7 @@ type HoldingRow = TaxReport['holdings_snapshot'][number]
  * about. The fourth table's trailing empty `<td>` is derived too, from the spans not
  * covering the full width.
  */
-const DIVIDEND_INCOME_COLUMNS = (money: Money): Column<DividendIncomeRow>[] => [
+export const DIVIDEND_INCOME_COLUMNS = (money: Money): Column<DividendIncomeRow>[] => [
   {
     key: 'symbol',
     header: 'Symbol',
@@ -160,7 +160,7 @@ const DIVIDEND_INCOME_COLUMNS = (money: Money): Column<DividendIncomeRow>[] => [
  * whose withholding is incomplete are tagged: absent when all of a country's payments
  * are estimates, the recorded sum with `excl. est.` when some are.
  */
-const BY_COUNTRY_COLUMNS = (money: Money): Column<ByCountryRow>[] => [
+export const BY_COUNTRY_COLUMNS = (money: Money): Column<ByCountryRow>[] => [
   {
     key: 'country',
     header: 'Country',
@@ -242,7 +242,7 @@ const BY_COUNTRY_COLUMNS = (money: Money): Column<ByCountryRow>[] => [
   },
 ]
 
-const REALIZED_COLUMNS = (money: Money): Column<RealizedRow>[] => [
+export const REALIZED_COLUMNS = (money: Money): Column<RealizedRow>[] => [
   {
     key: 'symbol',
     header: 'Symbol',
@@ -295,7 +295,7 @@ const REALIZED_COLUMNS = (money: Money): Column<RealizedRow>[] => [
   },
 ]
 
-const HOLDINGS_COLUMNS = (money: Money): Column<HoldingRow>[] => [
+export const HOLDINGS_COLUMNS = (money: Money): Column<HoldingRow>[] => [
   {
     key: 'symbol',
     header: 'Symbol',

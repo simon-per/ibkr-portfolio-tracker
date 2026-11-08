@@ -321,8 +321,8 @@ The edge trim and range flag on each window are `computeModifiedDietzReturn`'s, 
 
 TanStack Query, `refetchOnWindowFocus: false` and a 5-minute default `staleTime` (`App.tsx`); most
 reads set 30 minutes. The Dashboard stays mounted for the session, so a cache entry nobody refreshes
-can stay on screen until the tab is reloaded. `lib/queryCache.ts` decides what two app-wide writes
-refresh. Both predicates **name what they leave out**: a list of roots to refresh is how the bugs
+can stay on screen until the tab is reloaded. `lib/queryCache.ts` decides what three app-wide writes
+refresh. Every predicate **names what it leaves out**: a list of roots to refresh is how the bugs
 below happened, and a root added later is refreshed by default. Refreshing it anyway costs a request;
 missing it costs a wrong figure.
 
@@ -355,6 +355,15 @@ missing it costs a wrong figure.
   and `crypto` (its own tables and sync). A `skipped` sync refreshes nothing. The one active reader
   that can reach Yahoo is `GET /api/dividends/summary`, throttled server-side, so a sync's refetch
   costs what a page load costs. `Dashboard.sync.test.tsx` pins it.
+- **A new forecast withholding rate invalidates every reader of an estimated net**
+  (`readsAssumedWithholding`, review items T6/U5, 2026-11-08). An estimate's net is its gross less
+  the assumed rate (`IncomeSplit`, docs/dividends.md), and the control refreshed only
+  `['dividends', 'breakdown']`: the Tax tab's projection, the dividend summary, XIRR's dividend
+  inflows and the activity ledger kept the old rate for their stale time. Left out: the sync's
+  roots, `company-financials`, `fundamentals`, `watchlist`, `scheduler`, `allocation`,
+  `performance` (the decomposition reads the cash that landed) and the portfolio views without a
+  dividend net (summary, positions, value over time, attribution, benchmark, contributions,
+  look-through). `DividendWithholdingControl.test.tsx` pins both sides.
 - **`summaryQuery` and `positionsQuery` are defined once** in the same module, with one
   `staleTime`. Positions used to fall back to the 5-minute default at both of its readers. Opening
   the Allocation tab after 5 minutes then refetched positions but not the summary, and the hero's
@@ -426,7 +435,11 @@ the phone produces *nothing at all*, on a device the author is not looking at. S
 to `'detail'` (a new column reaches the phone unless someone explicitly hides it), `cell` takes the
 view it is rendering into rather than being duplicated, and two test files hold the line:
 `DataTable.test.tsx` drives both modes from one fixture, and `tableFamily.test.tsx` pins the
-conventions across column sets plus a source scan for any raw `<table>` outside `ui/`.
+conventions across column sets plus a source scan for any raw `<table>` outside `ui/`. **Every
+module-level column set is registered there** (review item U1, 2026-11-08), each with an all-null
+row: until then only four were, and the Dividends table's two `delta` columns went unchecked — the
+card draws only the first, so the forward yield never reached a phone. Only the sets built inline
+(the hidden Analytics tab's, the rebalance plan's) are left to the source scans.
 
 **The card title carries the row's avatar, drawn by `DataTable`** (#70). The `title` column's
 `avatar: (row, className) => …` returns its `TickerAvatar`, `ConstituentAvatar` or Activity's cash
@@ -846,10 +859,11 @@ insight. What that settled, on top of the product pass:
   green since 2026-10-17). Providers sit apart from their hooks (`CurrencyProvider.tsx` beside
   `CurrencyContext.tsx`, `ModeProvider.tsx` beside `portfolioMode.tsx`, `useTheme.ts` beside
   `ThemeProvider.tsx`) and storage readers live in `lib/` (`benchmarkSelection.ts`,
-  `rebalanceTargets.ts`, `lookthroughTone.ts`). The two table descriptors, `positionColumns` and
-  `lookthroughColumns`, are the named exception in `eslint.config.js`: each closes over helpers its
-  component renders with, and the table family test imports the exact array the component
-  renders; editing either file reloads the page instead of hot-swapping it.
+  `rebalanceTargets.ts`, `lookthroughTone.ts`). The table descriptors (`positionColumns`,
+  `lookthroughColumns` and, since U1, every other module-level set) are the named exception in
+  `eslint.config.js`: each closes over helpers its component renders with, and the table family
+  test imports the exact array the component renders; editing such a file reloads the page instead
+  of hot-swapping it.
 - **A chosen base currency the server cannot use is named, not hidden.** With no EUR→base rate
   stored, `/api/settings` answers `base_currency: EUR` and `base_currency_unavailable: CHF`
   (docs/pricing-and-fx.md); the header shows *No CHF rate yet — showing EUR.* and every figure is

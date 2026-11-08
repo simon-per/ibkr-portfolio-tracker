@@ -3,7 +3,9 @@ import { useQuery } from '@tanstack/react-query'
 import { ChartColumnStacked, ChevronRight, HandCoins, ListOrdered } from 'lucide-react'
 import { Card, CardContent, CardHeader } from '@/components/ui/card'
 import { SectionHeader } from '@/components/ui/SectionHeader'
-import { contributionsQuery, dividendBreakdownQuery, forecastHistoryQuery } from '@/lib/queryCache'
+import {
+  companyDividendTrackQuery, contributionsQuery, dividendBreakdownQuery, forecastHistoryQuery,
+} from '@/lib/queryCache'
 import type { DividendSecurityRow } from '@/lib/api'
 import { useFormatCurrency, useKeepPreviousData } from '@/lib/CurrencyContext'
 import {
@@ -11,12 +13,14 @@ import {
 } from '@/lib/dividendChart'
 import { dividendColor, hasIdentity } from '@/lib/dividendColors'
 import { forecastTrend, type LiveForecast } from '@/lib/dividendForecastTrend'
+import { forecastMilestones } from '@/lib/dividendMilestones'
 import { incomePerMoneyIn } from '@/lib/incomePerMoneyIn'
 import { deltaColor } from '@/lib/delta'
 import { feedRaises, payoutChanges, RAISE_BAND_PCT } from '@/lib/dividendGrowth'
 import { useRememberedOpen } from '@/lib/storage'
 import {
   DEFAULT_DIVIDEND_SORT, initialDirection, sortDividendRows, type DividendSortKey,
+  type DividendTrackMap,
 } from '@/lib/dividendTable'
 import { dividendPace } from '@/lib/dividendPace'
 import { DeltaChip } from './DeltaChip'
@@ -30,7 +34,9 @@ import { DividendYearComparison } from './DividendYearComparison'
 import { DIVIDEND_CHART_BOX, DividendStackChart } from './DividendStackChart'
 import { DividendTtmChart } from './DividendTtmChart'
 import { DividendWithholdingControl } from './DividendWithholdingControl'
-import { ABSENT, cn, formatSigned, formatSignedPercent, placeholderDim } from '@/lib/utils'
+import {
+  ABSENT, cn, formatFractionPercent, formatSigned, formatSignedPercent, placeholderDim,
+} from '@/lib/utils'
 import { DataTable, type Column } from '@/components/ui/DataTable'
 import { CompanyLink } from './CompanyLink'
 import { SegmentedControl } from '@/components/ui/SegmentedControl'
@@ -59,12 +65,15 @@ const dividendAvatar = (row: DividendSecurityRow, className: string) => (
  * did not exist at all. As `desktop: 'hide'` detail columns they are on the card and
  * still out of the desktop table's ten.
  */
-function dividendColumns(deps: {
+export function dividendColumns(deps: {
   formatCurrency: (v: number) => string
   duplicated: Set<string>
   showForecast: boolean
+  /** The companies' own dividend records (`/dividend-track`); a dash until they load. */
+  track?: DividendTrackMap
 }): Column<DividendSecurityRow, DividendSortKey>[] {
-  const { formatCurrency, duplicated, showForecast } = deps
+  const { formatCurrency, duplicated, showForecast, track } = deps
+  const own = (row: DividendSecurityRow) => track?.[String(row.security_id)]
   return [
     {
       key: 'symbol',
@@ -125,21 +134,6 @@ function dividendColumns(deps: {
       sortKey: 'yield',
       header: 'Yield',
       shortHeader: 'Yield',
-      align: 'right',
-      mobile: 'delta',
-      hint: { description: 'Trailing 12M net ÷ market value' },
-      cell: (row, view) =>
-        row.trailing_yield_pct != null ? (
-          `${row.trailing_yield_pct.toFixed(2)}%`
-        ) : view === 'table' ? (
-          ABSENT
-        ) : null,
-    },
-    {
-      key: 'fwdYield',
-      sortKey: 'fwdYield',
-      header: 'Fwd yield',
-      shortHeader: 'Fwd yield',
       align: 'right',
       mobile: 'delta',
       hint: { description: 'Next 12M forecast ÷ market value' },
@@ -216,6 +210,46 @@ function dividendColumns(deps: {
         row.per_share_growth_pct != null
           ? formatSignedPercent(row.per_share_growth_pct, 1)
           : ABSENT,
+    },
+    // The company's own record from its SEC filings (review item FD4): a fund has none.
+    {
+      key: 'dpsCagr',
+      sortKey: 'dpsCagr',
+      header: '5Y',
+      shortHeader: '5Y payout growth',
+      align: 'right',
+      cellClassName: 'text-muted-foreground',
+      hint: { description: 'Dividend per share, 5-year CAGR' },
+      cell: (row) => {
+        const v = own(row)?.dps_cagr_5y
+        return v != null ? formatSignedPercent(v * 100, 1) : ABSENT
+      },
+    },
+    {
+      key: 'streak',
+      sortKey: 'streak',
+      header: 'Streak',
+      shortHeader: 'Raise streak',
+      align: 'right',
+      cellClassName: 'text-muted-foreground',
+      hint: { description: 'Years in a row raised' },
+      cell: (row) => {
+        const v = own(row)?.raise_years
+        return v != null ? `${v}y` : ABSENT
+      },
+    },
+    {
+      key: 'payout',
+      sortKey: 'payout',
+      header: 'Payout',
+      shortHeader: 'Payout ratio',
+      align: 'right',
+      cellClassName: 'text-muted-foreground',
+      hint: { description: 'Dividends ÷ earnings, TTM' },
+      cell: (row) => {
+        const v = own(row)?.payout_ratio
+        return v != null ? formatFractionPercent(v, 0) : ABSENT
+      },
     },
     {
       key: 'yoc',
@@ -344,9 +378,11 @@ export function DividendsTab() {
     return showForecast ? rows : rows.filter((r) => r.payouts > 0)
   }, [data, showForecast])
 
+  // Each payer's own record from its filings, for the 5Y, Streak and Payout columns.
+  const { data: track } = useQuery(companyDividendTrackQuery)
   const sortedSecurities = useMemo(
-    () => sortDividendRows(securities, sortColumn, sortDirection, showForecast),
-    [securities, sortColumn, sortDirection, showForecast],
+    () => sortDividendRows(securities, sortColumn, sortDirection, showForecast, track),
+    [securities, sortColumn, sortDirection, showForecast, track],
   )
   // Counted over the rows the table shows, so the line can be checked against its
   // Growth column.
@@ -369,9 +405,11 @@ export function DividendsTab() {
   const kpiTrend = useMemo<DividendKpiTrend | null>(() => {
     const trend = forecastTrend(forecastHistory, live)
     if (!trend || !forecastHistory) return null
+    const milestones = forecastMilestones(trend.points)
     return {
       received: trend.points.map((p) => p.received),
       forecast: trend.points.map((p) => p.value),
+      milestone: milestones && { next: milestones.next, toGo: milestones.toGo },
       // `forecastTrend` drops `live` in another currency, so every point is the history's.
       perMoneyIn: incomePerMoneyIn(trend.points, forecastHistory.base_currency, contributions),
     }
@@ -388,8 +426,8 @@ export function DividendsTab() {
   const duplicated = useMemo(() => duplicatedSymbols(securities), [securities])
 
   const columns = useMemo(
-    () => dividendColumns({ formatCurrency, duplicated, showForecast }),
-    [formatCurrency, duplicated, showForecast]
+    () => dividendColumns({ formatCurrency, duplicated, showForecast, track }),
+    [formatCurrency, duplicated, showForecast, track]
   )
 
   const upcoming = useMemo(

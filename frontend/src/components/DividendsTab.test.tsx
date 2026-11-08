@@ -382,8 +382,7 @@ describe('The dividend legend', () => {
     data.securities = data.stack_order.map((symbol, i) => ({
       security_id: i + 1, symbol, exchange: null, description: symbol,
       payouts: 1, gross_eur: symbols[symbol], withholding_eur: 0, net_eur: symbols[symbol],
-      forecast_payouts: 0, forecast_net_eur: 0, trailing_yield_pct: null,
-      forward_yield_pct: null, trailing_yield_partial: false, days_held_in_ttm: 365,
+      forecast_payouts: 0, forecast_net_eur: 0, forward_yield_pct: null,
       yield_on_cost_pct: null, share_pct: null, next_pay_date: null, source: 'ibkr',
       forecast_basis: null, forecast_samples: null, forecast_cadence_days: null,
       forecast_lag_days: null, forecast_lag_samples: null,
@@ -516,9 +515,8 @@ describe('The per-position table', () => {
     return {
       security_id: id, symbol, exchange: null, description: symbol,
       payouts: 1, gross_eur: net, withholding_eur: 0, net_eur: net,
-      forecast_payouts: 0, forecast_net_eur: 0, trailing_yield_pct: null,
-      forward_yield_pct: null, per_share_growth_pct: growth, trailing_yield_partial: false,
-      days_held_in_ttm: 365, yield_on_cost_pct: null, share_pct: net, next_pay_date: null,
+      forecast_payouts: 0, forecast_net_eur: 0,
+      forward_yield_pct: null, per_share_growth_pct: growth, yield_on_cost_pct: null, share_pct: net, next_pay_date: null,
       source: 'ibkr', forecast_basis: null, forecast_samples: null, forecast_cadence_days: null,
       forecast_lag_days: null, forecast_lag_samples: null, forecast_method: null,
       forecast_withholding_pct: null, forecast_withholding_source: null,
@@ -557,6 +555,60 @@ describe('The per-position table', () => {
     expect(bodyOrder()).toEqual(['AAA', 'DDD', 'CCC', 'BBB'])
     await user.click(within(growth).getByRole('button'))
     expect(bodyOrder()).toEqual(['CCC', 'DDD', 'AAA', 'BBB'])
+  })
+
+  it('has one yield, the forecast over market value, on the table and on the phone', async () => {
+    // Review items FD2 and U1: a trailing "Yield" beside "Fwd yield" read low whenever
+    // shares had been added, and both were the card's delta, so the phone drew only the
+    // trailing one.
+    const data = withSecurities()
+    data.securities = [{ ...security(1, 'AAA', null, 40), forward_yield_pct: 1.25 }]
+    vi.spyOn(api, 'getDividendBreakdown').mockResolvedValue(data)
+    mount()
+    await screen.findByText(/Received/)
+    const headers = screen.getAllByRole('columnheader').map((h) => h.textContent)
+    expect(headers.filter((h) => /yield/i.test(h ?? '') && !/YoC/.test(h ?? ''))).toEqual(['Yield'])
+    expect(within(screen.getByRole('table')).getByText('1.25%')).toBeTruthy()
+    cleanup()
+
+    vi.stubGlobal('matchMedia', (query: string) => ({
+      matches: true, media: query, addEventListener: () => {}, removeEventListener: () => {},
+    }))
+    try {
+      mount()
+      await screen.findByText(/Received/)
+      expect(screen.getByText('1.25%')).toBeTruthy()
+    } finally {
+      vi.unstubAllGlobals()
+    }
+  })
+
+  it("shows each payer's own record from its filings, a dash for a fund, and sorts by it", async () => {
+    // Review item FD4: 5-year growth of the dividend per share, the raise streak and the
+    // payout ratio, by security id; a fund has no SEC filer and is absent.
+    vi.spyOn(api, 'getDividendBreakdown').mockResolvedValue(withSecurities())
+    vi.spyOn(api, 'getCompanyDividendTrack').mockResolvedValue({
+      1: { dps_cagr_5y: 0.082, raise_years: 12, payout_ratio: 0.354 },
+      3: { dps_cagr_5y: 0.15, raise_years: 0, payout_ratio: null },
+    })
+    const user = userEvent.setup()
+    mount()
+    await screen.findByText(/Received/)
+    const cells = (symbol: string) => {
+      const row = within(screen.getByRole('table')).getAllByRole('row')
+        .find((r) => r.querySelector('.text-xs')?.textContent === symbol)!
+      return Array.from(row.querySelectorAll('td')).map((td) => td.textContent)
+    }
+    await waitFor(() => expect(cells('AAA')).toEqual(expect.arrayContaining(['+8.2%', '12y', '35%'])))
+    expect(cells('CCC')).toEqual(expect.arrayContaining(['+15.0%', '0y']))
+    expect(cells('BBB').filter((c) => c === '—').length).toBeGreaterThanOrEqual(3)
+
+    const fiveYear = screen.getByRole('columnheader', { name: /5Y/ })
+    await user.click(within(fiveYear).getByRole('button'))
+    expect(bodyOrder().slice(0, 2)).toEqual(['CCC', 'AAA'])
+    // The rows without a record last, in either direction.
+    await user.click(within(fiveYear).getByRole('button'))
+    expect(bodyOrder().slice(0, 2)).toEqual(['AAA', 'CCC'])
   })
 
   it('counts raises and cuts over the payers it lists', async () => {

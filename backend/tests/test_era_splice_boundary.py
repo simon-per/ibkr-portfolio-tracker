@@ -58,7 +58,7 @@ def test_the_boundary_dividend_is_not_counted_from_both_sources():
         _p(1, BOUNDARY, "ibkr"),
         _p(2, BOUNDARY, "ibkr"),
     ]
-    kept, boundary = DividendService._splice_by_era(payments)
+    kept, boundary = DividendService._splice_by_era(payments, exact_pairs=None)
 
     assert boundary == BOUNDARY
     assert _dates(kept) == [(BOUNDARY, "ibkr"), (BOUNDARY, "ibkr")]
@@ -75,7 +75,7 @@ def test_a_genuinely_earlier_dividend_survives():
         _p(1, date(2026, 2, 9), "yfinance_estimate"),   # the boundary payment's ex-date
         _p(1, BOUNDARY, "ibkr"),
     ]
-    kept, _ = DividendService._splice_by_era(payments)
+    kept, _ = DividendService._splice_by_era(payments, exact_pairs=None)
 
     assert _dates(kept) == [
         (date(2026, 1, 5), "yfinance_estimate"),
@@ -95,7 +95,7 @@ def test_matching_is_one_to_one_so_a_monthly_payer_keeps_its_history():
         _p(1, BOUNDARY - timedelta(days=3), "yfinance_estimate"),   # the duplicate
         _p(1, BOUNDARY, "ibkr"),
     ]
-    kept, _ = DividendService._splice_by_era(payments)
+    kept, _ = DividendService._splice_by_era(payments, exact_pairs=None)
 
     kept_dates = _dates(kept)
     assert (BOUNDARY - timedelta(days=3), "yfinance_estimate") not in kept_dates
@@ -113,7 +113,7 @@ def test_it_does_not_match_across_securities():
         _p(2, date(2026, 2, 10), "yfinance_estimate"),
         _p(1, BOUNDARY, "ibkr"),          # only security 1 has an IBKR row
     ]
-    kept, _ = DividendService._splice_by_era(payments)
+    kept, _ = DividendService._splice_by_era(payments, exact_pairs=None)
 
     assert (date(2026, 2, 10), "yfinance_estimate") in _dates(kept)
     assert (date(2026, 2, 9), "yfinance_estimate") not in _dates(kept)
@@ -123,7 +123,7 @@ def test_an_estimate_beyond_the_lag_window_is_left_alone():
     """Past the widest real ex-to-pay lag, proximity is no longer evidence."""
     far = BOUNDARY - timedelta(days=EX_TO_PAY_MAX_LAG_DAYS + 1)
     payments = [_p(1, far, "yfinance_estimate"), _p(1, BOUNDARY, "ibkr")]
-    kept, _ = DividendService._splice_by_era(payments)
+    kept, _ = DividendService._splice_by_era(payments, exact_pairs=None)
     assert (far, "yfinance_estimate") in _dates(kept)
 
 
@@ -133,7 +133,7 @@ def test_an_estimate_after_the_boundary_is_still_dropped_by_the_boundary_rule():
         _p(1, BOUNDARY + timedelta(days=30), "yfinance_estimate"),
         _p(1, BOUNDARY, "ibkr"),
     ]
-    kept, _ = DividendService._splice_by_era(payments)
+    kept, _ = DividendService._splice_by_era(payments, exact_pairs=None)
     assert _dates(kept) == [(BOUNDARY, "ibkr")]
 
 
@@ -143,7 +143,7 @@ def test_a_history_with_no_ibkr_rows_is_untouched():
         _p(1, date(2025, 5, 1), "yfinance_estimate"),
         _p(1, date(2025, 8, 1), "yfinance_estimate"),
     ]
-    kept, boundary = DividendService._splice_by_era(payments)
+    kept, boundary = DividendService._splice_by_era(payments, exact_pairs=None)
     assert boundary is None
     assert len(kept) == 2
 

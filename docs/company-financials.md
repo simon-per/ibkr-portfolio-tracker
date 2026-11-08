@@ -420,7 +420,17 @@ their YoY, DPS and the payout ratio, P/E, P/S, P/FCF, dividend yield, return on 
 dividends paid, market cap). A CIK the pass never looked at:
 404.
 A known one without figures: 200, empty points, a warning. Response models are pinned both ways by
-`tests/test_company_financials_contract.py`. Public reads, rate-limited like every `/api/` read;
+`tests/test_company_financials_contract.py`.
+
+`GET /api/company-financials/dividend-track` (review item FD4, 2026-11-08):
+`{security_id: {dps_cagr_5y, raise_years, payout_ratio}}` for every held listing of a company with
+stored figures, read by the Dividends table's *5Y*, *Streak* and *Payout* columns
+(`dividend_track`). The 5-year growth is `growth_at` over the fiscal years' dividends per share;
+the streak (`raise_streak`) counts fiscal years in a row, newest back, that paid more than the
+year before, and a year without a figure, a missing year or a flat year ends it — null when the
+newest year paid nothing, never a streak of 0; the payout ratio is `key_stats`' own. A listing
+with no US filer behind it (a fund) is absent. Declared before `/{cik}`, which would take the
+path. Public reads, rate-limited like every `/api/` read;
 **no write route**.
 
 Computed in `company_financials_service` only:
