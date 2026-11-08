@@ -1076,6 +1076,39 @@ def _implied_shares(
     return shares if shares > 0 else None
 
 
+def _rescale_share_slips(
+    latest: Dict[str, Dict[Tuple[Optional[date], date], Obs]],
+    spec_of: Dict[str, "MetricSpec"],
+) -> None:
+    """
+    A reported share count a thousand times off net income over EPS for the same span,
+    rescaled in place **before** any quarter is derived from it (review item CO4,
+    2026-11-08). ONDS tags its 10-K counts in thousands and its 10-Qs in shares; the check
+    ran on the finished values, after Q4 had been derived from the year still in
+    thousands — negative, so dropped — and every TTM window since broke on the missing
+    quarter. The same test as the later pass (`_implied_shares`), on the raw spans.
+    """
+    def chain(metric: str) -> Dict[Tuple[Optional[date], date], Obs]:
+        out: Dict[Tuple[Optional[date], date], Obs] = {}
+        for concept in METRICS[metric].concepts:
+            for span, obs in latest.get(concept, {}).items():
+                out.setdefault(span, obs)
+        return out
+
+    by_span = {"net_income": chain("net_income"), "eps_diluted": chain("eps_diluted")}
+    for concept, periods in latest.items():
+        spec = spec_of.get(concept)
+        if spec is None or spec.kind != SHARES or spec.timing != FLOW:
+            continue
+        for span, obs in periods.items():
+            implied = _implied_shares(by_span, span, SHARES_SLIP_EPS_MAX_ERROR)
+            if implied is None:
+                continue
+            slip = _snap(obs.value / implied, SHARE_COUNT_SLIPS, SHARES_SLIP_TOLERANCE)
+            if slip is not None:
+                obs.value = obs.value / float(slip)
+
+
 def _quarter_totals(
     periods: Dict[Tuple[Optional[date], date], Obs], mapping: Dict[date, date]
 ) -> Dict[date, float]:
@@ -1251,6 +1284,7 @@ def normalise(
     instants: Dict[str, Dict[date, Obs]] = {}
     year_spans, ladder_starts, quarter_starts = set(), set(), set()
     spec_of = {c: s for s in METRICS.values() for c in s.concepts}
+    _rescale_share_slips(latest, spec_of)
     for concept, periods in latest.items():
         spec = spec_of[concept]
         if spec.timing == INSTANT:
@@ -1379,7 +1413,10 @@ def normalise(
             for end, v in anchors
             if 0 < abs((end - key[1]).days) <= NEIGHBOUR_DAYS and v > 0
         ]
-        if near and not any(
+        # Between its two reported neighbours it is a count, however fast the company
+        # dilutes (CO4: a quarter of heavy issuance is more than 1.2x from either side).
+        between = len(near) >= 2 and min(near) <= obs.value <= max(near)
+        if near and not between and not any(
             1 / DERIVED_COUNT_MAX_STEP <= obs.value / v <= DERIVED_COUNT_MAX_STEP
             for v in near
         ):

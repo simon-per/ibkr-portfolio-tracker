@@ -350,7 +350,11 @@ The same vote, per concept, undoes a **unit slip of a thousand or a million** (e
 tagged some counts in thousands; PCAR's 2019 10-K its share counts in millions, STX's 2024 10-K
 its dividends per share a million times over). A slip in a filing no newer one overlaps cannot be voted on, so a
 **reported share count about 1000× off net income / EPS** for the same period is rescaled too
-(ONDS tags some 10-Ks and Q1 10-Qs in thousands).
+(ONDS tags some 10-Ks and Q1 10-Qs in thousands) — **on the raw facts, before any quarter is
+derived** (`_rescale_share_slips`, review item CO4, 2026-11-08). The check ran on the finished values,
+after Q4 had come from the year still in thousands (negative, so dropped), and ONDS had no TTM share
+count since Q3 FY2023. A derived quarter's count lying between its two reported neighbours is kept
+however far from each it stands (a quarter of heavy issuance).
 
 A filing slipped **in some contexts only** fits no one factor: DXCM's 2014 10-K re-tagged its 2012
 quarters' EPS a million times over (−210000 beside three filings' −0.21) while its years stayed
