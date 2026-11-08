@@ -311,6 +311,22 @@ describe('CompanyTab', () => {
     expect(within(card('revenue')).queryByTestId('medians')).toBeNull()
   })
 
+    it('shows the latest quarter on its own, new for a week (review item R4)', async () => {
+    const filed = new Date(Date.now() - 2 * 86_400_000).toISOString().slice(0, 10)
+    vi.spyOn(api, 'getCompanyFinancials').mockResolvedValue(fixtureFinancials({
+      latest_quarter: {
+        label: 'Q3 FY2026', period_end: '2026-10-26', filed, revenue_yoy: 0.123,
+        eps_yoy: 0.2, fcf_yoy: null, operating_margin_change: -0.012,
+      },
+    }))
+    renderTab()
+    const row = await screen.findByTestId('latest-quarter')
+    expect(row.textContent).toContain('Latest quarter · Q3 FY2026')
+    expect(row.textContent).toContain('new')
+    expect(row.textContent).toContain('−1.2 pts')
+    expect(row.textContent).not.toContain('FCF')
+  })
+
     it('hides the valuation card for a company without stored prices', async () => {
     const none = fixtureSeries([null, null, null, null])
     vi.spyOn(api, 'getCompanyFinancials').mockResolvedValue(fixtureFinancials({

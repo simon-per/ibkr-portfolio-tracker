@@ -23,6 +23,7 @@ import type {
   CompanyFinancialsPeriod,
   CompanyFinancialsProfile,
   CompanyFinancialsRange,
+  CompanyFinancialsLatestQuarter,
   CompanyFinancialsResponse,
   CompanyFinancialsSeriesKey,
 } from '@/lib/api'
@@ -63,7 +64,7 @@ import { chartColor, LOSS_COLOR } from '@/lib/chartPalette'
 import { CHART_GRID_PROPS, CHART_TOOLTIP_LABEL_STYLE, CHART_TOOLTIP_STYLE } from '@/lib/chartTooltip'
 import { robustlyCapped, zeroBasedTicks, type Axis } from '@/lib/niceTicks'
 import { displayName } from '@/lib/securityName'
-import { TONE_TEXT, type Tone } from '@/lib/tone'
+import { TONE_CHIP, TONE_TEXT, type Tone } from '@/lib/tone'
 import { useIsCompact } from '@/lib/useMediaQuery'
 import {
   ABSENT,
@@ -599,7 +600,49 @@ function CompanyOverview({ data }: { data: CompanyFinancialsResponse }) {
           </div>
         </div>
       )}
+      <LatestQuarter quarter={data.latest_quarter ?? null} />
       <StreetRow profile={profile} />
+    </div>
+  )
+}
+
+/** How long a filing is `new` on the overview. */
+const NEW_FILING_DAYS = 7
+
+/**
+ * The newest quarter on its own (review item R4): what the latest report said, which the
+ * TTM figures blend into three older quarters. Each figure against the same quarter a
+ * year before; the margin's change in points. `new` for a week after the filing.
+ */
+function LatestQuarter({ quarter }: { quarter: CompanyFinancialsLatestQuarter | null }) {
+  // The moment the row was first drawn: a render must not read the clock.
+  const [now] = useState(() => Date.now())
+  if (!quarter) return null
+  const margin = quarter.operating_margin_change
+  const figures = [
+    { label: 'Revenue', value: quarter.revenue_yoy == null ? null : signedPercent(quarter.revenue_yoy) },
+    {
+      label: 'Op margin',
+      value: margin == null ? null : `${margin >= 0 ? '+' : '−'}${Math.abs(margin * 100).toFixed(1)} pts`,
+    },
+    { label: 'EPS', value: quarter.eps_yoy == null ? null : signedPercent(quarter.eps_yoy) },
+    { label: 'FCF', value: quarter.fcf_yoy == null ? null : signedPercent(quarter.fcf_yoy) },
+  ].filter((f): f is { label: string; value: string } => f.value != null)
+  if (figures.length === 0) return null
+  const filed = quarter.filed ? new Date(`${quarter.filed}T00:00:00`) : null
+  const fresh = filed != null && (now - filed.getTime()) / 86_400_000 <= NEW_FILING_DAYS
+  return (
+    <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs" data-testid="latest-quarter">
+      <span className="tabular-nums text-muted-foreground">
+        Latest quarter · {quarter.label}
+        {quarter.filed && <> · filed {periodText(quarter.filed)}</>}
+      </span>
+      {fresh && (
+        <span className={cn('rounded-full px-1.5 py-0.5 text-[10px] font-semibold', TONE_CHIP.positive)}>new</span>
+      )}
+      {figures.map((f) => (
+        <Stat key={f.label} label={f.label} value={f.value} tone={growthTone(f.value, false)} />
+      ))}
     </div>
   )
 }

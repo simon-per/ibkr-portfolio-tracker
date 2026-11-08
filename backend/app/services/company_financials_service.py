@@ -682,6 +682,44 @@ def dividend_track(rows: Sequence[CompanyFinancial]) -> Dict[str, Any]:
     }
 
 
+def latest_quarter(rows: Sequence[CompanyFinancial]) -> Optional[Dict[str, Any]]:
+    """
+    The newest quarter on its own (review item R4, 2026-11-08): its label and filing
+    date, revenue, diluted EPS and FCF against the same quarter a year before (the
+    series' YoY rule), and the operating margin's change in points. The overview's
+    "Latest quarter" row — what the newest report said, which a TTM blends into three
+    older quarters. None without a quarter.
+    """
+    points = _series_points(rows, "quarterly")
+    if not points:
+        return None
+    last = points[-1]
+    filed = max(
+        (r.filed for r in rows if r.period_end == last.period_end and r.fiscal_period != ANNUAL),
+        default=None,
+    )
+
+    def growth(name: str) -> Optional[float]:
+        return yoy_at([(p.period_end, p.series.get(name)) for p in points], len(points) - 1)
+
+    margins = [(p.period_end, p.series.get("operating_margin")) for p in points]
+    now = margins[-1][1]
+    target = _years_before(last.period_end, 1)
+    before = [v for d, v in margins[:-1] if abs((d - target).days) <= YOY_SLACK_DAYS]
+    return {
+        "label": last.label,
+        "period_end": last.period_end.isoformat(),
+        "filed": filed.isoformat() if filed else None,
+        "revenue_yoy": growth("revenue"),
+        "eps_yoy": growth("eps_diluted"),
+        "fcf_yoy": growth("fcf"),
+        # Points, not a growth rate: a ratio's change (0.012 is +1.2 pts).
+        "operating_margin_change": (
+            now - before[0] if now is not None and before and before[0] is not None else None
+        ),
+    }
+
+
 def build_series(
     rows: Sequence[CompanyFinancial], period: str, range_key: str, prices: Prices = ()
 ) -> Dict[str, Any]:
@@ -1000,6 +1038,7 @@ class CompanyFinancialsService:
             "as_of": utc_iso(coverage["fetched_at"]) if coverage else None,
             "warnings": warnings,
             "key_stats": key_stats(rows, current),
+            "latest_quarter": latest_quarter(rows),
             "profile": await self._profile(company, listing, closes, currency),
             "series": {
                 **build_series(rows, period, range_key, prices),

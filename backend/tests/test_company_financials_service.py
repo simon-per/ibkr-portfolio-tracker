@@ -490,3 +490,31 @@ def test_a_multiple_carries_its_own_medians_and_nothing_else_does():
     assert out == {"y3": 28.0, "y5": 25.0, "y10": 22.0}
     assert medians(years[:2]) == {"y3": None, "y5": None, "y10": None}
 
+
+def test_the_latest_quarter_against_the_same_one_a_year_before():
+    """Review item R4: the overview's row of what the newest report said."""
+    from datetime import date as _date
+
+    from app.clock import utcnow
+    from app.models.company_financials import CompanyFinancial
+    from app.services.company_financials_service import latest_quarter
+
+    ends = [_date(2025, 3, 31), _date(2025, 6, 30), _date(2025, 9, 30), _date(2025, 12, 31),
+            _date(2026, 3, 31)]
+    rows = []
+    for i, end in enumerate(ends):
+        for metric, value in (("revenue", 100.0 + 25 * (i == 4)), ("operating_income", 20.0 + 10 * (i == 4)),
+                              ("eps_diluted", 1.0 + 0.5 * (i == 4))):
+            rows.append(CompanyFinancial(
+                cik=1, period_end=end, fiscal_year=end.year, fiscal_period=f"Q{i % 4 + 1}",
+                metric=metric, value=value, unit="USD", source_concept="X",
+                filed=_date(2026, 4, 28) if i == 4 else end, fetched_at=utcnow(),
+            ))
+    q = latest_quarter(rows)
+    assert (q["label"], q["filed"]) == ("Q1 FY2026", "2026-04-28")
+    assert q["revenue_yoy"] == 0.25 and q["eps_yoy"] == 0.5
+    # 30/125 = 24% against 20/100 = 20%: +4 points.
+    assert abs(q["operating_margin_change"] - 0.04) < 1e-9
+    assert q["fcf_yoy"] is None
+    assert latest_quarter([]) is None
+

@@ -1694,6 +1694,19 @@ export interface CompanyFinancialsSeriesSet {
  */
 export type CompanyFinancialsRating = AnalystRatingCounts
 
+/** The newest quarter against the same one a year before (the overview's row, review item R4). */
+export interface CompanyFinancialsLatestQuarter {
+  label: string;
+  period_end: string;
+  /** When its filing was made; null when no row says. */
+  filed: string | null;
+  revenue_yoy: number | null;
+  eps_yoy: number | null;
+  fcf_yoy: number | null;
+  /** The operating margin's change in points, as a fraction (0.012 is +1.2 pts). */
+  operating_margin_change: number | null;
+}
+
 /**
  * The overview's company-level figures: the SEC's industry and fiscal year end, the price
  * line from the market closes, and Yahoo's figures (a held company's from its listing, any
@@ -1799,6 +1812,8 @@ export interface CompanyFinancialsResponse {
   as_of: string | null;
   warnings: string[];
   key_stats: CompanyFinancialsKeyStats;
+  /** The newest quarter on its own: the overview's "Latest quarter" row. */
+  latest_quarter?: CompanyFinancialsLatestQuarter | null;
   profile: CompanyFinancialsProfile;
   series: CompanyFinancialsSeriesSet;
 }

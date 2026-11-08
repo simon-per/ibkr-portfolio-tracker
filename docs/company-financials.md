@@ -487,6 +487,10 @@ Computed in `company_financials_service` only:
   the last 3, 5 and 10 years, positive values only, on the whole history like `cagrs`; null with
   fewer than three values in a span or a history shorter than it, and null for every other
   series. The Valuation card shows them where a growth card shows its CAGRs.
+- **The latest quarter** (`latest_quarter`, review item R4, 2026-11-08): the newest quarter on
+  its own — label, filing date, revenue, diluted EPS and FCF against the same quarter a year
+  before (the YoY rule), the operating margin's change in points — the overview's row of what the
+  newest report said, which TTM blends into three older quarters; tagged `new` for a week.
 - **Annual** = the fiscal years as filed (the FY facts), not a sum of quarters.
 - **Range** counts back from the series' latest period end, not from today, so a TTM at the
   range's start is computed from quarters before it.
