@@ -1097,6 +1097,12 @@ class CompanyFinancialsService:
             "current": current,
         }
 
+    async def key_figures(self, company: SecCompany) -> Tuple[Optional[str], Dict[str, Any]]:
+        """A company's reporting currency and the overview's key figures, by the one path
+        (`_priced`, `key_stats`): the Peers card and the look-through's fundamentals."""
+        priced = await self._priced(company)
+        return priced["currency"], key_stats(priced["rows"], priced["current"])
+
     async def peers(self, company: SecCompany) -> Dict[str, Any]:
         """
         The Peers card (review item R1, 2026-11-08): the companies the tab lists in this
@@ -1128,12 +1134,12 @@ class CompanyFinancialsService:
         held = await self._held_listings([c.cik for c in members])
         rows = []
         for member in members:
-            priced = await self._priced(member)
+            currency, stats = await self.key_figures(member)
             rows.append(
                 {
                     **self._identity(member, held.get(member.cik)),
-                    "currency": priced["currency"],
-                    "key_stats": key_stats(priced["rows"], priced["current"]),
+                    "currency": currency,
+                    "key_stats": stats,
                 }
             )
         mine, rest = rows[0], rows[1:]

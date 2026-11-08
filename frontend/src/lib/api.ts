@@ -1694,6 +1694,21 @@ export interface CompanyFinancialsSeriesSet {
  */
 export type CompanyFinancialsRating = AnalystRatingCounts
 
+/** The fundamentals of what the account owns, through funds as well (review item R2). */
+export interface LookthroughFundamentals {
+  as_of: string | null;
+  /** Covered value over owned earnings (share-equivalents). */
+  pe_ratio: number | null;
+  revenue_growth: number | null;
+  earnings_growth: number | null;
+  operating_margin: number | null;
+  fcf_margin: number | null;
+  /** Percent of the companies' value whose earnings yield is known. */
+  coverage_pct: number | null;
+  companies_covered: number;
+  companies: number;
+}
+
 /** One company of the Company tab's Peers card (review item R1). */
 export interface CompanyPeer {
   cik: number;
@@ -2256,6 +2271,10 @@ class ApiClient {
   ): Promise<CompanyFinancialsResponse> {
     const params = new URLSearchParams({ period, range });
     return this.request<CompanyFinancialsResponse>(`/api/company-financials/${cik}?${params}`);
+  }
+
+  async getLookthroughFundamentals(): Promise<LookthroughFundamentals> {
+    return this.request<LookthroughFundamentals>('/api/portfolio/lookthrough/fundamentals');
   }
 
   async getCompanyPeers(cik: number): Promise<CompanyPeers> {

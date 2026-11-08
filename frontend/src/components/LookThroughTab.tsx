@@ -18,6 +18,7 @@ import { DataTable, type Column, type FooterCell } from '@/components/ui/DataTab
 import { CompositionBar, ExposureTreemap } from './LookThroughCharts'
 import { ConstituentAvatar } from './ConstituentAvatar'
 import { CompanyLink } from './CompanyLink'
+import { LookthroughFundamentalsCard } from './LookthroughFundamentalsCard'
 import { buildExposureGroups, buildPartition, cashRow } from '@/lib/lookthroughChart'
 import { CASH_BUCKET, STRUCTURAL_PAINT } from '@/lib/sectorColors'
 import { paintBackground } from '@/lib/chartPaint'
@@ -696,6 +697,8 @@ export function LookThroughTab() {
               )}
             </CardContent>
           </Card>
+
+          <LookthroughFundamentalsCard />
 
           {/*
             Last on the page and collapsed by default, at the owner's request: the fund table,

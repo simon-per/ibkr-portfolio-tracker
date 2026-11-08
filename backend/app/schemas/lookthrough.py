@@ -190,6 +190,26 @@ class LookthroughIdentityCoverage(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
 
+class LookthroughFundamentals(BaseModel):
+    """
+    The fundamentals of what the account owns, through funds as well (review item R2;
+    `lookthrough_fundamentals`): share-equivalent figures over the look-through companies
+    with SEC figures. Each null when no covered company gives it.
+    """
+
+    as_of: Optional[str] = None
+    pe_ratio: Optional[float] = Field(None, description="Covered value over owned earnings.")
+    revenue_growth: Optional[float] = Field(None, description="Owned TTM revenue, YoY.")
+    earnings_growth: Optional[float] = Field(None, description="Owned TTM EPS, YoY.")
+    operating_margin: Optional[float] = None
+    fcf_margin: Optional[float] = None
+    coverage_pct: Optional[float] = Field(
+        None, description="Percent of the companies' value whose earnings yield is known."
+    )
+    companies_covered: int = 0
+    companies: int = Field(0, description="Every company the look-through names.")
+
+
 class LookthroughResponse(BaseModel):
     """
     Company-level exposure: direct holdings plus every fund decomposed.

@@ -178,6 +178,13 @@ export const companyDividendTrackQuery = queryOptions({
 })
 
 /** One company's fundamentals history at one period basis and range (the Company tab). */
+/** The look-through's fundamentals card (review item R2): asked only once it is opened. */
+export const lookthroughFundamentalsQuery = queryOptions({
+  queryKey: ['lookthrough', 'fundamentals'],
+  queryFn: () => api.getLookthroughFundamentals(),
+  staleTime: 30 * 60 * 1000,
+})
+
 /** The Peers card's rows (review item R1): asked only once the card is opened. */
 export const companyPeersQuery = (cik: number) =>
   queryOptions({

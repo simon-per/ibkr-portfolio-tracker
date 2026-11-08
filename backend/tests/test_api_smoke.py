@@ -108,6 +108,7 @@ READ_ENDPOINTS = [
     f"/api/tax/report.csv?year={TODAY.year}",
     "/api/portfolio/lookthrough",
     "/api/portfolio/lookthrough?limit=5",
+    "/api/portfolio/lookthrough/fundamentals",
     f"/api/performance/decomposition?start_date={START}&end_date={TODAY}",
     f"/api/performance/segments?start_date={START}&end_date={TODAY}",
     "/api/performance/closed-positions",
@@ -1056,6 +1057,12 @@ def test_the_lookthrough_folds_a_dual_listing_through_the_real_stack(client):
     `tests/test_lookthrough_partition.py`.
     """
     lt = client.get("/api/portfolio/lookthrough").json()
+
+    # The fundamentals of what is owned (review item R2): over the same companies, ASML's
+    # through its held listing's CIK.
+    owned = client.get("/api/portfolio/lookthrough/fundamentals").json()
+    assert owned["companies"] == lt["company_count_total"]
+    assert {"pe_ratio", "revenue_growth", "coverage_pct", "companies_covered"} <= set(owned)
 
     # The two ASML listings are one company row carrying both venues.
     asml = next(r for r in lt["companies"] if "NL0010273215" in r["isins"])

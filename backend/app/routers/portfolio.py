@@ -21,7 +21,8 @@ from app.services.activity_service import (
 from app.services.portfolio_service import PortfolioService
 from app.services.benchmark_service import ANCHOR_MODES, BenchmarkService, BENCHMARKS
 from app.services.lookthrough_service import COMPANY_LIMIT_MAX, LookthroughService
-from app.schemas.lookthrough import LookthroughResponse
+from app.schemas.lookthrough import LookthroughFundamentals, LookthroughResponse
+from app.services.lookthrough_fundamentals import lookthrough_fundamentals
 from app.schemas.portfolio import (
     PortfolioValuePoint,
     PortfolioSummary,
@@ -314,6 +315,16 @@ async def get_positions_breakdown(db: AsyncSession = Depends(get_db)):
     positions = await portfolio_service.get_positions_breakdown()
 
     return positions
+
+
+@router.get("/lookthrough/fundamentals", response_model=LookthroughFundamentals)
+async def get_lookthrough_fundamentals(db: AsyncSession = Depends(get_db)):
+    """
+    The fundamentals of what the account owns, through its funds as well (review item R2):
+    P/E, growth and margins of the look-through companies with SEC figures, weighted by
+    share-equivalents, and how much of the companies' value that covers. Pure DB read.
+    """
+    return await lookthrough_fundamentals(db)
 
 
 @router.get("/lookthrough", response_model=LookthroughResponse)
