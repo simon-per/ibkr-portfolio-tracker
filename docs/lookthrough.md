@@ -659,6 +659,13 @@ and treating that column as CUSIPs is a **silent fabrication**, which is why
   vowels, their own check digit — sitting in a column headed "CUSIP".
 - **Digit-leading is still not unambiguously US**: `82509L107` yields valid `US` and `CA` forms
   and only one exists. `derive_north_american_isin` names the assumption in its own signature.
+  **So the CUSIP is kept beside the ISIN derived from it** (`constituent_identifier`, review item
+  L2, 2026-11-08), and when both providers have answered "nothing" for that ISIN — a Canadian
+  company's CUSIP made a US ISIN that does not exist — `unresolved_identifiers` asks the CUSIP of
+  OpenFIGI (`ID_CUSIP`); its share-class FIGI folds the row with the Canadian listing. Shopify,
+  Thomson Reuters and Hydro One each read as two companies before. A US company's derived ISIN is
+  real and never asked again. Keeping the CUSIP changes every US adapter basket's fingerprint
+  once, so the first evening after the deploy rewrites them.
 
 So `identifier_kind()` classifies by *shape and check digit*, the ISIN is derived only for a
 plain CUSIP, and everything else is kept verbatim in `etf_holdings.constituent_identifier` for

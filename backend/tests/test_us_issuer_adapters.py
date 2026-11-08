@@ -149,7 +149,8 @@ def test_invesco_does_not_ask_a_provider_about_a_cash_placeholder():
                     kind="Uninvestible Cash"),
     ]), SOXQ)
 
-    assert [r.identifier for r in basket.rows] == [None, None, None]
+    # The CUSIP stays beside the ISIN derived from it (review item L2); cash asks nothing.
+    assert [r.identifier for r in basket.rows] == ["67066G104", None, None]
     assert [r.isin for r in basket.rows] == ["US67066G1040", None, None]
 
 
@@ -204,7 +205,7 @@ def test_first_trust_keeps_a_cins_raw_and_derives_only_the_digit_leading_one():
     ]), GRID, "GRID")
 
     assert [r.isin for r in basket.rows] == [None, None, "US67066G1040"]
-    assert [r.identifier for r in basket.rows] == ["G29183103", "F86921107", None]
+    assert [r.identifier for r in basket.rows] == ["G29183103", "F86921107", "67066G104"]
     assert basket.identifier_coverage_pct == Decimal("20")
 
 
@@ -282,7 +283,7 @@ def test_defiance_tells_a_cusip_a_cins_and_a_sedol_apart_in_one_column():
     ]), QTUM, "QTUM", FETCHED)
 
     assert [r.isin for r in basket.rows] == ["US18915M1071", None, None, None]
-    assert [r.identifier for r in basket.rows] == [None, "G0567U127", "B056381", None]
+    assert [r.identifier for r in basket.rows] == ["18915M107", "G0567U127", "B056381", None]
     assert [r.asset_class for r in basket.rows] == [None, None, None, "Cash"]
 
 

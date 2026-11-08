@@ -347,8 +347,11 @@ def _resolve_identifier(
         return text, None
     if kind == "CUSIP":
         # Digit-leading, so derivable. `derive_north_american_isin` assumes the US form; the
-        # Canadian one exists in the same numeric space and only one of the two is real.
-        return derive_north_american_isin(text), None
+        # Canadian one exists in the same numeric space and only one of the two is real. The
+        # CUSIP is kept beside it (review item L2): a Canadian company's (Shopify's 82509L107
+        # in QQQM) derives a US ISIN belonging to nothing, and only the CUSIP can still be
+        # asked about (`unresolved_identifiers`).
+        return derive_north_american_isin(text), text
     if kind in ("CINS", "SEDOL"):
         return None, text
     return None, None
