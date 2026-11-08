@@ -518,6 +518,30 @@ describe('logos in the tax tables', () => {
     expect((await tile('Margin used')).textContent).not.toMatch(/interest/)
   })
 
+  it('offers no year before the move to Switzerland (review item T8)', async () => {
+    vi.spyOn(api, 'getSettings').mockResolvedValue({
+      base_currency: 'CHF', supported_currencies: ['CHF'], dividend_forecast_withholding_pct: 15,
+      swiss_tax_residency_from: '2026-03-01',
+    } as Awaited<ReturnType<typeof api.getSettings>>)
+    vi.spyOn(api, 'getTaxReport').mockResolvedValue(report())
+    renderTab()
+    const picker = (await screen.findByLabelText('Year')) as HTMLSelectElement
+    await waitFor(() => {
+      const years = Array.from(picker.options).map((o) => Number(o.value))
+      expect(Math.min(...years)).toBe(2026)
+    })
+  })
+
+  it('asks for the year the server keeps, the UTC one (review item T8)', async () => {
+    // 00:30 on 1 January in Zurich is still the old year in UTC, and the server caps by UTC.
+    vi.useFakeTimers({ toFake: ['Date'], now: new Date('2026-12-31T23:30:00Z') })
+    const get = vi.spyOn(api, 'getTaxReport').mockResolvedValue(report())
+    renderTab()
+    await waitFor(() => expect(get).toHaveBeenCalled())
+    expect(get).toHaveBeenCalledWith(2026)
+    vi.useRealTimers()
+  })
+
   it('puts the KS 36 indicators as figures', async () => {
     vi.spyOn(api, 'getTaxReport').mockResolvedValue(report({ trader_criteria: criteria() }))
     renderTab()

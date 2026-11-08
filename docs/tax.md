@@ -10,7 +10,10 @@
 `GET /api/tax/report?year=YYYY` and `.csv`. `year` defaults to and is capped at the current UTC year,
 **resolved per request** (`_resolve_year`): it was a module constant evaluated at import, so on
 1 January the new year answered 422 and the default served the prior year until the container
-happened to restart — found 2026-09-12, pinned by `tests/test_tax_router_year.py`. Switzerland
+happened to restart — found 2026-09-12, pinned by `tests/test_tax_router_year.py`. **The tab asks for
+the UTC year too** (review item T8, 2026-11-08): it read the browser's local year, so from 00:00 to
+01:00 in Zurich on 1 January it asked for a year the server refused ("Failed to load"); and its
+picker starts at the residency year, the earlier reports being empty. Switzerland
 doesn't tax private capital gains but does tax
 dividend income and allows reclaiming foreign withholding via **DA-1** — so the report leads with
 dividend income + withholding, then realized gains, then a year-end holdings snapshot (Steuerwert).

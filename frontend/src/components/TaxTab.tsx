@@ -536,7 +536,9 @@ function TraderCriteria({ data, money }: { data: TaxReport; money: Money }) {
 
 export function TaxTab() {
   const money: Money = useFormatCurrency()
-  const currentYear = new Date().getFullYear()
+  // The server's year (review item T8): it caps `year` by the UTC date, and a browser in
+  // Zurich asked for the new year from 00:00 local, an hour early — "Failed to load".
+  const currentYear = new Date().getUTCFullYear()
   const [year, setYear] = useState(currentYear)
 
   // Shares Dashboard's query key, so TanStack Query serves it from cache rather than
@@ -547,7 +549,14 @@ export function TaxTab() {
   const inceptionYear = contributions?.first_contribution_date
     ? Number(contributions.first_contribution_date.slice(0, 4))
     : FALLBACK_FIRST_TAX_YEAR
-  const firstTaxYear = Math.min(inceptionYear, FALLBACK_FIRST_TAX_YEAR)
+  // No year before the move to Switzerland (review item T8): those reports are empty.
+  const residencyYear = settings?.swiss_tax_residency_from
+    ? Number(settings.swiss_tax_residency_from.slice(0, 4))
+    : null
+  const firstTaxYear = Math.max(
+    Math.min(inceptionYear, FALLBACK_FIRST_TAX_YEAR),
+    Math.min(residencyYear ?? 0, currentYear),
+  )
 
   const years: number[] = []
   for (let y = currentYear; y >= firstTaxYear; y--) years.push(y)
