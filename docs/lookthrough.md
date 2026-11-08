@@ -308,6 +308,24 @@ The remaining estimate is the tile label's *fit*: SVG text cannot be measured be
 (`NU HOLDINGS LTD/CAYMAN ISL-A`). Budgeting for mixed case put `ARISTA NETWOR…` over both edges
 of its own tile. Under-filling costs a character; overflowing costs the tile boundary.
 
+### Fundamentals of what you own
+
+`GET /api/portfolio/lookthrough/fundamentals` (`app/services/lookthrough_fundamentals.py`,
+review item R2, 2026-11-08): P/E, revenue and EPS growth, operating and FCF margin of what the
+account owns, through its funds as well as directly, over the look-through's companies with SEC
+figures on the Company tab. A row reaches a company by ISIN (`sec_companies.isin`, then each held
+listing's `security_ciks` row); its figures are the overview's own (`key_figures`). **Weighted by
+share-equivalents**: the account's value in a company times the company's TTM figure over its market
+cap is the owned earnings or revenue, a ratio, so the base currency and the reporting currency never
+meet. P/E = covered value over owned earnings — a loss lowers the earnings rather than vanishing as
+an absent P/E would; growth = the owned figure now against the same share-equivalents a year before
+(`revenue_yoy`, and `eps_yoy` because a share-equivalent holds per-share earnings); margins = owned
+profit over owned revenue. **Coverage is a figure**: the share of the companies' value whose earnings
+yield is known — non-US companies, funds without a basket and the tail past `COMPANY_LIMIT_MAX` are
+the rest, never renormalised onto. Each figure is null when no covered company gives it. One collapsed
+card at the bottom of the tab (`LookthroughFundamentalsCard`), asked for only once opened: the
+look-through itself plus about six queries a covered company.
+
 ### One fundness predicate, keyed on ISIN
 
 `ETF_ALLOCATIONS` entries now declare `"isins": [...]`, and `fund_isins()` /

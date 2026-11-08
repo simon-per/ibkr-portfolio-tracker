@@ -13,6 +13,7 @@ import { drawdownColumns } from '../AnalyticsTab'
 import { projectionColumns } from '../ForecastTab'
 import { forecastMonthColumns } from '../DividendForecastTrend'
 import { EARNINGS_COLUMNS, metricsColumns } from '../FundamentalsTab'
+import { peerColumns } from '../CompanyPeersCard'
 import {
   BY_COUNTRY_COLUMNS, DIVIDEND_INCOME_COLUMNS, HOLDINGS_COLUMNS, REALIZED_COLUMNS,
 } from '../TaxTab'
@@ -164,6 +165,18 @@ const SPARSE_DRAWDOWN = {
 // Today's value unknown: every figure of the projection is.
 const SPARSE_PROJECTION = { year: 1, value: null, moneyIn: null, gains: null }
 
+const SPARSE_PEER = {
+  cik: 1, security_id: null, symbol: 'X', name: '', isin: null, held: false, currency: null,
+  key_stats: {
+    label: null, period_end: null, revenue: null, revenue_yoy: null, revenue_cagr_5y: null,
+    net_income: null, eps_diluted: null, eps_yoy: null, eps_cagr_5y: null, fcf: null,
+    fcf_per_share: null, fcf_yoy: null, gross_margin: null, operating_margin: null,
+    net_margin: null, fcf_margin: null, diluted_shares: null, shares_yoy: null,
+    dividends_per_share: null, payout_ratio: null, pe_ratio: null, market_cap: null,
+    net_cash: null, enterprise_value: null, ev_ebit: null, ps_ratio: null,
+  },
+}
+
 const SPARSE_FUNDAMENTALS = {
   security_id: 1, symbol: 'X', description: '', exchange: null, currency: 'USD',
   quote_type: null, trailing_pe: null, forward_pe: null, peg_ratio: null,
@@ -244,6 +257,7 @@ const FAMILY: Array<[string, Column<never, string>[], unknown]> = [
   ['Forecast projection', projectionColumns(money) as never, SPARSE_PROJECTION],
   ['Fundamentals metrics', metricsColumns('€') as never, SPARSE_FUNDAMENTALS],
   ['Earnings history', EARNINGS_COLUMNS as never, SPARSE_EARNINGS],
+  ['Company peers', peerColumns() as never, SPARSE_PEER],
   ['Look-through funds', fundColumns({ formatCurrency: money }) as never, SPARSE_FUND_COVERAGE],
   ['Tax dividend income', DIVIDEND_INCOME_COLUMNS(money) as never, SPARSE_TAX_DIVIDEND],
   ['Tax by country', BY_COUNTRY_COLUMNS(money) as never, SPARSE_TAX_COUNTRY],

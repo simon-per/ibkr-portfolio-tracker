@@ -34,7 +34,7 @@ export default defineConfig([
             'activityColumns', 'drillDownColumns', 'drawdownColumns', 'projectionColumns',
             'metricsColumns', 'EARNINGS_COLUMNS', 'DIVIDEND_INCOME_COLUMNS',
             'BY_COUNTRY_COLUMNS', 'REALIZED_COLUMNS', 'HOLDINGS_COLUMNS',
-            'forecastMonthColumns',
+            'forecastMonthColumns', 'peerColumns',
           ],
         },
       ],

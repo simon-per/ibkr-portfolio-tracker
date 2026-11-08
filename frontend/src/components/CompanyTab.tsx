@@ -65,6 +65,7 @@ import { CHART_GRID_PROPS, CHART_TOOLTIP_LABEL_STYLE, CHART_TOOLTIP_STYLE } from
 import { robustlyCapped, zeroBasedTicks, type Axis } from '@/lib/niceTicks'
 import { displayName } from '@/lib/securityName'
 import { TONE_CHIP, TONE_TEXT, type Tone } from '@/lib/tone'
+import { CompanyPeersCard } from './CompanyPeersCard'
 import { useIsCompact } from '@/lib/useMediaQuery'
 import {
   ABSENT,
@@ -842,6 +843,9 @@ export function CompanyTab() {
                   ))
                 : <ChartSkeletons />}
             </div>
+            {data?.profile.industry && (
+              <CompanyPeersCard key={data.cik} cik={data.cik} industry={data.profile.industry} />
+            )}
             </>
           )}
         </div>

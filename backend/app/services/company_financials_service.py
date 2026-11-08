@@ -146,6 +146,10 @@ PRICE_MATCH_DAYS = 7
 # A newest close older than this gives no current P/E: two missed weekly price passes.
 PRICE_MAX_AGE_DAYS = 14
 SPLIT_RATIO_TOLERANCE = 0.005
+# The Peers card (`peers`): the four-digit industry unless it holds fewer than this many
+# other companies the tab lists, then the three-digit group; at most this many rows.
+PEERS_MIN = 4
+PEERS_MAX = 15
 # How near a filed split (`eps_basis`) a Yahoo split of its ratio must fall to be the same
 # one: Yahoo's ratio is the exchange's, the filings' a snapped vote.
 FILED_SPLIT_SLACK_DAYS = 14
@@ -1067,22 +1071,99 @@ class CompanyFinancialsService:
                 out[listing.id] = track
         return out
 
-    async def get_financials(
-        self,
-        company: SecCompany,
-        period: str = DEFAULT_PERIOD,
-        range_key: str = DEFAULT_RANGE,
-    ) -> Dict[str, Any]:
+    async def _priced(self, company: SecCompany) -> Dict[str, Any]:
+        """
+        One company's stored rows, coverage, held listing and closes — as quoted and on the
+        figures' split basis — and today's close for the multiples (None past
+        `PRICE_MAX_AGE_DAYS`). The one path to a company's key figures: the overview and
+        the Peers card both read them here (`tests/test_company_peers.py`).
+        """
         rows = await self.repo.rows_for(company.cik)
         coverage = (await self.repo.coverage([company.cik])).get(company.cik)
         listing = (await self._held_listings([company.cik])).get(company.cik)
-        identity = self._identity(company, listing)
         currency = coverage["currency"] if coverage else None
         closes = await self._closes(company.cik, rows, currency, listing)
         prices = await self._on_eps_basis(company.cik, rows, closes)
         current = None
         if prices and (utc_today() - prices[-1][0]).days <= PRICE_MAX_AGE_DAYS:
             current = prices[-1][1]
+        return {
+            "rows": rows,
+            "coverage": coverage,
+            "listing": listing,
+            "currency": currency,
+            "closes": closes,
+            "prices": prices,
+            "current": current,
+        }
+
+    async def key_figures(self, company: SecCompany) -> Tuple[Optional[str], Dict[str, Any]]:
+        """A company's reporting currency and the overview's key figures, by the one path
+        (`_priced`, `key_stats`): the Peers card and the look-through's fundamentals."""
+        priced = await self._priced(company)
+        return priced["currency"], key_stats(priced["rows"], priced["current"])
+
+    async def peers(self, company: SecCompany) -> Dict[str, Any]:
+        """
+        The Peers card (review item R1, 2026-11-08): the companies the tab lists in this
+        one's SEC industry (`sic`), and when that holds fewer than `PEERS_MIN` others, in its
+        three-digit group. Each with the overview's key figures (`_priced`, `key_stats`),
+        largest TTM revenue first, at most `PEERS_MAX` with the company itself always
+        among them. No industry is no peers.
+        """
+        out: Dict[str, Any] = {
+            "cik": company.cik,
+            "sic": company.sic,
+            "industry": company.sic_description,
+            "widened": False,
+            "peers": [],
+        }
+        if company.sic is None:
+            return out
+        listed = {c["cik"] for c in await self.list_companies()}
+        others = [
+            c
+            for c in (await self.repo.companies(listed)).values()
+            if c.cik != company.cik and c.sic is not None
+        ]
+        same = [c for c in others if c.sic == company.sic]
+        if len(same) < PEERS_MIN:
+            out["widened"] = True
+            same = [c for c in others if c.sic // 10 == company.sic // 10]
+        members = [company, *same]
+        held = await self._held_listings([c.cik for c in members])
+        rows = []
+        for member in members:
+            currency, stats = await self.key_figures(member)
+            rows.append(
+                {
+                    **self._identity(member, held.get(member.cik)),
+                    "currency": currency,
+                    "key_stats": stats,
+                }
+            )
+        mine, rest = rows[0], rows[1:]
+        rest.sort(
+            key=lambda r: (
+                r["key_stats"]["revenue"] is None,
+                -(r["key_stats"]["revenue"] or 0),
+                r["symbol"],
+            )
+        )
+        out["peers"] = [mine, *rest[: PEERS_MAX - 1]]
+        return out
+
+    async def get_financials(
+        self,
+        company: SecCompany,
+        period: str = DEFAULT_PERIOD,
+        range_key: str = DEFAULT_RANGE,
+    ) -> Dict[str, Any]:
+        priced = await self._priced(company)
+        rows, coverage, listing = priced["rows"], priced["coverage"], priced["listing"]
+        currency, closes, prices = priced["currency"], priced["closes"], priced["prices"]
+        current = priced["current"]
+        identity = self._identity(company, listing)
         warnings: List[str] = []
         if not rows:
             warnings.append(

@@ -146,7 +146,24 @@ the same list (101 lines, GOOG and GOOGL one company; all 101 resolve to SEC tic
 2026-10-25). Equity rows only, **whitelisted** (`INVESTED_ASSET_CLASSES`): QQQM's money-market
 fund, futures and cash lines are no companies — and not `counts_as_invested`, whose fund marker
 would admit the money-market fund. Foreign private issuers in the index (ASML, AZN, PDD, ARM, …)
-get their CIK and then a miss, like a held one.
+get their CIK and then a miss, like a held one. A line QQQM publishes with a CINS and no ISIN
+(Linde, Seagate) takes the ISIN the identity store gives its share-class FIGI (`_isins_of_figis`),
+or `/companies` carried no ISIN for it and a look-through row of Linde — which only ISINs name —
+linked nowhere (review item R5).
+
+**Named elsewhere** — `CompanyFinancialsSync.named_elsewhere` (review item R5, 2026-11-08;
+**owner's approval 2026-11-07** for the requests, CLAUDE.md rule 1): 37 of the look-through's top
+100 rows linked nowhere. On top of the index's capped hundred (`Constituent.capped`), the pass takes
+the look-through's heaviest `NAMED_LOOKTHROUGH` (100) companies **with a US ISIN**, under the
+ticker the stored baskets most often give that ISIN, and the watchlist's US tickers (no exchange
+suffix). A US ISIN rather than any ticker the SEC lists: a foreign line's ticker can name another
+company there (Roche's ROG is Rogers Corp's). A held company is in scope already; one named twice
+is one company. Measured budget, approved: about twenty more companies, so about twenty more
+companyfacts requests a week, about twenty more Yahoo weekly-close requests every Sunday
+(`company_price_sync`), and the Yahoo profile rotation about 20% longer (`company_profile_sync`).
+They are stamped like the index's, so every reader of the stamp (the picker, the price pass, the
+profile chunk) takes them with no further change. Irish-domiciled 10-K filers outside the index
+(Accenture, Medtronic, Eaton) carry no US ISIN and stay without a page (accepted).
 
 - **A constituent nobody holds gets a `sec_companies` row and never a `securities` row**: every
   Yahoo loop reads `securities`, and a hundred new rows there would be a hundred new price
@@ -689,6 +706,21 @@ filings' `currency`.
 - **`series.price`** (`price_series`): the market closes shaped like any series, the range counted
   back from the newest close, each point's YoY and the CAGRs by the same rules, `label` = the date.
   The Period toggle does not apply.
+
+## Peers
+
+`GET /api/company-financials/{cik}/peers` (`CompanyFinancialsService.peers`, review item R1,
+2026-11-08): the companies the tab lists (`list_companies`'s scope) in the company's SEC industry
+(`sec_companies.sic`, filled by the Sunday pass's `submissions` read), and when that holds fewer
+than `PEERS_MIN` (4) others, its three-digit group (`sic // 10`, `widened`). The company first,
+then the rest by TTM revenue, largest first, at most `PEERS_MAX` (15) rows. **Each row's figures are
+the overview's own** — `_priced` (rows, closes on the split basis, today's close) and `key_stats`,
+the one path `get_financials` reads too; `tests/test_company_peers.py` compares every peer's
+`key_stats` with its own overview's. No industry is no peers. On the tab: a collapsed card under the
+charts (`CompanyPeersCard`), shown only when the profile names an industry, that asks the server
+only once opened (about six queries a peer); the industry and `SIC 3674` (or `SIC 367x` widened)
+on its header, a sortable table (`peerColumns`, in `tableFamily.test.tsx`) whose rows link through
+`CompanyLink`. Figures stay in each company's reporting currency, as everywhere on the tab.
 
 ## Known gaps and out of scope
 
