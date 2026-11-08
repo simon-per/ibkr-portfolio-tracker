@@ -1,4 +1,4 @@
-from sqlalchemy import String, ForeignKey, Numeric, Date, Index, UniqueConstraint
+from sqlalchemy import String, ForeignKey, Numeric, Date, DateTime, Index, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column
 from sqlalchemy.sql import func
 from datetime import datetime, date
@@ -37,6 +37,12 @@ class Trade(Base):
     )
     symbol: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
     trade_date: Mapped[date] = mapped_column(Date, nullable=False, index=True)
+    #: When IBKR executed it (Flex ``dateTime``), naive UTC. ``trade_date`` is the
+    #: exchange-local day, which for an Asian session is the day after the US Eastern
+    #: evening it executed in; a lot opened by this trade carries the same instant as its
+    #: ``openDateTime`` and takes ``trade_date`` from here (`date_lots_by_their_buys`).
+    #: NULL on a row stored before 2026-11-08 until a statement re-delivers it.
+    executed_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
     buy_sell: Mapped[str] = mapped_column(String(16), nullable=False)  # BUY / SELL / CANCELBUY / CANCELSELL
     quantity: Mapped[Decimal] = mapped_column(Numeric(18, 6), nullable=False)  # signed: buys +, sells -
     price: Mapped[Optional[Decimal]] = mapped_column(Numeric(18, 6), nullable=True)  # tradePrice

@@ -4,7 +4,7 @@ Fetches and parses securities and tax lot data from Interactive Brokers.
 Focuses on securities only - ignores dividends, cash, and other transactions.
 """
 from typing import List, Dict, Optional, Tuple
-from datetime import datetime, date
+from datetime import datetime, date, timezone
 from decimal import Decimal
 import asyncio
 import logging
@@ -259,7 +259,7 @@ INGESTED_ATTRS: Dict[str, frozenset] = {
         "symbol",
     }),
     "Trade": frozenset({
-        "assetCategory", "buySell", "conid", "currency", "fifoPnlRealized",
+        "assetCategory", "buySell", "conid", "currency", "dateTime", "fifoPnlRealized",
         "ibCommission", "proceeds", "quantity", "reportDate", "symbol", "tradeDate",
         "tradeID", "tradePrice", "transactionID",
     }),
@@ -331,6 +331,20 @@ def _enum_name(value) -> Optional[str]:
     if value is None:
         return None
     return getattr(value, "name", None) or str(value)
+
+
+def _ibkr_instant(value) -> Optional[datetime]:
+    """
+    A Flex ``dateTime``/``openDateTime`` as naive UTC, the one form a stored timestamp
+    takes here; None for a bare date or nothing. Flex states times in US Eastern. Only
+    ever compared with another instant converted the same way — a lot's opening with
+    the trade that opened it — so the zone matters for the stored value's label, never
+    for the match.
+    """
+    if not isinstance(value, datetime):
+        return None
+    aware = value if value.tzinfo else value.replace(tzinfo=flex_generation.ET)
+    return aware.astimezone(timezone.utc).replace(tzinfo=None)
 
 
 def _as_date(value) -> Optional[date]:
@@ -907,6 +921,9 @@ class IBKRService:
                 # date on cost_basis_eur, deployment collapsed into one month,
                 # and XIRR booking every purchase on the same day.
                 open_date = getattr(position, 'openDateTime', None)
+                # The instant, for `date_lots_by_their_buys`: the BUY executed at it
+                # carries the lot's real (exchange-local) trade date.
+                opened_at = _ibkr_instant(open_date)
                 if isinstance(open_date, datetime):
                     open_date = open_date.date()
 
@@ -926,6 +943,7 @@ class IBKRService:
                 taxlot = {
                     'conid': conid,
                     'open_date': open_date,
+                    'opened_at': opened_at,
                     'quantity': Decimal(str(quantity)),
                     'cost_basis': Decimal(str(abs(cost_basis_money))),  # Total cost
                     'price_per_unit': Decimal(str(abs(cost_basis_price))),  # Price per share
@@ -974,6 +992,7 @@ class IBKRService:
                 'conid': str(conid),
                 'symbol': getattr(t, 'symbol', None),
                 'trade_date': trade_date,
+                'executed_at': _ibkr_instant(getattr(t, 'dateTime', None)),
                 'buy_sell': _enum_name(getattr(t, 'buySell', None)) or 'UNKNOWN',
                 'quantity': _dec(getattr(t, 'quantity', None)) or Decimal("0"),
                 'price': _dec(getattr(t, 'tradePrice', None)),

@@ -149,6 +149,18 @@ rather than realigning. One stray row silently stamped **every later lot** with 
 ibflex 0.15 does parse the field (`parse_element_attr` returns a `datetime`); the comment claiming
 otherwise was wrong. Don't reintroduce index matching. Tests: `tests/test_ibkr_parsers.py`.
 
+**A lot opened by a BUY is dated by that trade** (review item C1, 2026-11-08). `openDateTime` is US
+Eastern; `tradeDate` is exchange-local, and the cash leaves on it. A KRX buy at 09:05 in Seoul executes
+at 20:05 the evening before in New York, so the lot entered the holdings a day before its cash left:
+each SK Hynix lot a day before its trade, the Total Value up by the purchase for a day and every range starting that day anchored on it. The ingest stores each trade's
+`dateTime` as `trades.executed_at` (naive UTC, migration `e5a7c9d1f3b4`), and
+`date_lots_by_their_buys` gives a lot whose `openDateTime` is a BUY's instant that trade's
+`trade_date` — from the table, so the date holds once the trade has left the statement window. A lot no
+purchase with an instant explains (a transfer, a split, a trade stored before the instants were) keeps
+its `openDateTime` date. The first sync that redates a lot moves its snapshot twin to the new date
+before the diff (`_redated_snapshot`): seen vanishing from one day it would be booked as a sale
+whenever the security also had a real sale in the window. Tests: `tests/test_lot_trade_date.py`.
+
 `restamp_unsourced_closed_lots()` then fixes lots closed *before* `<Trades>` existed: those carry the
 date the sync **noticed** the drop, not the sale date (CRM and NFLX read 2026-04-17 for a 2026-03-13
 sale). A lot is only re-stamped when exactly one SELL for that security matches its quantity and isn't

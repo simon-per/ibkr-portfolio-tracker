@@ -21,9 +21,9 @@ net quantity (used until issue #54) a rebuy cannot hide a sale.
 """
 import logging
 from collections import defaultdict
-from datetime import date
+from datetime import date, datetime
 from decimal import Decimal
-from typing import Dict, List, Optional, Set
+from typing import Dict, List, Optional, Set, Tuple
 
 from sqlalchemy import and_, select
 
@@ -196,11 +196,15 @@ async def ingest_flex_statement(db, flex_data: Dict) -> Dict:
             f"accruals were not applied"
         )
     else:
+        taxlots_data = await ibkr_service.extract_taxlots(flex_data)
+        # A lot opened by a BUY is dated by that trade (the trades are persisted above,
+        # so this statement's own are among them).
+        date_lots_by_their_buys(taxlots_data, await trade_repo.buy_dates_by_instant())
         recon = await reconcile_taxlots(
             taxlot_repo=taxlot_repo,
             currency_service=currency_service,
             conid_to_security_id=conid_to_security_id,
-            taxlots_data=await ibkr_service.extract_taxlots(flex_data),
+            taxlots_data=taxlots_data,
             report_to_date=to_date,
             trade_repo=trade_repo,
             corp_action_repo=corp_action_repo,
@@ -712,6 +716,61 @@ POSITION_CREATING_ACTIONS = {
 }
 
 
+def date_lots_by_their_buys(
+    taxlots_data: List[Dict], buys: Dict[Tuple[str, datetime], date]
+) -> int:
+    """
+    Give each lot opened by a BUY that trade's own ``trade_date``, in place; returns how
+    many changed. The lot keeps the date IBKR's ``openDateTime`` gave it as
+    ``statement_open_date``, which the reconcile needs once (`_redated_snapshot`).
+
+    **Why** (review item C1, 2026-11-08): ``openDateTime`` is US Eastern and the trade's
+    ``tradeDate`` exchange-local. A KRX buy at 09:05 in Seoul executes at 20:05 the
+    evening before in New York, so the lot entered the holdings a day before its cash
+    left (which goes by the trade date): the Total Value spiked by the purchase for a day,
+    and every range starting that day anchored on it. ``buys`` is
+    `TradeRepository.buy_dates_by_instant`, keyed on the instant both rows carry. A lot
+    whose purchase is not on record with an instant (a transfer, a split, a trade stored
+    before the instants were) keeps its ``openDateTime`` date.
+    """
+    changed = 0
+    for lot in taxlots_data:
+        opened_at = lot.get("opened_at")
+        traded = buys.get((str(lot["conid"]), opened_at)) if opened_at else None
+        if traded is not None and traded != lot["open_date"]:
+            lot["statement_open_date"] = lot["open_date"]
+            lot["open_date"] = traded
+            changed += 1
+    if changed:
+        logger.info(f"Dated {changed} lot(s) by the trade that opened them")
+    return changed
+
+
+def _redated_snapshot(snap_lots: List[Dict], incoming_lots: List[Dict]) -> List[Dict]:
+    """
+    The snapshot with each lot stored under its ``openDateTime`` date moved to the trade
+    date its incoming counterpart now carries (`date_lots_by_their_buys`), so the sync
+    that first dates a lot by its trade does not see it vanish from one day and appear on
+    the next. Seen as a sale it would be booked as one whenever the security also had a
+    real sale in the window. A snapshot lot moves only when nothing incoming sits on its
+    own date at its price, and an incoming lot redated from that date at that price does;
+    every later sync finds the dates equal and moves nothing.
+    """
+    on_own_date = {(lot["open_date"], lot["price_per_unit"]) for lot in incoming_lots}
+    redated = {
+        (lot["statement_open_date"], lot["price_per_unit"]): lot["open_date"]
+        for lot in incoming_lots
+        if lot.get("statement_open_date") is not None
+    }
+    out = []
+    for lot in snap_lots:
+        key = (lot["open_date"], lot["price_per_unit"])
+        if key not in on_own_date and key in redated:
+            lot = {**lot, "open_date": redated[key]}
+        out.append(lot)
+    return out
+
+
 def _missing_per_lot(snap_lots: List[Dict], incoming_lots: List[Dict]) -> List[Decimal]:
     """
     How many shares of each snapshot lot the incoming statement no longer holds,
@@ -918,7 +977,9 @@ async def reconcile_taxlots(
         }
 
         new_open_lots.append(taxlot_data)
-        incoming_lots[security_id].append(taxlot_data)
+        incoming_lots[security_id].append(
+            {**taxlot_data, "statement_open_date": lot_data.get("statement_open_date")}
+        )
         taxlots_count += 1
         total_cost_basis_eur += cost_basis_eur
         incoming_qty[security_id] += lot_data["quantity"]
@@ -951,7 +1012,9 @@ async def reconcile_taxlots(
         security_id_to_conid = {sid: str(conid) for sid, conid in rows if conid is not None}
 
     for security_id, snap_lots in snapshot.items():
-        missing = _missing_per_lot(snap_lots, incoming_lots.get(security_id, []))
+        incoming_here = incoming_lots.get(security_id, [])
+        snap_lots = _redated_snapshot(snap_lots, incoming_here)
+        missing = _missing_per_lot(snap_lots, incoming_here)
         sold_qty = sum(missing, Decimal("0"))
 
         if sold_qty <= 0:
