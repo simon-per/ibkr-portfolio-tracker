@@ -382,6 +382,10 @@ class FundamentalMetricsResponse(BaseModel):
     price_to_book: Optional[float] = None
     revenue_growth: Optional[float] = None
     earnings_growth: Optional[float] = None
+    # What the two above compare: "ttm" (the last four quarters against the four before,
+    # from the SEC filings) or "quarter" (the latest quarter against the same one a year
+    # before, Yahoo's); None when neither is known (review item Y1).
+    growth_basis: Optional[str] = None
     fwd_revenue_growth: Optional[float] = None
     fwd_eps_growth: Optional[float] = None
     profit_margins: Optional[float] = None
@@ -449,6 +453,7 @@ class WatchlistItemResponse(BaseModel):
     ev_to_ebitda: Optional[float] = None
     revenue_growth: Optional[float] = None
     earnings_growth: Optional[float] = None
+    growth_basis: Optional[str] = None          # as on FundamentalMetricsResponse
     fwd_revenue_growth: Optional[float] = None
     fwd_eps_growth: Optional[float] = None
     profit_margins: Optional[float] = None

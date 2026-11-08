@@ -121,11 +121,17 @@ async def company_tab_ciks(db: AsyncSession, ciks: Iterable[int]) -> set:
 
 
 class TickerSource:
-    """Where a watchlist ticker's company figures and counts come from."""
+    """Where a watchlist ticker's company figures, counts and filed growth come from."""
 
-    def __init__(self, figures=None, counts: Optional[Dict[str, int]] = None):
+    def __init__(
+        self,
+        figures=None,
+        counts: Optional[Dict[str, int]] = None,
+        growth: Optional[Dict] = None,
+    ):
         self.figures = figures
         self.counts = counts
+        self.growth = growth
 
 
 async def sources_for_tickers(
@@ -152,8 +158,9 @@ async def sources_for_tickers(
             ).scalars()
         }
         counts = await counts_for_securities(db, held_here.values())
+        growth = await growth_by_security(db, held_here.values())
         for ticker, sid in held_here.items():
-            out[ticker] = TickerSource(metrics.get(sid), counts.get(sid))
+            out[ticker] = TickerSource(metrics.get(sid), counts.get(sid), growth.get(sid))
     rest = wanted - set(held_here)
     if rest:
         upper = func.upper(SecCompany.ticker)
@@ -164,6 +171,7 @@ async def sources_for_tickers(
         )
         in_scope = await company_tab_ciks(db, ciks.values())
         profiles = await CompanyFinancialsRepository(db).yahoo_profiles(in_scope)
+        growth = await edgar_ttm_growth(db, in_scope)
         for ticker, cik in ciks.items():
             profile = profiles.get(cik)
             if (
@@ -171,7 +179,7 @@ async def sources_for_tickers(
                 and profile is not None
                 and profile.fetched_at is not None
             ):
-                out[ticker] = TickerSource(profile, counts_of(profile))
+                out[ticker] = TickerSource(profile, counts_of(profile), growth.get(cik))
     return out
 
 
@@ -197,3 +205,79 @@ def company_figures(figures) -> Dict[str, object]:
     """The watchlist columns a stored figures row fills, None included: the company's
     figure, absent where it has none, never the watchlist's own `.info` beside it."""
     return {column: getattr(figures, field, None) for column, field in WATCHLIST_FIGURES.items()}
+
+
+#: `growth_basis` on a served row: what its revenue and EPS growth compare.
+GROWTH_TTM = "ttm"          # the last four quarters against the four before (SEC filings)
+GROWTH_QUARTER = "quarter"  # the latest quarter against the same one a year before (Yahoo)
+
+
+async def edgar_ttm_growth(db: AsyncSession, ciks: Iterable[int]) -> Dict[int, Dict]:
+    """
+    CIK -> ``{"revenue_growth", "earnings_growth"}``, the TTM-over-TTM growth of revenue and
+    diluted EPS from the company's stored SEC figures (`key_stats`' `revenue_yoy` and
+    `eps_yoy`), for every CIK with stored figures. No request of any kind.
+
+    **Why** (review item Y1, 2026-11-08): yfinance's quarterly timeseries returns at most
+    five quarters, so the 8-quarter TTM tier of `ttm_growth` never runs and the "TTM"
+    growth Yahoo's rows carry is the latest quarter against the same quarter a year
+    before — NVDA's revenue +105.85% where its TTM is +83.4%. Where the filings are
+    stored, they answer; elsewhere the Yahoo figure stays and says it is a quarter's.
+    """
+    from app.services.company_financials_service import key_stats
+
+    repo = CompanyFinancialsRepository(db)
+    out: Dict[int, Dict] = {}
+    for cik in set(ciks):
+        rows = await repo.rows_for(cik)
+        if not rows:
+            continue
+        stats = key_stats(rows)
+        out[cik] = {
+            "revenue_growth": stats["revenue_yoy"],
+            "earnings_growth": stats["eps_yoy"],
+        }
+    return out
+
+
+async def growth_by_security(
+    db: AsyncSession, security_ids: Iterable[int]
+) -> Dict[int, Dict]:
+    """Security id -> its company's `edgar_ttm_growth`, for securities with a CIK."""
+    wanted = list(security_ids)
+    if not wanted:
+        return {}
+    cik_of = dict((await db.execute(
+        select(SecurityCik.security_id, SecurityCik.cik).where(
+            SecurityCik.security_id.in_(wanted), SecurityCik.cik.isnot(None)
+        )
+    )).all())
+    growth = await edgar_ttm_growth(db, cik_of.values())
+    return {sid: growth[cik] for sid, cik in cik_of.items() if cik in growth}
+
+
+def served_growth(
+    revenue: Optional[float], earnings: Optional[float], edgar: Optional[Dict]
+) -> Dict:
+    """A row's ``revenue_growth``, ``earnings_growth`` and ``growth_basis``: the filings'
+    TTM growth where the company's are stored, else Yahoo's quarter, None when neither."""
+    if edgar is not None:
+        return {**edgar, "growth_basis": GROWTH_TTM}
+    basis = GROWTH_QUARTER if revenue is not None or earnings is not None else None
+    return {"revenue_growth": revenue, "earnings_growth": earnings, "growth_basis": basis}
+
+
+def source_columns(source: Optional[TickerSource]) -> Dict[str, object]:
+    """
+    The watchlist columns a ticker's company source fills (`company_figures`), its revenue
+    and EPS growth the filings' TTM where stored (`served_growth`), and `growth_basis`.
+    Empty for a ticker with no stored source: the row's own `.info` answers.
+    """
+    if source is None:
+        return {}
+    columns = company_figures(source.figures) if source.figures is not None else {}
+    if source.growth is not None or columns:
+        columns.update(served_growth(
+            columns.get("revenue_growth"), columns.get("earnings_growth"), source.growth
+        ))
+    return columns

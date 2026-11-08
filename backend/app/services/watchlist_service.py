@@ -75,7 +75,7 @@ def watchlist_rating(
 
 
 from app.services.company_yahoo import (  # noqa: E402 - below the module helpers on purpose
-    TickerSource, company_figures, counts_of, sources_for_tickers,
+    TickerSource, counts_of, source_columns, sources_for_tickers,
 )
 
 
@@ -509,9 +509,8 @@ class WatchlistService:
         # A held or Company-tab company's figures are the ones its own rows store, so the
         # watchlist, Fundamentals and the overview cannot disagree about them (review item
         # DR1); `.info` keeps the price and the technicals.
-        source = sources.get(yahoo_ticker.upper())
-        if source is not None and source.figures is not None:
-            data.update(company_figures(source.figures))
+        data.update(source_columns(sources.get(yahoo_ticker.upper())))
+        data.pop("growth_basis", None)
         if slow:
             data["estimates_synced_at"] = utcnow()
         # Kept when `.info` lacks it, so a missing field never re-arms `new_quarter`; and

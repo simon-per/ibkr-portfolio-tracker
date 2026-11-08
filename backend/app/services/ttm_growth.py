@@ -13,6 +13,13 @@ security could report different earnings growth on ``/api/fundamentals/portfolio
 
 Neither copy touched ``self``, so this is a plain function.
 
+**In practice it is a quarter's growth** (review item Y1, 2026-11-08): yfinance's quarterly
+timeseries returns at most five quarters, so the 8-quarter TTM tier below rarely runs and
+the figure is the latest quarter against the same one a year before — and so is the
+`.info` fallback. Where a company's SEC filings are stored, the served rows replace it
+with their TTM-over-TTM growth (`company_yahoo.served_growth`, `growth_basis: "ttm"`);
+elsewhere it is served as what it is (`growth_basis: "quarter"`).
+
 **No positive base, no percentage** (2026-10-14). The division used to be by
 ``abs(prior)``, guarding only ``prior == 0``, so a company moving from a loss to a profit
 reported growth: -0.01 to +0.50 EPS read as **+5,100%**, painted green and scored as

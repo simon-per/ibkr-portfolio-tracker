@@ -1,4 +1,4 @@
-import { useState, useMemo, useEffect, useRef } from 'react'
+import { useState, useMemo, useEffect, useRef, type ReactNode } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { Card, CardContent } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
@@ -9,6 +9,7 @@ import { ABSENT, cn, formatDate, formatMultiple, formatShortDateTime, marketCapP
 import { useCurrencySymbol } from '@/lib/CurrencyContext'
 import { syncFreshness } from '@/lib/watchlistFreshness'
 import { api } from '@/lib/api'
+import { QuarterTag } from './QuarterTag'
 import type {
   FundamentalMetrics, EarningsCalendarItem, EarningsHistoryItem, FundamentalsStatus,
 } from '@/lib/api'
@@ -44,6 +45,11 @@ const SYNC_DEADLINE_MS = 15 * 60_000
 
 /** A status poll, stamped with when it was asked — so a poll can be placed after a click. */
 type StatusPoll = FundamentalsStatus & { askedAt: number }
+
+/** A growth figure, tagged `q` when it is the latest quarter's rather than TTM (Y1). */
+function growthCell(value: number | null, basis: FundamentalMetrics['growth_basis']): ReactNode {
+  return value != null && basis === 'quarter' ? <>{formatPct(value)}<QuarterTag /></> : formatPct(value)
+}
 
 function formatPct(value: number | null): string {
   if (value === null) return ABSENT
@@ -270,8 +276,8 @@ export function metricsColumns(currencySymbol: string): Column<FundamentalMetric
       sortKey: 'revenue_growth',
       align: 'right',
       tone: (row) => growthColor(row.revenue_growth),
-      hint: { description: 'Last 4 quarters vs the 4 before.' },
-      cell: (row) => formatPct(row.revenue_growth),
+      hint: { description: 'Revenue vs a year before; q: latest quarter' },
+      cell: (row) => growthCell(row.revenue_growth, row.growth_basis),
     },
     {
       key: 'earnings_growth',
@@ -280,8 +286,8 @@ export function metricsColumns(currencySymbol: string): Column<FundamentalMetric
       sortKey: 'earnings_growth',
       align: 'right',
       tone: (row) => growthColor(row.earnings_growth),
-      hint: { description: 'Last 4 quarters vs the 4 before.' },
-      cell: (row) => formatPct(row.earnings_growth),
+      hint: { description: 'EPS vs a year before; q: latest quarter' },
+      cell: (row) => growthCell(row.earnings_growth, row.growth_basis),
     },
     {
       key: 'fwd_revenue_growth',

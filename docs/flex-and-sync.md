@@ -760,6 +760,14 @@ dividend-adjusted, the stored closes are not, so the RSI can differ slightly aro
 *Budget* for a company over the five weekly runs: 7 × 5 = 35 requests before issue #11, now
 6 + 4 × 4 = 22, and 17 when held. A fund stays 4 a run (3 when held).
 
+**Revenue and EPS growth come from the filings where they are stored** (review item Y1,
+2026-11-08). yfinance returns at most five quarters, so the growth Yahoo's rows carry is the
+latest quarter against the same one a year before, though it was labelled TTM (NVDA's revenue
++105.85% against a TTM +83.4%). `/api/fundamentals/portfolio` and `/api/watchlist` serve a
+company's TTM-over-TTM growth from its stored SEC figures where there are any
+(`company_yahoo.served_growth`, no request), with `growth_basis: "ttm"`, and Yahoo's figure elsewhere
+with `"quarter"`, which the tables tag `q` (`tests/test_growth_basis.py`).
+
 **A forward P/E needs forward EPS in the trailing EPS's units** (review item Y5, 2026-11-08):
 `yahoo_estimates.forward_pe` is the one reader of `forwardPE`, and it and the forward-EPS growth
 fallback are refused when `forwardEps / trailingEps` sits outside 1/20–20 (`EPS_UNITS_BAND`) —

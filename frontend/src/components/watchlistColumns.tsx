@@ -7,6 +7,7 @@ import type { Column } from '@/components/ui/DataTable'
 import { AnalystRatingBadge } from './AnalystRatingBadge'
 import { CompanyLink } from './CompanyLink'
 import { TickerAvatar } from '@/components/ui/TickerAvatar'
+import { QuarterTag } from './QuarterTag'
 
 /**
  * The watchlist's eighteen columns, described once for both renderings.
@@ -120,6 +121,10 @@ export function pegOf(item: WatchlistItem): number | null {
 }
 
 const pct = (v: number | null) => (v != null ? `${(v * 100).toFixed(1)}%` : ABSENT)
+
+/** A growth figure, tagged `q` when it is the latest quarter's rather than TTM (Y1). */
+const growthCell = (v: number | null, basis: WatchlistItem['growth_basis']): ReactNode =>
+  v != null && basis === 'quarter' ? <>{pct(v)}<QuarterTag /></> : pct(v)
 const num = (v: number | null, dp = 1) => (v != null ? v.toFixed(dp) : ABSENT)
 
 /** The entry's logo by security or ISIN, else a monogram; the card title draws it too. */
@@ -368,10 +373,8 @@ export function watchlistColumns(deps: {
       shortHeader: 'Revenue growth',
       sortKey: 'revenue_growth',
       tone: (i) => colorClass(i.revenue_growth != null ? i.revenue_growth * 100 : null, true),
-      hint: {
-        description: 'TTM revenue growth',
-      },
-      cell: (i) => pct(i.revenue_growth),
+      hint: { description: 'Revenue vs a year before; q: latest quarter' },
+      cell: (i) => growthCell(i.revenue_growth, i.growth_basis),
     },
     {
       key: 'earnings_growth',
@@ -379,10 +382,8 @@ export function watchlistColumns(deps: {
       shortHeader: 'EPS growth',
       sortKey: 'earnings_growth',
       tone: (i) => colorClass(i.earnings_growth != null ? i.earnings_growth * 100 : null, true),
-      hint: {
-        description: 'TTM EPS growth',
-      },
-      cell: (i) => pct(i.earnings_growth),
+      hint: { description: 'EPS vs a year before; q: latest quarter' },
+      cell: (i) => growthCell(i.earnings_growth, i.growth_basis),
     },
     {
       key: 'fwd_revenue_growth',

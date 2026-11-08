@@ -17,6 +17,7 @@ from app.repositories.fundamentals_repository import (
 from app.repositories.security_repository import held
 from app.services.identity_service import companies_of_securities
 from app.services.allocation_service import allocation_from_info, apply_allocation
+from app.services.company_yahoo import growth_by_security, served_growth
 from app.services.market_cap import market_cap_to_base
 from app.services.peg_ratio import resolve_peg
 from app.services.safe_numbers import safe_float, safe_int
@@ -459,6 +460,10 @@ class FundamentalsService:
         # The tab shows and sorts the base-currency figure (`market_cap.py`).
         to_base = await market_cap_to_base(self.db)
 
+        # Revenue and EPS growth from the filings wherever a company's are stored: Yahoo's
+        # rows carry a quarter's, labelled TTM (`company_yahoo.served_growth`, Y1).
+        filed_growth = await growth_by_security(self.db, [s.id for s in securities])
+
         portfolio_data = []
         for sec in securities:
             m = metrics_map.get(sec.id)
@@ -495,6 +500,9 @@ class FundamentalsService:
                     # as local time, which the tab's as-of line prints.
                     'last_updated': utc_iso(m.last_updated),
                 })
+                entry.update(served_growth(
+                    m.revenue_growth, m.earnings_growth, filed_growth.get(sec.id)
+                ))
             else:
                 entry.update({
                     'quote_type': None,
@@ -519,6 +527,7 @@ class FundamentalsService:
                     'data_currency': None,
                     'last_updated': None,
                 })
+                entry.update(served_growth(None, None, filed_growth.get(sec.id)))
 
             portfolio_data.append(entry)
 

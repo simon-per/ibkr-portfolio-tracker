@@ -654,6 +654,8 @@ export interface SyncResponse {
   warnings?: string[];
 }
 
+export type GrowthBasis = 'ttm' | 'quarter'
+
 export interface FundamentalMetrics {
   security_id: number;
   symbol: string;
@@ -668,6 +670,12 @@ export interface FundamentalMetrics {
   price_to_book: number | null;
   revenue_growth: number | null;
   earnings_growth: number | null;
+  /**
+   * What the two growth figures compare: 'ttm' — the last four quarters against the four
+   * before, from the SEC filings — or 'quarter' — the latest quarter against the same one
+   * a year before, Yahoo's. Null when neither is known.
+   */
+  growth_basis?: GrowthBasis | null;
   fwd_revenue_growth: number | null;
   fwd_eps_growth: number | null;
   profit_margins: number | null;
@@ -755,6 +763,12 @@ export interface WatchlistItem {
   ev_to_ebitda: number | null;
   revenue_growth: number | null;
   earnings_growth: number | null;
+  /**
+   * What the two growth figures compare: 'ttm' — the last four quarters against the four
+   * before, from the SEC filings — or 'quarter' — the latest quarter against the same one
+   * a year before, Yahoo's. Null when neither is known.
+   */
+  growth_basis?: GrowthBasis | null;
   fwd_revenue_growth: number | null;
   fwd_eps_growth: number | null;
   profit_margins: number | null;

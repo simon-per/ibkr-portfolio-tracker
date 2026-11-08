@@ -5,7 +5,7 @@ from app.database import get_db
 from app.services.market_cap import market_cap_to_base
 from app.services.peg_ratio import read_time_peg
 from app.services.ticker_isin import isins_by_yahoo_ticker
-from app.services.company_yahoo import company_figures, counts_of
+from app.services.company_yahoo import GROWTH_QUARTER, counts_of, source_columns
 from app.services.watchlist_service import WatchlistService, watchlist_rating
 from app.single_flight import (
     PUBLIC_SYNC_COOLDOWN_SECONDS,
@@ -179,13 +179,9 @@ async def _responses(db: AsyncSession, items,
     stored = {t: s.counts for t, s in sources.items() if s.counts is not None}
     out = []
     for item in items:
-        source = sources.get(item.yahoo_ticker.upper())
-        figures = (
-            company_figures(source.figures)
-            if source is not None and source.figures is not None else {}
-        )
-        cap = figures.get("market_cap", item.market_cap) if figures else item.market_cap
-        cap_currency = figures.get("data_currency") if figures else item.data_currency
+        figures = source_columns(sources.get(item.yahoo_ticker.upper()))
+        cap = figures.get("market_cap", item.market_cap)
+        cap_currency = figures.get("data_currency", item.data_currency)
         out.append(_item_to_response(
             item, await to_base(cap, cap_currency),
             security_ids.get(item.yahoo_ticker.upper()), isins.get(item.yahoo_ticker.upper()),
@@ -236,6 +232,12 @@ def _item_to_response(item, market_cap_base=None, security_id=None,
         analyst_target=pick("analyst_target"),
         analyst_rating=rating,
         analyst_count=pick("analyst_count"),
+        # What the growth compares (`company_yahoo.served_growth`): the filings' TTM, else
+        # the row's own Yahoo figure, which is a quarter's (review item Y1).
+        growth_basis=f.get("growth_basis") if "growth_basis" in f else (
+            GROWTH_QUARTER
+            if item.revenue_growth is not None or item.earnings_growth is not None else None
+        ),
         buy_score=item.buy_score,
         # Through `utc_iso`, not a bare `isoformat()`: the tab prints this as the data's
         # as-of time, and a naive string is read by the browser as local time.
