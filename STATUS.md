@@ -467,8 +467,9 @@ Rough priority. Re-verify each `path:line` in code before fixing; lines move.
    goal run. The plan, the per-item evidence and the repro scripts are kept outside the repo
    (they quote account figures): `C:\Users\simon\Desktop\ibkr-review-2026-11-07\` (PLAN.md,
    findings-raw.md, GOAL.md, repros/). Owner decisions are in PLAN.md (Yahoo budget for ~20 more
-   Company pages approved). A /goal run is implementing it wave by wave, merged into `main`
-   locally; see *Watch after the next deploy*.
+   Company pages approved). A /goal run implemented all eight waves, merged into `main` locally
+   and not pushed; see *Watch after the next deploy*. Two items wait on a read this run could not
+   make: R6 (IFRS figures) and CO8's KLAC concept — both under *Needs a human*.
 1. **The last leftover from audit round 2** (not filed): KS 36's derivatives indicator needs the
    Flex ingest to keep non-STK trades. The rest shipped on 2026-11-07 (branch
    `harmonize-company-links`). Accumulating funds' Kursliste income is out of scope: the owner's
@@ -501,6 +502,9 @@ Rough priority. Re-verify each `path:line` in code before fixing; lines move.
 
 One line each, newest first; drop the oldest.
 
+- **2026-11-07/08 (/goal run of the 14-reviewer audit, waves 0–7)** — ~90 findings fixed across
+  safety, performance, dividends, the ledger, Yahoo, company data and features, look-through and
+  tax; one local branch per wave merged into `main`, nothing pushed; R6 blocked on an SEC read.
 - **2026-11-07 (improvements survey, branch `analyst-counts-and-freshness`)** — a live-site
   survey found one company's figures disagreeing across tabs; every rating now shows its
   analyst counts under one label (owner-approved watchlist `recommendations` budget), the
@@ -530,8 +534,3 @@ One line each, newest first; drop the oldest.
   market cap (balance-sheet or cover count, cross-checked against the diluted count); net cash
   with short-term investments (unknown where they stop being tagged, as NVDA's), EV, EV/EBIT.
 
-- **2026-10-25 (Company tab: figures and Nasdaq-100)** — key figures, four more series, CAGRs;
-  net cash built then dropped (cash excludes investments); figures re-keyed by CIK so 100
-  constituents need no `securities` rows; storage came in at 17.6 MB, not the 8–12 MB estimated;
-  an audit of every company's series fixed splits between filings (BKNG, CRWD, KLAC, NFLX), two
-  revenue concepts (CRWD, ODFL) and million-fold unit slips (PCAR, STX).
