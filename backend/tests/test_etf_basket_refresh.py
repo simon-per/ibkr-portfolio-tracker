@@ -108,7 +108,9 @@ def _parsed(fund_isin, adapter, as_of=TODAY, rows=2) -> ParsedBasket:
     return ParsedBasket(
         fund_isin=fund_isin, as_of_date=as_of, source="test", adapter=adapter,
         rows=[
-            ConstituentRow(line_no=n, name=f"New {n}", weight_pct=Decimal("2"),
+            # The whole fund in securities: below `MIN_BASKET_COVERAGE_PCT` a basket is
+            # refused at write (review item L1).
+            ConstituentRow(line_no=n, name=f"New {n}", weight_pct=Decimal(99) / rows,
                            isin=f"US00000000{n}9", asset_class="Equity")
             for n in range(1, rows + 1)
         ],
@@ -340,7 +342,7 @@ async def test_requests_per_evening_for_a_daily_feed_and_a_stalled_month_end_fun
             return _parsed(VT, adapter, as_of=vt_as_of)
         # A new file each day, dated the day before.
         basket = _parsed(fund_isin, adapter, as_of=fetched_on - timedelta(days=1))
-        basket.rows[0] = replace(basket.rows[0], weight_pct=Decimal(fetched_on.day))
+        basket.rows[0] = replace(basket.rows[0], name=f"New {fetched_on.day}")
         return basket
 
     replaced = {IWDA: 0, VT: 0}

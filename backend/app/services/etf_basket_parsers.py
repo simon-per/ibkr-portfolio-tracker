@@ -92,6 +92,11 @@ MIN_ROWS = 2
 # Rounding puts real files a hair over 100 (IWDA measures 100.01). Anything beyond this is a
 # unit error or a notional-weighted file, and is refused rather than clamped.
 MAX_TOTAL_WEIGHT_PCT = Decimal("101")
+# Below this share of the fund in securities, a basket is treated as *absent* rather than as
+# a fund holding mostly cash (`lookthrough_service._fund_status`): EMIM's real 98.04 is a
+# residual, a half-parsed file at 3 is not. `replace_basket` refuses one below it at write
+# (review item L1), or a partial parse took the place of a good stored basket.
+MIN_BASKET_COVERAGE_PCT = Decimal("80")
 
 
 class BasketParseError(Exception):

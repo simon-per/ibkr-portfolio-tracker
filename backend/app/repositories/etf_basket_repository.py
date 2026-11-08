@@ -13,6 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.clock import utcnow
 from app.models.etf_basket import ConstituentIdentifierMiss, EtfBasket, EtfHolding
+from app.services.etf_basket_parsers import MIN_BASKET_COVERAGE_PCT
 
 logger = logging.getLogger(__name__)
 
@@ -263,6 +264,9 @@ class EtfBasketRepository:
         - **An as-of that moves backwards.** Re-importing an older saved file would regress
           the basket while looking like a successful refresh. Equal as-of is allowed, so
           re-running an import is idempotent.
+        - **Securities below `MIN_BASKET_COVERAGE_PCT` of the fund** (review item L1): the
+          look-through reads such a basket as none, so storing it would only have thrown
+          away the good one it replaced, with no warning anywhere.
 
         **Identical content is not rewritten** (`basket_fingerprint` matches the stored one):
         only `checked_at` moves, and `unchanged` tells the caller there is nothing new for
@@ -279,6 +283,14 @@ class EtfBasketRepository:
         if previous is not None:
             previous_as_of = previous.as_of_date
             previous_rows = int(previous.stored_rows or 0)
+        if not force and parsed.equity_weight_pct < MIN_BASKET_COVERAGE_PCT:
+            kept = " The stored basket stays." if previous is not None else ""
+            raise BasketReplaceRefused(
+                f"{fund_isin}: the incoming basket puts only "
+                f"{parsed.equity_weight_pct:.2f}% of the fund in securities, below the "
+                f"{MIN_BASKET_COVERAGE_PCT}% the look-through attributes, so nothing was "
+                f"written.{kept} Pass --force if the fund really holds this little."
+            )
         if previous is not None and not force:
             if parsed.as_of_date < previous.as_of_date:
                 raise BasketReplaceRefused(

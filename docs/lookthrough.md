@@ -161,6 +161,10 @@ the same "% of portfolio" header.
 - **A basket below `MIN_BASKET_COVERAGE_PCT` (80) is reported as absent**, with its measured Σ.
   A residual is right for EMIM's real 98.04 and catastrophic at Σ=3, where "this fund is 97%
   cash" is a *plausible* figure — the dangerous kind.
+  **And it is refused at write** (`replace_basket`, review item L1, 2026-11-08): stored, it was
+  read as no basket and the good one it replaced was gone, with no warning. The refusal is that
+  fund's warning in the evening refresh; the stored basket stays; the import CLI's `--force`
+  stores it anyway. The floor lives beside the parser's other refusals (`etf_basket_parsers`).
 - **A constituent that is itself a fund gets its own bucket, not a company row.** Live risk:
   iShares baskets carry the BlackRock ICS liquidity fund as a line item. v1 does not recurse —
   that needs a depth cap and a visited set, because a feeder can hold its own share class.

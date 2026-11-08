@@ -54,7 +54,7 @@ from app.services.percentages import share_pct
 from app.services.cash_service import CashService, UninvestedCash, is_valuable
 from app.services.company_identity import IdentityMember
 from app.services.identity_service import group_companies
-from app.services.etf_basket_parsers import counts_as_invested
+from app.services.etf_basket_parsers import MIN_BASKET_COVERAGE_PCT, counts_as_invested
 from app.services.sector_taxonomy import UNKNOWN, normalise as normalise_sector
 from app.clock import utc_today
 
@@ -62,10 +62,10 @@ logger = logging.getLogger(__name__)
 
 HUNDRED = Decimal("100")
 
-# Below this, a basket is treated as *absent* rather than as a fund holding mostly cash.
-# A residual is the right answer for EMIM's real 98.04; at Σ=3 — a half-parsed file — "this
-# fund is 97% cash" is a plausible figure, which is the dangerous kind.
-MIN_BASKET_COVERAGE_PCT = Decimal("80")
+# `MIN_BASKET_COVERAGE_PCT` (etf_basket_parsers): below it a basket is treated as *absent*
+# rather than as a fund holding mostly cash. A residual is the right answer for EMIM's real
+# 98.04; at Σ=3 — a half-parsed file — "this fund is 97% cash" is a plausible figure, which
+# is the dangerous kind.
 
 # Past this a basket is served but badged, because today's fund value times an old basket shows
 # exposure to a company that has left the index. Default for an adapter not named below.
