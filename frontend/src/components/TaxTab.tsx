@@ -475,7 +475,7 @@ function YearEndProjection({ data, money }: { data: TaxReport; money: Money }) {
   const p = data.projected
   if (!p) return null
   return (
-    <KpiPanel columns={3}>
+    <KpiPanel columns={3} fillLastRow>
       <KpiCard tile icon={Telescope} label="Dividends to 31 Dec" value={money(p.gross)} sub="gross · est." />
       <KpiCard tile icon={CalendarClock} label="Still expected" value={money(p.expected_gross)} sub="gross · est." />
       <KpiCard
@@ -502,7 +502,7 @@ function TraderCriteria({ data, money }: { data: TaxReport; money: Money }) {
   return (
     <div>
       <SectionHeader variant="bare" icon={Scale} title="Securities dealer (KS 36)" className="mb-3" />
-      <KpiPanel columns={3}>
+      <KpiPanel columns={3} fillLastRow>
         <KpiCard
           tile
           icon={ArrowLeftRight}
