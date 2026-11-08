@@ -14,6 +14,7 @@ import { projectionColumns } from '../ForecastTab'
 import { forecastMonthColumns } from '../DividendForecastTrend'
 import { EARNINGS_COLUMNS, metricsColumns } from '../FundamentalsTab'
 import { peerColumns } from '../CompanyPeersCard'
+import { screenerColumns } from '../CompanyScreenerCard'
 import {
   BY_COUNTRY_COLUMNS, DIVIDEND_INCOME_COLUMNS, HOLDINGS_COLUMNS, REALIZED_COLUMNS,
 } from '../TaxTab'
@@ -177,6 +178,16 @@ const SPARSE_PEER = {
   },
 }
 
+const SPARSE_SCREENER = {
+  cik: 1, security_id: null, symbol: 'X', name: '', isin: null, held: false, currency: null,
+  industry: null, period_end: null, market_cap: null, revenue_yoy: null, revenue_cagr_5y: null,
+  eps_yoy: null, eps_cagr_5y: null, gross_margin: null, operating_margin: null, fcf_margin: null,
+  roe: null, net_cash: null, pe_ratio: null, pe_median_5y: null, pe_vs_median: null,
+  pfcf_ratio: null, pfcf_median_5y: null, pfcf_vs_median: null, ps_ratio: null,
+  ps_median_5y: null, ps_vs_median: null, dividend_yield: null, dps_cagr_5y: null,
+  raise_years: null, payout_ratio: null,
+}
+
 const SPARSE_FUNDAMENTALS = {
   security_id: 1, symbol: 'X', description: '', exchange: null, currency: 'USD',
   quote_type: null, trailing_pe: null, forward_pe: null, peg_ratio: null,
@@ -258,6 +269,7 @@ const FAMILY: Array<[string, Column<never, string>[], unknown]> = [
   ['Fundamentals metrics', metricsColumns('€') as never, SPARSE_FUNDAMENTALS],
   ['Earnings history', EARNINGS_COLUMNS as never, SPARSE_EARNINGS],
   ['Company peers', peerColumns() as never, SPARSE_PEER],
+  ['Company screener', screenerColumns() as never, SPARSE_SCREENER],
   ['Look-through funds', fundColumns({ formatCurrency: money }) as never, SPARSE_FUND_COVERAGE],
   ['Tax dividend income', DIVIDEND_INCOME_COLUMNS(money) as never, SPARSE_TAX_DIVIDEND],
   ['Tax by country', BY_COUNTRY_COLUMNS(money) as never, SPARSE_TAX_COUNTRY],

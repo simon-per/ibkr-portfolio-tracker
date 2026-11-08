@@ -66,6 +66,7 @@ import { robustlyCapped, zeroBasedTicks, type Axis } from '@/lib/niceTicks'
 import { displayName } from '@/lib/securityName'
 import { TONE_CHIP, TONE_TEXT, type Tone } from '@/lib/tone'
 import { CompanyPeersCard } from './CompanyPeersCard'
+import { CompanyScreenerCard } from './CompanyScreenerCard'
 import { useIsCompact } from '@/lib/useMediaQuery'
 import {
   ABSENT,
@@ -761,6 +762,8 @@ export function CompanyTab() {
 
   return (
     <div className="space-y-4">
+      {/* Every company in one table, collapsed above the one shown: a row opens its page here. */}
+      <CompanyScreenerCard />
       <Card>
         <SectionHeader
           title={

@@ -123,6 +123,7 @@ READ_ENDPOINTS = [
     "/api/company-financials/320193",   # a Nasdaq-100 constituent not held
     "/api/company-financials/1234567",  # a known company without figures
     "/api/company-financials/937966/peers",  # its industry widened to 355x: Apple
+    "/api/company-financials/screener",      # every listed company, one row each
 ]
 
 # The crypto book's reads need the admin key (docs/crypto.md), so they run through
@@ -607,6 +608,14 @@ def test_company_financials_serve_their_contract_through_the_real_stack(client):
     assert [p["symbol"] for p in peers["peers"]] == ["ASML", "AAPL"]
     assert peers["peers"][0]["key_stats"] == body["key_stats"]
     assert client.get("/api/company-financials/999/peers").status_code == 404
+
+    # The screener: the tab's companies, one row each, the row the company's own page in one
+    # line — routed before `/{cik}`, which would otherwise take the path and 422 it.
+    screener = client.get("/api/company-financials/screener").json()
+    assert [r["cik"] for r in screener] == [c["cik"] for c in companies]
+    asml = next(r for r in screener if r["cik"] == 937966)
+    assert asml["pe_ratio"] == body["key_stats"]["pe_ratio"]
+    assert asml["market_cap"] == body["key_stats"]["market_cap"]
     assert client.get("/api/company-financials/937966?period=weekly").status_code == 422
     assert client.get("/api/company-financials/937966?range=2y").status_code == 422
     assert client.get("/api/company-financials/937966?range=3y").json()["range"] == "3y"

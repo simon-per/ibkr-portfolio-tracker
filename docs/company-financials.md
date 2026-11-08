@@ -726,6 +726,29 @@ only once opened (about six queries a peer); the industry and `SIC 3674` (or `SI
 on its header, a sortable table (`peerColumns`, in `tableFamily.test.tsx`) whose rows link through
 `CompanyLink`. Figures stay in each company's reporting currency, as everywhere on the tab.
 
+## Screener
+
+`GET /api/company-financials/screener` (`CompanyFinancialsService.screener`, 2026-11-08): every
+company `list_companies` lists, one row each, in that order — the overview's key figures
+(`_priced`, `key_stats`), the company's own dividend record (`dividend_track`, handed the
+`key_stats` it already has rather than recomputing them), and today's P/E, P/FCF and P/S against
+**their own 5-year medians**: `multiple_medians` takes `build_series`' two steps on the TTM view
+(each TTM point valued at its period end's close) and the one `medians`, so a row's median is the
+Valuation card's 5Y chip on that company's page, and `*_vs_median` is `premium` — today's over the
+median, less one, null when either is missing or not positive (a loss year's P/E has no history to
+be read against). `tests/test_company_screener.py` compares every row with its own page.
+
+- **No server cache.** It reads every listed company's figures — about 2.5 s for 120 synthetic
+  companies locally, expect a few seconds on the VPS — so the card asks only once opened and the
+  client keeps the answer 30 minutes (`companyScreenerQuery`), the trade the Look-through's
+  fundamentals card already makes. Cache it server-side if it starts to matter; the held listings'
+  daily closes are what any key would have to follow.
+- **On the tab:** a collapsed *Screener* card at the top of the Company tab (`CompanyScreenerCard`)
+  with All | Held, opening on the cheapest against their own 5-year P/E (ascending, blanks last).
+  Columns (`screenerColumns`, in `tableFamily.test.tsx`): market cap, P/E, its 5Y median, P/E,
+  P/FCF and P/S vs 5Y, revenue and EPS 5-year CAGR, FCF margin, ROE, dividend yield, raise
+  streak. A row links to the company's page through `CompanyLink`.
+
 ## Annual-only filers
 
 Review item R6 (2026-11-08). One companyfacts read each on the server that day: **ASML** files its

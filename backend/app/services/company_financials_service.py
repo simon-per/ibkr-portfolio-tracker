@@ -705,12 +705,16 @@ def raise_streak(points: Sequence[tuple]) -> Optional[int]:
     return streak
 
 
-def dividend_track(rows: Sequence[CompanyFinancial]) -> Dict[str, Any]:
+def dividend_track(
+    rows: Sequence[CompanyFinancial], stats: Optional[Dict[str, Any]] = None
+) -> Dict[str, Any]:
     """
     A company's own dividend record from its filings (review item FD4): the 5-year
     growth of the fiscal years' dividends per share, the raise streak over them
     (`raise_streak`), and the payout ratio as `key_stats` reads it (TTM dividends per
     share over TTM diluted EPS) — one definition of each, shared with the Company tab.
+    `stats` is that `key_stats(rows)` when the caller has it already (the screener, which
+    otherwise paid for it twice per company).
     """
     annual = [
         (p.period_end, p.series.get("dividends_per_share"))
@@ -719,7 +723,7 @@ def dividend_track(rows: Sequence[CompanyFinancial]) -> Dict[str, Any]:
     return {
         "dps_cagr_5y": growth_at(annual, len(annual) - 1, 5) if annual else None,
         "raise_years": raise_streak(annual),
-        "payout_ratio": key_stats(rows)["payout_ratio"],
+        "payout_ratio": (stats if stats is not None else key_stats(rows))["payout_ratio"],
     }
 
 
@@ -797,6 +801,37 @@ def build_series(
             "medians": medians(full) if name in VALUATIONS else dict.fromkeys(cagrs(full)),
         }
     return out
+
+
+#: The multiples the screener reads against their own history.
+SCREENED_MULTIPLES = ("pe_ratio", "pfcf_ratio", "ps_ratio")
+
+
+def multiple_medians(
+    rows: Sequence[CompanyFinancial], prices: Prices
+) -> Dict[str, Dict[str, Optional[float]]]:
+    """
+    Each of `SCREENED_MULTIPLES`' own 3/5/10-year medians over its TTM history: the
+    Valuation card's chips on its default TTM view, by `build_series`' two steps (the TTM
+    points, each valued at its period end's close) and the one `medians`.
+    """
+    points = _series_points(rows, "ttm")
+    _with_valuations(points, rows, "ttm", prices)
+    return {
+        name: medians([(p.period_end, p.series.get(name)) for p in points])
+        for name in SCREENED_MULTIPLES
+    }
+
+
+def premium(today: Optional[float], median_value: Optional[float]) -> Optional[float]:
+    """
+    Today's multiple against its own median, less one: +0.25 is a quarter above the
+    company's history. None when either is missing or not positive — a loss year's P/E has
+    no history to be read against.
+    """
+    if today is None or median_value is None or today <= 0 or median_value <= 0:
+        return None
+    return today / median_value - 1
 
 
 from app.services.company_yahoo import counts_of, target_upside  # noqa: E402
@@ -1155,6 +1190,59 @@ class CompanyFinancialsService:
             )
         )
         out["peers"] = [mine, *rest[: PEERS_MAX - 1]]
+        return out
+
+    async def screener(self) -> List[Dict[str, Any]]:
+        """
+        The screener (2026-11-08): every company the tab lists (`list_companies`), one row
+        each, with the overview's key figures (`_priced`, `key_stats`), its own dividend
+        record (`dividend_track`), and today's P/E, P/FCF and P/S against their own 5-year
+        medians (`multiple_medians`, `premium`). So a row is that company's page in one line
+        (`tests/test_company_screener.py`). In the tab's list order; the client sorts.
+        """
+        listed = await self.list_companies()
+        companies = await self.repo.companies({c["cik"] for c in listed})
+        out: List[Dict[str, Any]] = []
+        for entry in listed:
+            company = companies.get(entry["cik"])
+            if company is None:
+                continue
+            priced = await self._priced(company)
+            rows = priced["rows"]
+            stats = key_stats(rows, priced["current"])
+            track = dividend_track(rows, stats)
+            own = multiple_medians(rows, priced["prices"])
+            out.append(
+                {
+                    **{key: entry[key] for key in ("cik", "security_id", "symbol", "name", "isin", "held")},
+                    "currency": priced["currency"],
+                    "industry": company.sic_description,
+                    "period_end": stats["period_end"],
+                    "market_cap": stats["market_cap"],
+                    "revenue_yoy": stats["revenue_yoy"],
+                    "revenue_cagr_5y": stats["revenue_cagr_5y"],
+                    "eps_yoy": stats["eps_yoy"],
+                    "eps_cagr_5y": stats["eps_cagr_5y"],
+                    "gross_margin": stats["gross_margin"],
+                    "operating_margin": stats["operating_margin"],
+                    "fcf_margin": stats["fcf_margin"],
+                    "roe": stats["roe"],
+                    "net_cash": stats["net_cash"],
+                    "pe_ratio": stats["pe_ratio"],
+                    "pe_median_5y": own["pe_ratio"]["y5"],
+                    "pe_vs_median": premium(stats["pe_ratio"], own["pe_ratio"]["y5"]),
+                    "pfcf_ratio": stats["pfcf_ratio"],
+                    "pfcf_median_5y": own["pfcf_ratio"]["y5"],
+                    "pfcf_vs_median": premium(stats["pfcf_ratio"], own["pfcf_ratio"]["y5"]),
+                    "ps_ratio": stats["ps_ratio"],
+                    "ps_median_5y": own["ps_ratio"]["y5"],
+                    "ps_vs_median": premium(stats["ps_ratio"], own["ps_ratio"]["y5"]),
+                    "dividend_yield": stats["dividend_yield"],
+                    "dps_cagr_5y": track["dps_cagr_5y"],
+                    "raise_years": track["raise_years"],
+                    "payout_ratio": stats["payout_ratio"],
+                }
+            )
         return out
 
     async def get_financials(
