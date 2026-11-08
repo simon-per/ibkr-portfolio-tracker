@@ -192,6 +192,11 @@ the same "% of portfolio" header.
 `lib/` for the reason `portfolioKpis.ts` is — the interesting mistakes are numeric and testable
 in `node` without paying jsdom's startup.
 
+**Every tile tall enough for two lines names its company** (review item VI8, 2026-11-08): a tile
+over 70px wide carries the name; a narrower one (over 44px, as a phone's column of small tiles is)
+carried a bare percentage, so it now shows the company's ticker above it (its first listing), or for
+a company held only through funds as much of the name as fits at 10px (`TileContent`).
+
 **A treemap for the companies, a stacked bar for the partition, and a pie for neither.** The
 company ranking is ~50 rows spanning three orders of magnitude, where comparing angles fails
 completely; the partition is three segments with long names, where a horizontal bar reads left
