@@ -99,17 +99,12 @@ code trace; all of them shipped that evening (waves 1–3, the product issues #7
 
 Only what is still unverified.
 
-- **Screener spans and cache, BKR's EPS, median spans (local commits `5318889`, `3fc8bd9`,
-  `55bd813` on `main`, not pushed):** migration `e7a9c1d3f5b8` (`sec_filing_reads.reader`, every
-  existing read becomes 1). After the push: the screener's first open still takes the 8–9 s, a
-  second open (another browser, or after the 30-minute client cache) should answer in well under
-  a second; the 3Y | 5Y | 10Y switch in the browser; BKR's and MRNA's 3Y P/E chips gone. **BKR's
-  EPS needs the next Sunday pass (2026-11-15)** — or, sooner, the CLI with `--symbol BKR
-  --force` (EDGAR only): its record should show about 13–16 `filings_read` for BKR, then BKR's
-  quarterly EPS from Q1 2023 on its page and a current P/E and P/E medians. The same pass reads
-  each other EPS-gap filing once (11 companies, mostly 2008–2015 quarters; GOOG's 2015 stays
-  empty: three classes). Unverified: BKR's 10-K for FY2025 tags its year's EPS on the Class A
-  too (its Q4 needs it); if not, Q4 FY2025 stays absent and TTM EPS starts at Q1 2026.
+- **BKR's EPS, median spans, screener spans and cache (pushed 2026-11-09, `3c1aea5`):** BKR,
+  MRNA and the screener's cache verified on production (docs/shipped-log.md 2026-11-09).
+  Unseen: the 3Y | 5Y | 10Y switch in the browser; the Sunday 2026-11-15 pass reading each other
+  EPS-gap filing once (11 companies, mostly 2008–2015; GOOG's 2015 stays empty, three classes) —
+  its `filings_read` in `/api/scheduler/history`. The period fix may also give other companies'
+  dividend gaps a filing they lacked: compare that pass's `ttm_dividend_gaps` with 11-08's.
 
 - **Allocation from the look-through, and the Company screener (pushed 2026-11-08, `fe376cb`):**
   the API half is verified on production (docs/shipped-log.md 2026-11-08). Unseen in the browser
@@ -516,10 +511,10 @@ Rough priority. Re-verify each `path:line` in code before fixing; lines move.
 
 One line each, newest first; drop the oldest.
 
-- **2026-11-08 (P/E medians follow-up, local commits on `main`, not pushed)** — median spans end
-  at the newest point; BKR's Class A-only EPS read from its filings (confirmed on its Q3 2026
-  10-Q; `sec_filing_reads.reader`); the screener serves 3/5/10Y medians with a switch and keeps
-  its answer server-side under a key of everything it reads.
+- **2026-11-08/09 (P/E medians follow-up, pushed and run)** — median spans end at the newest
+  point; BKR's Class A-only EPS read from its filings, and a filing's period no longer lost to its
+  comparatives (BKR's Q2 2026); the screener serves 3/5/10Y medians with a switch and a server
+  cache. BKR fetched by hand on production; P/E back.
 - **2026-11-08 (feature survey; branch `allocation-one-source`, merged and pushed)** — verified the Sunday EDGAR
   pass on production; Allocation's Sectors and Regions became the look-through rolled up (new
   `region_taxonomy`; `etf_mappings.py`'s estimates and the client's maps deleted), and a Company

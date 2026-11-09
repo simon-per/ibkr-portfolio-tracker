@@ -7,6 +7,19 @@
 > entry records what shipped, why, and what was verified on production — the durable rules it
 > established live in `docs/<subsystem>.md`.
 
+## Shipped 2026-11-09 — BKR's EPS, median spans, the screener's spans and cache
+
+- **What**: medians end at the newest point (`5318889`); the diluted EPS a filing tags only on a
+  share class is read from its instance, `sec_filing_reads.reader` (`3fc8bd9`, migration
+  `e7a9c1d3f5b8`); the screener serves 3/5/10Y medians with a switch and keeps its answer in the
+  process (`55bd813`); a filing's own period no longer loses to its comparatives (`3c1aea5`).
+  Docs: docs/company-financials.md *Filing instances*, *Service and API*, *Screener*.
+- **Verified on production (2026-11-09, `3c1aea5`)**: `fetch_company_financials --symbol BKR
+  --force` read 11 filings, then (after the period fix) the Q2 2026 10-Q: BKR has a diluted EPS
+  every quarter from Q1 2023, TTM EPS 2.90, P/E 16.5 against its own 3Y median 17.6, and its Q2
+  2026 dividend per share (the TTM dividend warning is gone). MRNA's 3Y P/E median is null. The
+  screener answered in 8.2 s, then 0.3 s from its cache; 102 rows, 73 with a 10Y median.
+
 ## Shipped 2026-11-08 — Allocation from the look-through; a Company screener
 
 - **Why**: the Allocation tab answered "how much of the book is Technology / in Europe" from
