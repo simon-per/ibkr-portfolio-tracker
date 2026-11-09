@@ -113,8 +113,11 @@ def _date(value: Any) -> Optional[date]:
 def filings(companyfacts: Dict[str, Any]) -> Dict[str, Filing]:
     """
     Every 10-Q/10-K (and amendment) the document's us-gaap facts come from, by accession
-    number. Its period is the end most of its duration facts share: a few carry a later
-    date (a dividend declared after the quarter, as a subsequent event).
+    number. Its period is the newest end carrying more than half as many duration facts as
+    the commonest: a few carry a later date (a dividend declared after the quarter, as a
+    subsequent event), while the commonest alone can be last year's comparatives — BKR's
+    Q2 2026 10-Q has 102 facts ending in June 2025 and 101 in June 2026, so the quarter it
+    reports had no filing and its EPS and dividend were never read (2026-11-09).
     """
     gaap = ((companyfacts or {}).get("facts") or {}).get("us-gaap") or {}
     ends: Dict[str, Counter] = defaultdict(Counter)
@@ -130,11 +133,15 @@ def filings(companyfacts: Dict[str, Any]) -> Dict[str, Filing]:
                 ends[accn][end] += 1
                 meta.setdefault(accn, (form, filed))
     return {
-        accn: Filing(
-            accn, meta[accn][0], meta[accn][1], max(c, key=lambda e: (c[e], e))
-        )
+        accn: Filing(accn, meta[accn][0], meta[accn][1], _own_period(c))
         for accn, c in ends.items()
     }
+
+
+def _own_period(ends: Counter) -> date:
+    """The newest end with more than half the facts of the commonest one (`filings`)."""
+    top = max(ends.values())
+    return max(end for end, n in ends.items() if 2 * n > top)
 
 
 def dividend_gaps(rows: Iterable[Dict[str, Any]]) -> List[date]:

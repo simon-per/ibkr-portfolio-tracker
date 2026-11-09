@@ -188,6 +188,14 @@ def test_a_filings_period_is_the_end_most_of_its_facts_share():
     }
 
 
+def test_a_filings_period_is_its_own_when_comparatives_outnumber_it():
+    """BKR's Q2 2026 10-Q: one fact more ends on last year's quarter than on its own."""
+    own = [_row("2021-04-01", "2021-06-30", "q2")] * 2 + [_row("2021-01-01", "2021-06-30", "q2")]
+    prior = [_row("2020-04-01", "2020-06-30", "q2")] * 2 + [_row("2020-01-01", "2020-06-30", "q2")] * 2
+    doc = {"facts": {"us-gaap": {"Revenues": {"units": {"USD": own + prior}}}}}
+    assert filings(doc)["q2"].period_end == date(2021, 6, 30)
+
+
 def test_the_original_reports_a_period_before_its_amendment():
     by_accn = {
         "a": Filing("a", "10-K/A", date(2022, 5, 1), date(2021, 12, 31)),

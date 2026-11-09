@@ -127,6 +127,10 @@ diluted count then comes from net income / EPS (*Diluted shares when not reporte
   income and no EPS, 60 quarters in all — BKR 20 (2016's shell quarters have no filing of their
   own), TSLA 11 (2010–12), ALNY 5, FANG and FAST 4, GOOG and REGN 3, HONA, NXPI, ONDS, RKLB and
   SNDK 2. Each names a filing once ever; BKR then costs one filing a quarter, as its dividend does.
+- **A filing's own period** (`filings`, 2026-11-09): the newest end with more than half the
+  duration facts of the commonest. The commonest alone named BKR's Q2 2026 10-Q a Q2 2025
+  filing (102 comparative facts against 101 of its own), so its quarter had no filing: its EPS
+  and dividend per share were never read, which had been put down to companyfacts lacking it.
 
 ## Limits and bounds
 
@@ -642,8 +646,8 @@ record and the next Sunday warned about it again as new. The record
 so its TTM is absent now — and `stale_figures` — newest figures older than
 `FIGURES_STALE_AFTER` (150 days; a 10-Q is due 40–45 days after its quarter, a 10-K 60–90
 after the year, so the newest period end is at most about 135 days old). **A warning names
-only the companies the previous scheduled run did not list**: a gap nothing can close (BKR's
-Q2 2026 10-Q is missing from companyfacts until the 2027 one repeats it) is a line of the
+only the companies the previous scheduled run did not list**: a gap nothing can close (WDC's
+2013–2015 dividends, tagged nowhere) is a line of the
 record every week, not a banner the reader learns to skip. The first run after the deploy
 warns about all of them once.
 
@@ -827,8 +831,7 @@ All three were misses: the normaliser read 10-K/10-Q facts in us-gaap only.
   one-month context, or on AMAT's own members, with slips beside them (AMAT's FY2013 Q4 0.09
   against a 0.10 rate) — summing them would guess; some filings tag no dividend per share
   anywhere (WDC 2013–2015, CTAS's FY2017); 2008–2009 quarters reported only as comparatives
-  before XBRL (MA, PCAR, FAST, ROP); BKR's Q2 2026 10-Q is missing from companyfacts (as ALNY's,
-  below); TMUS before 2018 and LITE paid preferred or other dividends, not common.
+  before XBRL (MA, PCAR, FAST, ROP); TMUS before 2018 and LITE paid preferred or other dividends, not common.
 - **KDP before 2018** mixes Dr Pepper Snapple's and Keurig's filings (the 2018 reverse merger moved
   the fiscal year): its 2016-2017 share counts jump. Accepted; the figures since 2018 are one company's.
 - **A 10-Q missing from companyfacts**: ALNY's Q1 2026 is in no fact, so it has no TTM from
