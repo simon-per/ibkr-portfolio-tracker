@@ -101,13 +101,13 @@ Only what is still unverified.
 
 - **BKR's EPS, median spans, screener spans and cache (pushed 2026-11-09, `3c1aea5`):** BKR,
   MRNA and the screener's cache verified on production (docs/shipped-log.md 2026-11-09).
-  Unseen: the 3Y | 5Y | 10Y switch in the browser; the Sunday 2026-11-15 pass reading each other
-  EPS-gap filing once (11 companies, mostly 2008–2015; GOOG's 2015 stays empty, three classes) —
-  its `filings_read` in `/api/scheduler/history`. The period fix may also give other companies'
-  dividend gaps a filing they lacked: compare that pass's `ttm_dividend_gaps` with 11-08's.
-  A forced manual fetch on 11-11 failed every CIK lookup (a ticker named twice → two INSERTs
-  into `sec_tickers`); `496fbec` fixes it, **committed but not pushed** — the Sunday pass would
-  fail the same way without it. After the push: re-run the forced fetch.
+  The EPS-gap filings were read by a forced manual fetch on 11-11 (after `496fbec`, a ticker
+  named twice was two INSERTs into `sec_tickers` and failed every CIK lookup): 133 companies,
+  0 failed, 178 filings read. What stays empty was read and holds nothing (pre-2016 quarters;
+  V and BRK-A, whose classes' EPS differ). **Open:** AEP's and EXC's Q2 2026 10-Q is missing
+  from companyfacts altogether, so no filing is known for that quarter and their TTM P/E is
+  blank — the same lag CO5 reads the newest filing for, one quarter back. Unseen: the 3Y | 5Y |
+  10Y switch in the browser; the Sunday 2026-11-15 pass's `ttm_dividend_gaps` against 11-08's.
 
 - **Allocation from the look-through, and the Company screener (pushed 2026-11-08, `fe376cb`):**
   the API half is verified on production (docs/shipped-log.md 2026-11-08). Unseen in the browser
