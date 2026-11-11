@@ -371,16 +371,20 @@ class CompanyFinancialsSync:
         ]
         known, asked = await self._known_tickers()
         # A ticker asked before and not listed waits `CIK_RECHECK_AFTER`, like a held one.
-        unknown = [
-            c
-            for c in constituents
-            if c.ticker not in known
-            and (
-                force
-                or c.ticker not in asked
-                or asked[c.ticker] <= now - CIK_RECHECK_AFTER
-            )
-        ]
+        # Once per ticker: the index, the look-through and the watchlist can each name it,
+        # and two `record_ticker`s of one new ticker are two INSERTs (2026-11-11).
+        unknown = list(
+            {
+                c.ticker: c
+                for c in constituents
+                if c.ticker not in known
+                and (
+                    force
+                    or c.ticker not in asked
+                    or asked[c.ticker] <= now - CIK_RECHECK_AFTER
+                )
+            }.values()
+        )
         summary: Dict[str, Any] = {
             "status": "success",
             "configured": configured,

@@ -137,6 +137,11 @@ lose time to.
   within ~10 minutes of an `ALL_SYNC_HOURS` slot) needs Berlin time: `python -c "from datetime
   import datetime; from zoneinfo import ZoneInfo; print(datetime.now(ZoneInfo('Europe/Berlin')))"`.
   A push made 3 minutes before 11:00 on 2026-10-18 this way was held back by the auto-deploy guard.
+- **The test session autoflushes; production's does not.** `tests/conftest.py` opens a plain
+  `AsyncSession` (autoflush on), `AsyncSessionLocal` sets `autoflush=False`. A `session.get`
+  then finds an object added earlier in the same transaction only in the tests, so two adds of
+  one new key pass the suite and fail production with a UNIQUE error (`sec_tickers`,
+  2026-11-11). A test of a write loop sets `db.sync_session.autoflush = False`.
 - **Playwright: the LAST registered `page.route` wins.** A catch-all that proxies a local build's
   `/api/` to production, added after the two `abort()` routes for `/api/dividends/summary` and
   `/api/portfolio/benchmark`, forwards both to the live site — rule 1. Refuse those two paths

@@ -14,7 +14,7 @@ from decimal import Decimal
 import pytest
 
 from app.clock import utcnow
-from app.models.company_financials import SecCompany
+from app.models.company_financials import SecCompany, SecTicker
 from app.models.etf_basket import EtfHolding
 from app.models.isin_identity import IsinIdentity
 from app.models.watchlist_item import WatchlistItem
@@ -104,6 +104,25 @@ async def test_the_named_companies_come_on_top_of_the_capped_index(
     assert summary["universe"] == 3
     apple = await db.get(SecCompany, APPLE_CIK)
     assert apple.universe_seen_at is not None and apple.isin == "US0378331005"
+
+
+@pytest.mark.asyncio
+async def test_a_company_named_twice_is_looked_up_once(db, configured, monkeypatch):
+    """Apple on the look-through and the watchlist: one new `sec_tickers` row, not two.
+    Without autoflush, as `AsyncSessionLocal` runs it: the test session's own autoflush
+    hid the second INSERT that failed the production run."""
+    db.sync_session.autoflush = False
+    monkeypatch.setattr(
+        LookthroughService, "get_lookthrough", _view(("APPLE INC", ["US0378331005"]))
+    )
+    await _qqqm(db, NASDAQ_100)
+    await _named(db)
+    db.add(WatchlistItem(yahoo_ticker="AAPL", company_name="Apple"))
+    await db.commit()
+
+    summary = await _sync(db, Edgar()).refresh(force=True)
+    assert summary["status"] == "success"
+    assert await db.get(SecTicker, "AAPL") is not None
 
 
 @pytest.mark.asyncio
