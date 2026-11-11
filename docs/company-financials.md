@@ -635,6 +635,15 @@ weekday (about sixty fetches that moved nothing) and past it never looked. Three
   `CHASE_WEEKDAY` (Monday), until `FILING_CHASE_UNTIL` (400 days): past a year of missing
   10-Qs it has stopped filing. Not on Sunday: the weekly pass's tests count every URL, and a
   date-relative ask there would start failing them once the fixture aged.
+- **An older quarter it skipped — by hand only.** `_filing_behind` looks at the newest filing
+  alone. AEP's and EXC's Q2 2026 10-Qs (filed 2026-07-30) never reached companyfacts although
+  their Q3s did, so Q2's net income was derived from the YTD ladder and its diluted EPS (not
+  additive) stayed empty, and with it the TTM P/E. Filled on 2026-11-11 by reading the 10-Q
+  `submissions` lists for that `reportDate` through `_read_filing(..., whole=True)`, storing it
+  with `record_filing_read`, then `fetch_company_financials --symbol AEP --symbol EXC --force`.
+  Automating it — a recent quarter with no companyfacts filing looked up in `submissions` — is
+  in STATUS.md's *Worth doing next*. SEC stays the one source: the gap is in companyfacts' index,
+  not in what the SEC holds.
 
 **What each pass checks** (owner's request, 2026-11-07): the Sunday pass tests the stored rows
 of **every** company in scope after its loop, fetched or not, and the weekday check the companies

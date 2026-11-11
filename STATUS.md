@@ -104,10 +104,9 @@ Only what is still unverified.
   The EPS-gap filings were read by a forced manual fetch on 11-11 (after `496fbec`, a ticker
   named twice was two INSERTs into `sec_tickers` and failed every CIK lookup): 133 companies,
   0 failed, 178 filings read. What stays empty was read and holds nothing (pre-2016 quarters;
-  V and BRK-A, whose classes' EPS differ). **Open:** AEP's and EXC's Q2 2026 10-Q is missing
-  from companyfacts altogether, so no filing is known for that quarter and their TTM P/E is
-  blank — the same lag CO5 reads the newest filing for, one quarter back. Unseen: the 3Y | 5Y |
-  10Y switch in the browser; the Sunday 2026-11-15 pass's `ttm_dividend_gaps` against 11-08's.
+  V and BRK-A, whose classes' EPS differ). AEP's and EXC's Q2 2026 10-Qs, missing from
+  companyfacts, were read by hand (docs/shipped-log.md 2026-11-11). Unseen: the 3Y | 5Y | 10Y
+  switch in the browser; the Sunday 2026-11-15 pass's `ttm_dividend_gaps` against 11-08's.
 
 - **Allocation from the look-through, and the Company screener (pushed 2026-11-08, `fe376cb`):**
   the API half is verified on production (docs/shipped-log.md 2026-11-08). Unseen in the browser
@@ -498,6 +497,11 @@ Rough priority. Re-verify each `path:line` in code before fixing; lines move.
     hidden Analytics tab's `segments` through `decompose` before that tab returns (it still
     classifies basket rows itself, with raw countries). Researched future sources (N-PORT,
     commercial APIs — do not re-shop) are in docs/lookthrough.md.
+7a. **Read an older quarter companyfacts skipped, automatically.** `_filing_behind` reads only
+    the newest filing `submissions` lists; AEP's and EXC's Q2 2026 were filled by hand
+    (docs/company-financials.md, *When companyfacts lags the filing list*). For a recent quarter
+    with net income and no filing in `filings(companyfacts)`, look its 10-Q up in the same
+    `submissions` document and read it whole, once.
 8. **The look-through fundamentals card takes ~8 s** (uncached), the shape the screener had;
     the screener's key (`_screener_key`, docs/company-financials.md *Screener*) is the pattern.
 9. **Dividends: a forecast check** (owner asked 2026-11-08 what is best; proposal given, not
@@ -514,6 +518,9 @@ Rough priority. Re-verify each `path:line` in code before fixing; lines move.
 
 One line each, newest first; drop the oldest.
 
+- **2026-11-11 (EPS-gap fill)** — a forced EDGAR fetch failed on a ticker named twice (two
+  INSERTs; fixed, `496fbec`), then read the EPS-gap filings; AEP's and EXC's Q2 2026 10-Qs,
+  missing from companyfacts, read by hand. SEC stays the only source.
 - **2026-11-08/09 (P/E medians follow-up, pushed and run)** — median spans end at the newest
   point; BKR's Class A-only EPS read from its filings, and a filing's period no longer lost to its
   comparatives (BKR's Q2 2026); the screener serves 3/5/10Y medians with a switch and a server
@@ -531,12 +538,4 @@ One line each, newest first; drop the oldest.
   analyst counts under one label (owner-approved watchlist `recommendations` budget), the
   valuation card heads with today's multiples, a report refreshes watchlist growth the next
   run, and a Mon–Sat EDGAR check fetches a new 10-Q the next morning. Pushed (`d8ae10e`).
-
-- **2026-11-07 (Company tab: missing dividends per share, /goal run)** — MA's FY19–FY23 hole:
-  companyfacts drops dimensioned facts, and MA (and PCAR, INTC, MDLZ, XEL, BKR, COST) tag DPS
-  only on an equity-statement or share-class member; now read once per filing from its XBRL
-  instance; a zero quarter the ladder shows is kept (INTC, WMT); one rate on every rung,
-  vouched for by the declared totals (IBKR, BKNG, CEG); each pass now names broken TTMs and
-  stale figures. Deployed on the owner's word; all gap companies backfilled at one SEC request
-  per 3 s (gaps 260 → 90 on production, MA's already filled).
 

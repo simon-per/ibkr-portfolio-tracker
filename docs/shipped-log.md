@@ -7,6 +7,18 @@
 > entry records what shipped, why, and what was verified on production — the durable rules it
 > established live in `docs/<subsystem>.md`.
 
+## Shipped 2026-11-11 — one CIK lookup per ticker; the EPS-gap filings read; AEP's and EXC's Q2
+
+- **What**: a ticker the index, the look-through and the watchlist each name was two INSERTs into
+  `sec_tickers` under `autoflush=False`, failing every CIK lookup of the pass (`496fbec`; the
+  test session's autoflush hid it, now a docs/local-development.md trap). AEP's and EXC's Q2 2026
+  10-Qs, absent from companyfacts, were read by hand (docs/company-financials.md, *When
+  companyfacts lags the filing list*).
+- **Verified on production (2026-11-11, `88ed84b`)**: `fetch_company_financials --force`: 132 of
+  133 companies fetched, 0 failed, 178 filings read; the EPS gaps left were read and hold
+  nothing (pre-2016 quarters; V's and BRK-A's classes differ). AEP's Q2 2026 diluted EPS 1.30,
+  EXC's 0.39; both have a TTM P/E in the screener again.
+
 ## Shipped 2026-11-09 — BKR's EPS, median spans, the screener's spans and cache
 
 - **What**: medians end at the newest point (`5318889`); the diluted EPS a filing tags only on a
