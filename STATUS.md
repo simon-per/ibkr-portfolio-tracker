@@ -7,7 +7,7 @@
 > [docs/troubleshooting.md](docs/troubleshooting.md); local-dev traps in
 > [docs/local-development.md](docs/local-development.md).
 
-**Last updated: 2026-11-08.** The **Company tab** (one company's SEC EDGAR fundamentals history,
+**Last updated: 2026-11-11.** The **Company tab** (one company's SEC EDGAR fundamentals history,
 docs/company-financials.md) is deployed and filled for the held filers **and the Nasdaq-100**
 (102 companies with figures, keyed by CIK), with key figures, valuation multiples (weekly Yahoo closes), ROE and net cash, gross margin, operating income,
 buybacks & dividends, cash & debt and 3/5/10Y CAGRs (docs/shipped-log.md 2026-10-25). PR #80 (Swiss residency)
@@ -105,6 +105,9 @@ Only what is still unverified.
   EPS-gap filing once (11 companies, mostly 2008–2015; GOOG's 2015 stays empty, three classes) —
   its `filings_read` in `/api/scheduler/history`. The period fix may also give other companies'
   dividend gaps a filing they lacked: compare that pass's `ttm_dividend_gaps` with 11-08's.
+  A forced manual fetch on 11-11 failed every CIK lookup (a ticker named twice → two INSERTs
+  into `sec_tickers`); `496fbec` fixes it, **committed but not pushed** — the Sunday pass would
+  fail the same way without it. After the push: re-run the forced fetch.
 
 - **Allocation from the look-through, and the Company screener (pushed 2026-11-08, `fe376cb`):**
   the API half is verified on production (docs/shipped-log.md 2026-11-08). Unseen in the browser
