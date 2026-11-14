@@ -120,7 +120,7 @@ async def update_base_currency(
 
         # Refuse whole, before the setting is written. With no EUR->base rate at all,
         # `BaseFx.convert` hands back the EUR amount, so every figure in the app would be
-        # EUR printed under a CHF or USD label — right numbers, wrong currency, nothing on
+        # EUR printed under a CHF, USD or GBP label — right numbers, wrong currency, nothing on
         # screen inviting doubt. One rate is enough (`BaseFx` carries the nearest one
         # forward and back), and the check is the read path's own loader, so it cannot
         # disagree with what the next GET would find. The backfill may have committed

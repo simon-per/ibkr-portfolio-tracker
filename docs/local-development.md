@@ -185,7 +185,7 @@ lose time to.
   2026-09-07 from a fixture whose index started three days after the window. Stub both fetch
   steps for the module and assert the raiser was never reached on teardown; the `_offline`
   fixture in `test_benchmark_window_anchor.py` is the pattern.
-- **The base currency is whatever the user last picked** (`/api/settings`, EUR/CHF/USD). Every money
+- **The base currency is whatever the user last picked** (`/api/settings`, EUR/CHF/USD/GBP). Every money
   figure moves with it, so never compare a number across sessions without checking it — hold it
   fixed by comparing payloads built from one snapshot, or ratios inside one payload.
 - **Don't push within ~10 minutes of a Berlin sync slot** — ten of them, on the hour at

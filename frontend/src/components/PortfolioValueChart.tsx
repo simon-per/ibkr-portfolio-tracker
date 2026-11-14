@@ -30,8 +30,8 @@ const CHART_BOX = 'h-[260px] sm:h-[340px] lg:h-[400px]'
 const VALUE_COLOR = PORTFOLIO_SERIES_COLORS.value
 
 /**
- * How far below zero the Y axis may extend, in the **base currency** (EUR/CHF/USD — the
- * three are close enough that one figure covers all, and this is a display bound rather
+ * How far below zero the Y axis may extend, in the **base currency** (EUR/CHF/USD/GBP — the
+ * four are close enough that one figure covers all, and this is a display bound rather
  * than an amount anyone reconciles).
  *
  * A bound is needed because the axis minimum is rounded *out* to a step multiple, which

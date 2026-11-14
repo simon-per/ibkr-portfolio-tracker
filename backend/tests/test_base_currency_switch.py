@@ -170,7 +170,7 @@ def test_an_unsupported_currency_is_refused_before_anything_runs(env):
     client, provider, _seed, calls = env
     provider("ok")
 
-    r = client.put("/api/settings/base-currency", json={"base_currency": "GBP"}, headers=AUTH)
+    r = client.put("/api/settings/base-currency", json={"base_currency": "JPY"}, headers=AUTH)
 
     assert r.status_code == 400
     assert "Unsupported base currency" in r.json()["detail"]
@@ -200,3 +200,17 @@ def test_a_stored_base_with_a_rate_is_the_one_in_use(env):
     assert settings_body["base_currency"] == "CHF"
     assert settings_body["base_currency_unavailable"] is None
     assert client.get("/api/portfolio/summary").json()["base_currency"] == "CHF"
+
+
+def test_a_switch_to_gbp_backfills_eur_to_gbp_and_succeeds(env):
+    client, provider, _seed, calls = env
+    provider("ok")
+
+    r = client.put("/api/settings/base-currency", json={"base_currency": "gbp"}, headers=AUTH)
+
+    assert r.status_code == 200, r.text
+    assert calls == ["GBP"]
+    body = r.json()
+    assert body["base_currency"] == "GBP"
+    assert "GBP" in body["supported_currencies"]
+    assert _base(client) == "GBP"

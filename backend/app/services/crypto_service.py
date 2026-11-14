@@ -65,8 +65,8 @@ from app.models.crypto import (
 )
 from app.models.exchange_rate import ExchangeRate
 from app.repositories.app_settings_repository import (
-    SUPPORTED_BASE_CURRENCIES,
     AppSettingsRepository,
+    eur_to_base_pairs,
 )
 from app.repositories.sync_run_repository import SyncRunRepository, utc_iso
 from app.services.base_fx import load_base_fx
@@ -910,7 +910,7 @@ class CryptoSyncService:
         """
         warnings: List[str] = []
         window_start = CRYPTO_HISTORY_START - timedelta(days=FX_MAX_CARRY_DAYS)
-        pairs = [("USD", "EUR")] + [("EUR", b) for b in SUPPORTED_BASE_CURRENCIES if b != "EUR"]
+        pairs = [("USD", "EUR")] + eur_to_base_pairs()
         for from_currency, to_currency in pairs:
             try:
                 async with self._session_factory() as db:

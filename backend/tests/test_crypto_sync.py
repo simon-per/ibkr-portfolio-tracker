@@ -153,7 +153,7 @@ async def test_a_full_first_sync_stores_the_snapshot_holdings_and_prices(db, mon
 
     # The FX warm-up covered the crypto book's own currency and every non-EUR base.
     assert {(c, to) for c, to, _ in RecordingCurrencyService.calls} == {
-        (("USD",), "EUR"), (("EUR",), "CHF"), (("EUR",), "USD"),
+        (("USD",), "EUR"), (("EUR",), "CHF"), (("EUR",), "USD"), (("EUR",), "GBP"),
     }
 
 
@@ -182,7 +182,7 @@ async def test_the_second_slot_asks_only_for_todays_price(db, monkeypatch):
     assert gecko.calls == ["/simple/price"]
     # Today's set replaced, not duplicated; FX warmed once per Berlin day.
     assert await _count(db, CryptoDailyHolding) == 2
-    assert len(RecordingCurrencyService.calls) == 3
+    assert len(RecordingCurrencyService.calls) == 4
 
 
 @pytest.mark.asyncio

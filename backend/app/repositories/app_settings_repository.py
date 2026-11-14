@@ -18,7 +18,18 @@ logger = logging.getLogger(__name__)
 # The base (display) currency the whole portfolio is reported in.
 BASE_CURRENCY_KEY = "base_currency"
 DEFAULT_BASE_CURRENCY = "EUR"
-SUPPORTED_BASE_CURRENCIES = ["EUR", "CHF", "USD"]
+SUPPORTED_BASE_CURRENCIES = ["EUR", "CHF", "USD", "GBP"]
+
+
+def eur_to_base_pairs() -> list[tuple[str, str]]:
+    """The `EUR -> base` rate pairs every selectable non-EUR base needs in the cache.
+
+    The one list both FX warmers read — the daily exchange-rate job and the crypto
+    book's `_warm_fx`. The job once hard-coded `("CHF", "USD")`, a copy of this list that
+    a new base would have silently missed: switching to it worked (the switch backfills
+    its own history) and then the rate stopped moving, a day older every morning.
+    """
+    return [("EUR", base) for base in SUPPORTED_BASE_CURRENCIES if base != "EUR"]
 
 
 def normalize_base_currency(currency: Optional[str]) -> str:
@@ -111,8 +122,8 @@ class AppSettingsRepository:
         The base currency every figure is projected into: the stored choice, unless no
         EUR->base rate exists at all — then EUR.
 
-        `BaseFx.convert` hands back the EUR amount when it holds no rate, so a CHF or USD
-        base with no rate behind it printed EUR figures under a CHF or USD label: right
+        `BaseFx.convert` hands back the EUR amount when it holds no rate, so a CHF, USD or
+        GBP base with no rate behind it printed EUR figures under that label: right
         numbers, wrong currency, nothing inviting doubt. The switch refuses to enter that
         state (`PUT /api/settings/base-currency`, 2026-10-17); this closes the way left
         into it — a database whose base was chosen before the refusal existed, or whose
@@ -120,7 +131,7 @@ class AppSettingsRepository:
         services, `/api/settings`) asks here, so the label and the figures cannot part,
         and `/api/settings` names the currency it could not use. One stored rate is
         enough: `BaseFx` carries the nearest one forward and back, and the scheduler
-        refreshes EUR->CHF and EUR->USD daily.
+        refreshes EUR->base for every supported base daily (`eur_to_base_pairs`).
         """
         stored = await self.get_stored_base_currency()
         if stored == "EUR" or await self._has_eur_rate(stored):

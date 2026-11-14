@@ -226,7 +226,7 @@ describe('CurrencyProvider', () => {
       </QueryClientProvider>,
     )
     await waitFor(() =>
-      expect(screen.getByTestId('supported').textContent).toBe('EUR,CHF,USD'),
+      expect(screen.getByTestId('supported').textContent).toBe('EUR,CHF,USD,GBP'),
     )
   })
 })

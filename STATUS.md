@@ -7,7 +7,7 @@
 > [docs/troubleshooting.md](docs/troubleshooting.md); local-dev traps in
 > [docs/local-development.md](docs/local-development.md).
 
-**Last updated: 2026-11-11.** The **Company tab** (one company's SEC EDGAR fundamentals history,
+**Last updated: 2026-11-14.** The **Company tab** (one company's SEC EDGAR fundamentals history,
 docs/company-financials.md) is deployed and filled for the held filers **and the Nasdaq-100**
 (102 companies with figures, keyed by CIK), with key figures, valuation multiples (weekly Yahoo closes), ROE and net cash, gross margin, operating income,
 buybacks & dividends, cash & debt and 3/5/10Y CAGRs (docs/shipped-log.md 2026-10-25). PR #80 (Swiss residency)
@@ -98,6 +98,11 @@ code trace; all of them shipped that evening (waves 1–3, the product issues #7
 ## Watch after the next deploy
 
 Only what is still unverified.
+
+- **GBP as a base currency (branch `ccr-47cc7bbe-8060um`, not yet on `main`):** after it deploys,
+  switch the header to GBP once — the switch backfills EUR→GBP from Frankfurter (no Yahoo, no
+  Flex) and must answer 200 with `GBP` in `supported_currencies`; then the next exchange-rate slot's
+  `sync_runs` row should list no stale `EUR->GBP`. Figures should read `£`; the tax tab stays CHF.
 
 - **BKR's EPS, median spans, screener spans and cache (pushed 2026-11-09, `3c1aea5`):** BKR,
   MRNA and the screener's cache verified on production (docs/shipped-log.md 2026-11-09).
@@ -518,6 +523,10 @@ Rough priority. Re-verify each `path:line` in code before fixing; lines move.
 
 One line each, newest first; drop the oldest.
 
+- **2026-11-14 (GBP base currency, branch `ccr-47cc7bbe-8060um`)** — GBP joined EUR/CHF/USD as a
+  switchable base; the daily FX job's hard-coded `("CHF", "USD")` became `eur_to_base_pairs()`.
+  The owner kept the benchmark's baseline FX gap (*Worth doing next* #5) out of scope.
+
 - **2026-11-11 (EPS-gap fill)** — a forced EDGAR fetch failed on a ticker named twice (two
   INSERTs; fixed, `496fbec`), then read the EPS-gap filings; AEP's and EXC's Q2 2026 10-Qs,
   missing from companyfacts, read by hand. SEC stays the only source.
@@ -533,9 +542,3 @@ One line each, newest first; drop the oldest.
   safety, performance, dividends, the ledger, Yahoo, company data and features, look-through and
   tax; one local branch per wave merged into `main`; R6 built after an approved read. Pushed 2026-11-08
   (`65784c0`); the post-deploy read found VI4 missing the EM 3a fund, fixed in `77962ea`.
-- **2026-11-07 (improvements survey, branch `analyst-counts-and-freshness`)** — a live-site
-  survey found one company's figures disagreeing across tabs; every rating now shows its
-  analyst counts under one label (owner-approved watchlist `recommendations` budget), the
-  valuation card heads with today's multiples, a report refreshes watchlist growth the next
-  run, and a Mon–Sat EDGAR check fetches a new 10-Q the next morning. Pushed (`d8ae10e`).
-

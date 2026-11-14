@@ -303,7 +303,7 @@ Tests: `tests/test_currency_fallback.py`, `tests/test_fundamentals_market_cap.py
 
 **A base-currency switch the app cannot convert into is refused** (2026-10-17). `BaseFx.convert`
 hands back the EUR amount when it holds no EUR→base rate at all, so a switch accepted while
-Frankfurter was down printed every figure in the app as EUR under a CHF or USD label. `PUT
+Frankfurter was down printed every figure in the app as EUR under a CHF, USD or GBP label. `PUT
 /api/settings/base-currency` now validates the code (`normalize_base_currency`), backfills, asks the
 read path's own loader (`load_base_fx(..., backfill=False)`) whether it would find a rate, and only
 then writes the setting; with none it answers 503 and the base stays where it was (the header says
@@ -318,8 +318,21 @@ fundamentals and crypto services and `/api/settings` — now answers the stored 
 EUR→base rate exists, and EUR otherwise; `get_stored_base_currency()` keeps the choice, and
 `/api/settings` serves it as `base_currency_unavailable` while it cannot be used, which the header
 turns into a one-line warning. So `BaseFx.convert`'s EUR fallback can no longer meet a non-EUR
-label: a base is in use only with a rate to convert by. The scheduler refreshes EUR→CHF and EUR→USD
-daily, so on a running install the check passes and costs one indexed lookup per request.
-Tests: `tests/test_base_currency_switch.py`.
+label: a base is in use only with a rate to convert by. The scheduler refreshes EUR→base for every
+supported base daily, so on a running install the check passes and costs one indexed lookup per
+request. Tests: `tests/test_base_currency_switch.py`.
+
+**The selectable bases are spelled once** (GBP joined 2026-11-14): `SUPPORTED_BASE_CURRENCIES` in
+`app_settings_repository.py` is what the switch accepts and `/api/settings` serves, and
+`eur_to_base_pairs()` beside it is the pair list both FX warmers read — the daily exchange-rate job
+and the crypto book's `_warm_fx`. The job had hard-coded `("CHF", "USD")`: a base added only to the
+list would have switched fine (the switch backfills its own history) and then converted at a rate a
+day older each morning. `tests/test_base_currency_family.py` walks `app/` for any literal list of
+base currencies outside that module. Adding a base is the list, a symbol in the frontend's
+`CURRENCY_SYMBOLS` (`lib/utils.ts`; an unmapped code prints as `XXX `), and `DEFAULT_SUPPORTED` in
+`lib/CurrencyContext.tsx` (the fallback when `/api/settings` cannot be read). Nothing branches on a
+particular base: the tax report is CHF by construction and ignores the switch, and the benchmark
+inherits the base through `_apply_base_currency` — including its known gap (STATUS.md *Worth doing
+next*), unchanged for GBP.
 
 ---

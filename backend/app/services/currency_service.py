@@ -651,7 +651,7 @@ class CurrencyService:
         Make sure ``currencies`` have a usable rate for ``target_date``.
 
         Called at every sync so a currency is never first looked up on the day a position
-        in it arrives. ECB currencies — and ``extra_pairs``, such as the `EUR -> CHF/USD`
+        in it arrives. ECB currencies — and ``extra_pairs``, such as the `EUR -> CHF/USD/GBP`
         rows the base-currency switch reads — are brought up to the ECB's last
         publication day by **one** Frankfurter request covering only the missing span,
         and by none once they are current (`_refresh_ecb_pairs`). Every other currency is

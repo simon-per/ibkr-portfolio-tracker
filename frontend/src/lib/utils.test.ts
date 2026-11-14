@@ -169,6 +169,7 @@ describe('currencySymbol', () => {
   it('gives a tight symbol for the currencies with one', () => {
     expect(currencySymbol('EUR')).toBe('€')
     expect(currencySymbol('USD')).toBe('$')
+    expect(currencySymbol('GBP')).toBe('£')
   })
 
   it('separates CHF from its amount with a non-breaking space', () => {
@@ -178,7 +179,7 @@ describe('currencySymbol', () => {
 
   it('falls back to the code plus the same non-breaking space', () => {
     // Never empty: an unmapped currency must not render as a bare number.
-    expect(currencySymbol('GBP')).toBe('GBP\u00a0')
+    expect(currencySymbol('SEK')).toBe('SEK\u00a0')
     expect(currencySymbol('TWD')).toBe('TWD\u00a0')
   })
 

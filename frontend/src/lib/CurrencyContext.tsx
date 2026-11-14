@@ -33,7 +33,7 @@ export interface CurrencyContextValue {
 }
 
 export const FALLBACK_CURRENCY = 'EUR'
-export const DEFAULT_SUPPORTED = ['EUR', 'CHF', 'USD']
+export const DEFAULT_SUPPORTED = ['EUR', 'CHF', 'USD', 'GBP']
 
 /**
  * The context object, the value's shape and the hooks that read it. The provider is

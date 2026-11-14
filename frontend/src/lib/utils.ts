@@ -142,6 +142,7 @@ const NBSP = "\u00a0"
 const CURRENCY_SYMBOLS: Record<string, string> = {
   EUR: "€",
   USD: "$",
+  GBP: "£",
   CHF: `CHF${NBSP}`,
 }
 

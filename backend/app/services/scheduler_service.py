@@ -38,7 +38,7 @@ from app.services.market_data_service import MarketDataService
 from app.services.currency_service import CurrencyService
 from app.services.sync_helper import ingest_flex_statement
 from app.repositories.security_repository import SecurityRepository, held
-from app.repositories.app_settings_repository import AppSettingsRepository
+from app.repositories.app_settings_repository import AppSettingsRepository, eur_to_base_pairs
 from app.repositories.sync_run_repository import SyncRunRepository, utc_iso
 from app.services.benchmark_service import (
     BENCHMARKS, BenchmarkService, last_finished_session,
@@ -1254,12 +1254,12 @@ class SchedulerService:
 
                 logger.info(f"Syncing exchange rates for currencies: {sorted(currencies)}")
 
-                # The EUR->base rates for the selectable base currencies (CHF/USD) ride in
+                # The EUR->base rates for the selectable base currencies ride in
                 # the same request, so switching the display currency is instant. Every
                 # ECB pair costs one request between them, and none once current.
                 warmed = await currency_service.warm_rates(
                     currencies, target_date=today, days_back=days_back,
-                    extra_pairs=[("EUR", base) for base in ("CHF", "USD")],
+                    extra_pairs=eur_to_base_pairs(),
                 )
                 total_rates = warmed["frankfurter"] + warmed["fallback"]
 

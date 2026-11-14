@@ -6,7 +6,7 @@ charts; a Swiss tax report; company-level look-through of the ETFs. A crypto boo
 lives beside it in its own **Crypto** mode and shares no figure with the stocks
 ([docs/crypto.md](docs/crypto.md)). All money is stored in EUR (the crypto book's USD is the one
 exception) and projected into a base currency the user switches at will
-(`app_settings.base_currency`, EUR/CHF/USD) — **read it from `/api/settings`, never from a
+(`app_settings.base_currency`, EUR/CHF/USD/GBP) — **read it from `/api/settings`, never from a
 document**; every figure moves with it.
 
 **Live:** https://portfolio.srv1211053.hstgr.cloud · **Repo is PUBLIC** (never commit account data)

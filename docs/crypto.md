@@ -171,8 +171,8 @@ nothing else; `warnings[]` says so under a fifth of the plan.
 4. **Writes**: the mapping and prices in one transaction (a failure is a warning); the FX warm-up
    (below); then, in **one** transaction, the snapshot, its holdings and **today's
    `crypto_daily_holdings` set**, replacing that UTC date's rows.
-5. **FX warm-up** — once per Berlin day (on the day's first snapshot), USD→EUR and EUR→CHF/USD
-   from `CRYPTO_HISTORY_START` minus the lookback, through the **existing** FX path
+5. **FX warm-up** — once per Berlin day (on the day's first snapshot), USD→EUR and EUR→each non-EUR base
+   (`eur_to_base_pairs()`: CHF, USD, GBP) from `CRYPTO_HISTORY_START` minus the lookback, through the **existing** FX path
    (`CurrencyService.warm_rates`, one pair per session); the whole window only while the cache
    does not reach within `FX_WARM_SLACK_DAYS` (7) of its start, a week otherwise. No other FX
    source exists for crypto.
