@@ -100,7 +100,8 @@ code trace; all of them shipped that evening (waves 1–3, the product issues #7
 Only what is still unverified.
 
 - **GBP as a base currency, and every base's FX history from the first purchase (2026-11-14):**
-  after both commits deploy, the first slot's exchange-rate result should carry
+  deployed 13:41 Berlin (`/health` on `54bf2a2`; `/api/settings` lists GBP). Still unseen: the first
+  slot's exchange-rate result (15:00 Berlin onward; `sync_runs`, ssh only) should carry
   `base_history: {"EUR->GBP": "backfilled"}` (one Frankfurter request — no Yahoo, no Flex; CHF and
   USD appear too only if their history fell short) and no such key on the slot after. Then switch
   the header to GBP: 200, `GBP` in `supported_currencies`, figures in `£`, the tax tab still CHF.
