@@ -99,7 +99,7 @@ code trace; all of them shipped that evening (waves 1–3, the product issues #7
 
 Only what is still unverified.
 
-- **GBP as a base currency (branch `ccr-47cc7bbe-8060um`, not yet on `main`):** after it deploys,
+- **GBP as a base currency (pushed to `main` 2026-11-14, 13:30 Berlin):** after it deploys,
   switch the header to GBP once — the switch backfills EUR→GBP from Frankfurter (no Yahoo, no
   Flex) and must answer 200 with `GBP` in `supported_currencies`; then the next exchange-rate slot's
   `sync_runs` row should list no stale `EUR->GBP`. Figures should read `£`; the tax tab stays CHF.
@@ -523,7 +523,7 @@ Rough priority. Re-verify each `path:line` in code before fixing; lines move.
 
 One line each, newest first; drop the oldest.
 
-- **2026-11-14 (GBP base currency, branch `ccr-47cc7bbe-8060um`)** — GBP joined EUR/CHF/USD as a
+- **2026-11-14 (GBP base currency, merged to `main` and pushed)** — GBP joined EUR/CHF/USD as a
   switchable base; the daily FX job's hard-coded `("CHF", "USD")` became `eur_to_base_pairs()`.
   The owner kept the benchmark's baseline FX gap (*Worth doing next* #5) out of scope.
 
