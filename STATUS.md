@@ -99,10 +99,11 @@ code trace; all of them shipped that evening (waves 1–3, the product issues #7
 
 Only what is still unverified.
 
-- **GBP as a base currency (pushed to `main` 2026-11-14, 13:30 Berlin):** after it deploys,
-  switch the header to GBP once — the switch backfills EUR→GBP from Frankfurter (no Yahoo, no
-  Flex) and must answer 200 with `GBP` in `supported_currencies`; then the next exchange-rate slot's
-  `sync_runs` row should list no stale `EUR->GBP`. Figures should read `£`; the tax tab stays CHF.
+- **GBP as a base currency, and every base's FX history from the first purchase (2026-11-14):**
+  after both commits deploy, the first slot's exchange-rate result should carry
+  `base_history: {"EUR->GBP": "backfilled"}` (one Frankfurter request — no Yahoo, no Flex; CHF and
+  USD appear too only if their history fell short) and no such key on the slot after. Then switch
+  the header to GBP: 200, `GBP` in `supported_currencies`, figures in `£`, the tax tab still CHF.
 
 - **BKR's EPS, median spans, screener spans and cache (pushed 2026-11-09, `3c1aea5`):** BKR,
   MRNA and the screener's cache verified on production (docs/shipped-log.md 2026-11-09).
@@ -524,7 +525,8 @@ Rough priority. Re-verify each `path:line` in code before fixing; lines move.
 One line each, newest first; drop the oldest.
 
 - **2026-11-14 (GBP base currency, merged to `main` and pushed)** — GBP joined EUR/CHF/USD as a
-  switchable base; the daily FX job's hard-coded `("CHF", "USD")` became `eur_to_base_pairs()`.
+  switchable base; the daily FX job's hard-coded `("CHF", "USD")` became `eur_to_base_pairs()`,
+  and the job now backfills every base's EUR→base history to the first lot (`ensure_base_history`).
   The owner kept the benchmark's baseline FX gap (*Worth doing next* #5) out of scope.
 
 - **2026-11-11 (EPS-gap fill)** — a forced EDGAR fetch failed on a ticker named twice (two

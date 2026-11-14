@@ -9,17 +9,15 @@ from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
-from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
-from app.models.taxlot import TaxLot
 from app.repositories.app_settings_repository import (
     SUPPORTED_BASE_CURRENCIES,
     AppSettingsRepository,
     normalize_base_currency,
 )
-from app.services.base_fx import default_start, load_base_fx
+from app.services.base_fx import load_base_fx, stock_book_start
 from app.services.currency_service import CurrencyService
 from app.clock import utc_today
 
@@ -104,8 +102,7 @@ async def update_base_currency(
     # Backfill EUR -> base daily rates over the full portfolio history so read
     # endpoints can convert without hitting the network. One Frankfurter range call.
     if base_currency != "EUR":
-        min_open = (await db.execute(select(func.min(TaxLot.open_date)))).scalar()
-        start = default_start(min_open)
+        start = await stock_book_start(db)
         currency_service = CurrencyService(db)
         try:
             today = utc_today()

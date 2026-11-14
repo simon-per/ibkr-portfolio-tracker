@@ -39,6 +39,7 @@ from app.services.currency_service import CurrencyService
 from app.services.sync_helper import ingest_flex_statement
 from app.repositories.security_repository import SecurityRepository, held
 from app.repositories.app_settings_repository import AppSettingsRepository, eur_to_base_pairs
+from app.services.base_fx import ensure_base_history, stock_book_start
 from app.repositories.sync_run_repository import SyncRunRepository, utc_iso
 from app.services.benchmark_service import (
     BENCHMARKS, BenchmarkService, last_finished_session,
@@ -1254,6 +1255,20 @@ class SchedulerService:
 
                 logger.info(f"Syncing exchange rates for currencies: {sorted(currencies)}")
 
+                # Each selectable base's full history first, from the first purchase:
+                # cost basis converts at each lot's own date, and the warm-up below keeps
+                # only a recent window. One request for every base that falls short (a
+                # newly added base, or a switch whose own backfill failed), and none once
+                # they all reach — so the warm-up then finds those pairs current.
+                history_start = await stock_book_start(db)
+                base_history = {
+                    f"EUR->{base}": "backfilled" if stored else "failed"
+                    for base, stored in (await ensure_base_history(
+                        db, currency_service, [b for _eur, b in eur_to_base_pairs()],
+                        history_start,
+                    )).items()
+                }
+
                 # The EUR->base rates for the selectable base currencies ride in
                 # the same request, so switching the display currency is instant. Every
                 # ECB pair costs one request between them, and none once current.
@@ -1273,6 +1288,8 @@ class SchedulerService:
                     "quoted_currencies": sorted(quoted),
                     "timestamp": utc_iso(utcnow())
                 }
+                if base_history:
+                    result["base_history"] = base_history
                 # Recorded, not warned: one run's failure is healed by the next slot's
                 # re-ask. The warning is the staleness those failures add up to.
                 for key in ("frankfurter_failed", "fallback_available"):

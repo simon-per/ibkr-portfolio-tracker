@@ -324,15 +324,20 @@ async def test_the_sync_makes_one_frankfurter_request_and_then_none(monkeypatch,
     first = await svc.sync_exchange_rates(days_back=7)
 
     assert first["status"] == "success"
-    (request,) = frankfurter(calls)
+    # On an empty cache the bases' full history comes first, in a request of its own
+    # (`ensure_base_history`, tests/test_base_history_backfill.py); the warm-up proper is
+    # still one request for everything else.
+    history, request = frankfurter(calls)
+    assert set(history[1]["to"].split(",")) == {"CHF", "USD", "GBP"}
     asked = set(request[1]["to"].split(","))
-    assert {"USD", "CHF"} | (MARKET_CAP_CURRENCIES & CurrencyService.SUPPORTED_CURRENCIES) == asked
-    assert len(calls) == 2                  # plus the one fallback table (TWD and the rest)
+    # The base pairs left it current to today, so the warm-up has no EUR->CHF to ask for.
+    assert {"USD"} | (MARKET_CAP_CURRENCIES & CurrencyService.SUPPORTED_CURRENCIES) == asked
+    assert len(calls) == 3                  # plus the one fallback table (TWD and the rest)
 
     second = await svc.sync_exchange_rates(days_back=7)
 
     assert second["status"] == "success"
-    assert len(calls) == 2
+    assert len(calls) == 3
     async with AsyncSession(engine) as db:
         pairs = {(r.from_currency, r.to_currency)
                  for r in (await db.execute(select(ExchangeRate))).scalars().all()}

@@ -27,7 +27,7 @@ from app.services.native_amounts import NativeToBase, cash_flow_in_base
 from app.services.realized_trades import ClosedCost, gain_in_base, realized_from_sell_trades
 # `BaseFx` lives in base_fx.py and is re-exported here, where eight test modules and
 # benchmark_service import it from.
-from app.services.base_fx import BaseFx, default_start, load_base_fx  # noqa: F401
+from app.services.base_fx import BaseFx, default_start, load_base_fx, stock_book_start  # noqa: F401
 from app.services.fx_policy import FX_MAX_CARRY_DAYS
 from app.services.fx_preload import (
     RateCache, eur_rate_on, preload_eur_rates, slice_eur_rates, wanted_currencies,
@@ -206,9 +206,8 @@ class PortfolioService:
         base_currency = await self.get_base_currency()
         if base_currency == "EUR":
             return BaseFx("EUR", {})
-        min_open = (await self.db.execute(select(func.min(TaxLot.open_date)))).scalar()
         return await load_base_fx(
-            self.db, self.currency_service, base_currency, default_start(min_open)
+            self.db, self.currency_service, base_currency, await stock_book_start(self.db)
         )
 
     async def _load_position_start_dates(self) -> Dict[int, date]:

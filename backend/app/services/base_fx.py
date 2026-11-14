@@ -12,7 +12,7 @@ import bisect
 import logging
 from datetime import date, timedelta
 from decimal import Decimal
-from typing import Dict, Optional
+from typing import Dict, List, Optional
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -114,3 +114,70 @@ def default_start(earliest: Optional[date]) -> date:
     """The loader's window start when a book has no dated history yet: one year back,
     which is what `PortfolioService` has always used for an empty lot table."""
     return earliest or (utc_today() - timedelta(days=365))
+
+
+async def stock_book_start(db: AsyncSession) -> date:
+    """The stock book's EUR->base window start: the earliest lot's `open_date` (IBKR and
+    pillar 3a alike), or a year back for an empty lot table.
+
+    One answer for the three places that need it — `PortfolioService._load_base_fx`
+    (what is read), the base-currency switch (what it backfills) and the daily FX job's
+    `ensure_base_history` (what it keeps filled). They were two copies of one query
+    before the third was written; a backfill that stops short of what the reader loads
+    is how a 2025 purchase ends up converted at a carried 2026 rate.
+    """
+    from sqlalchemy import func
+    from app.models.taxlot import TaxLot
+
+    earliest = (await db.execute(select(func.min(TaxLot.open_date)))).scalar()
+    return default_start(earliest)
+
+
+# How far after the window start the oldest stored rate may sit and still count as
+# reaching it: the start can be a weekend or a TARGET holiday (Easter spans four days),
+# and the ECB publishes nothing for those. `CurrencyService.WARM_REACH_SLACK_DAYS` is the
+# same allowance for the warm-up's own window.
+BASE_HISTORY_SLACK_DAYS = 7
+
+
+async def ensure_base_history(
+    db: AsyncSession, currency_service, bases: List[str], start: date,
+) -> Dict[str, bool]:
+    """
+    Make each EUR->base history in `bases` reach back to `start`, with **one** Frankfurter
+    range request for every base that does not. Returns `{base: stored anything}` for the
+    bases that needed it — empty when every history already reaches. Never raises
+    (`_fetch_ecb_range` does not).
+
+    The switch fills a base's history when it is chosen, but only if Frankfurter answers
+    at that moment — and the crypto book's warm-up and the daily warm-up each keep a
+    shorter window of the same pair. So a base whose switch-time backfill failed could
+    be accepted on 2026 rates alone, and `BaseFx` would carry the oldest one back over
+    every earlier purchase: cost basis at the wrong day's rate, silently. The daily FX
+    job calls this for every selectable base (`eur_to_base_pairs`), switched to or not,
+    so each one's full history is in the cache before anyone picks it, and a failed fill
+    is re-asked at the next slot. Once filled it is one indexed `min(date)` per base.
+    """
+    from sqlalchemy import func
+    from app.models.exchange_rate import ExchangeRate
+
+    short = []
+    for base in bases:
+        if base == "EUR":
+            continue
+        oldest = (await db.execute(
+            select(func.min(ExchangeRate.date)).where(
+                ExchangeRate.from_currency == "EUR",
+                ExchangeRate.to_currency == base,
+            )
+        )).scalar()
+        if oldest is None or oldest > start + timedelta(days=BASE_HISTORY_SLACK_DAYS):
+            short.append(base)
+    if not short:
+        return {}
+    pairs = [("EUR", base) for base in short]
+    answered, _ = await currency_service._fetch_ecb_range(pairs, start, utc_today())
+    for pair in pairs:
+        if pair not in answered:
+            logger.warning(f"Could not backfill EUR->{pair[1]} history from {start}")
+    return {base: ("EUR", base) in answered for base in short}

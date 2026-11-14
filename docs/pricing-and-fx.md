@@ -335,4 +335,19 @@ particular base: the tax report is CHF by construction and ignores the switch, a
 inherits the base through `_apply_base_currency` — including its known gap (STATUS.md *Worth doing
 next*), unchanged for GBP.
 
+**Every base's history reaches the first purchase, switched to or not** (2026-11-14,
+`base_fx.ensure_base_history`). Cost basis converts at each lot's own `open_date`, and `BaseFx`
+carries the nearest rate back over any gap — so a base whose cache starts in 2026 converts a 2025
+purchase at a 2026 rate, silently. The switch fills the history when a base is chosen, but only if
+Frankfurter answers at that moment; the daily warm-up keeps 7–30 days and the crypto book's warm-up
+reaches 2026-01-01. So `sync_exchange_rates` first asks `ensure_base_history` for every base in
+`eur_to_base_pairs()`: a base whose oldest EUR→base row is more than `BASE_HISTORY_SLACK_DAYS` (7,
+for a start on a weekend or Easter) after `stock_book_start` is fetched from there to today in
+**one** Frankfurter range request with every other short base; none once all reach, so it costs one
+indexed `min(date)` per base. The run record carries `base_history: {"EUR->GBP": "backfilled" |
+"failed"}` only when it asked; a failure is re-asked at the next slot. `stock_book_start` (earliest
+lot `open_date`, or a year back) is the one window start the reader (`_load_base_fx`), the switch and
+the job share — it was two copies of one query before the job needed a third. Tests:
+`tests/test_base_history_backfill.py`.
+
 ---
