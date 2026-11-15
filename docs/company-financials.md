@@ -220,16 +220,16 @@ the SEC lists no such ticker" needs a row of its own, with its own stamp (the `I
 
 | metric | chain, in order |
 |---|---|
-| revenue | `RevenuesNetOfInterestExpense` → `Revenues` → `RevenueFromContractWithCustomerExcludingAssessedTax` → `…IncludingAssessedTax` (CRWD, ODFL) → `SalesRevenueNet` → `SalesRevenueServicesNet` (ODFL before 2018) |
+| revenue | `RevenuesNetOfInterestExpense` → `Revenues` → `RevenueFromContractWithCustomerExcludingAssessedTax` → `…IncludingAssessedTax` (CRWD, ODFL) → `SalesRevenueNet` → `SalesRevenueServicesNet` (ODFL before 2018) → `RegulatedAndUnregulatedOperatingRevenue` (XEL from 2019) |
 | net income | `NetIncomeLoss` → `NetIncomeLossAvailableToCommonStockholdersBasic` → `ProfitLoss` |
 | diluted EPS | `EarningsPerShareDiluted` → `EarningsPerShareBasicAndDiluted` (ALNY to 2021) → `IncomeLossFromContinuingOperationsPerDilutedShare` (ABNB; MNST after 2011), then net income / diluted shares (below) |
 | operating cash flow | `NetCashProvidedByUsedInOperatingActivities` → `…ContinuingOperations` |
-| capex | `PaymentsToAcquirePropertyPlantAndEquipment` → `PaymentsToAcquireProductiveAssets` → `PaymentsForCapitalImprovements` |
+| capex | `PaymentsToAcquirePropertyPlantAndEquipment` → `PaymentsToAcquireProductiveAssets` → `PaymentsForCapitalImprovements` → `PaymentsToAcquireOtherPropertyPlantAndEquipment` (LLY) → `PaymentsToAcquireOtherProductiveAssets` (VZ, ROP from 2019) |
 | SBC | `ShareBasedCompensation` → `AllocatedShareBasedCompensationExpense` |
-| diluted shares | `WeightedAverageNumberOfDilutedSharesOutstanding` (then net income / EPS, below) |
+| diluted shares | `WeightedAverageNumberOfDilutedSharesOutstanding` → `WeightedAverageNumberOfShareOutstandingBasicAndDiluted` (ZS, WDAY, PANW, DDOG); in a loss period the reported basic count (below); then net income / EPS |
 | operating income | `OperatingIncomeLoss` |
 | dividends per share | `CommonStockDividendsPerShareDeclared` → `CommonStockDividendsPerShareCashPaid` |
-| cash | `CashAndCashEquivalentsAtCarryingValue` → `CashCashEquivalentsRestrictedCashAndRestrictedCashEquivalents` |
+| cash | `CashAndCashEquivalentsAtCarryingValue` → `CashCashEquivalentsRestrictedCashAndRestrictedCashEquivalents` → `…AtCarryingValueIncludingDiscontinuedOperations` (MDLZ 2016–2018) |
 | cash and short-term investments | `CashCashEquivalentsAndShortTermInvestments` (MSFT, GOOGL, ADBE) |
 | short-term investments | `ShortTermInvestments` → `MarketableSecuritiesCurrent` → `AvailableForSaleSecuritiesDebtSecuritiesCurrent` → `AvailableForSaleSecuritiesCurrent` |
 | gross profit | `GrossProfit` |
@@ -237,8 +237,8 @@ the SEC lists no such ticker" needs a row of its own, with its own stamp (the `I
 | buybacks | `PaymentsForRepurchaseOfCommonStock` |
 | dividends paid | `PaymentsOfDividendsCommonStock` → `PaymentsOfDividends` → `PaymentsOfOrdinaryDividends` |
 | debt, total | `LongTermDebt` → `LongTermDebtAndCapitalLeaseObligationsIncludingCurrentMaturities` |
-| debt, noncurrent | `LongTermDebtNoncurrent` → `LongTermDebtAndCapitalLeaseObligations` → `LongTermNotesAndLoans` (ORCL from 2026) |
-| debt, current | `LongTermDebtCurrent` → `DebtCurrent` → `NotesPayableCurrent` (ORCL) → `ShortTermBorrowings` (NFLX) |
+| debt, noncurrent | `LongTermDebtNoncurrent` → `LongTermDebtAndCapitalLeaseObligations` → `LongTermNotesAndLoans` (ORCL from 2026) → `ConvertibleDebtNoncurrent` → `ConvertibleLongTermNotesPayable` (PANW, DDOG, ZS) |
+| debt, current | `LongTermDebtCurrent` → `DebtCurrent` → `NotesPayableCurrent` (ORCL) → `ShortTermBorrowings` (NFLX) → `LongTermDebtAndCapitalLeaseObligationsCurrent` (ODFL, CSX) → `ConvertibleNotesPayableCurrent` → `ConvertibleDebtCurrent`; else zero when the balance sheet shows none (below) |
 | shares outstanding | `CommonStockSharesOutstanding` → `dei:EntityCommonStockSharesOutstanding` (the cover's, dated weeks after the period: keyed to the newest period end its own filing reports). A count tagged per class is left out by companyfacts |
 | equity | `StockholdersEquity` → `…IncludingPortionAttributableToNoncontrollingInterest` (the parent's first, as net income is) |
 
@@ -286,6 +286,36 @@ derived inside one concept before the chains merge (one exception, Q4 below).
   for a period with no non-current investments tagged beside it (`_total_only_when_current`, which
   reads `noncurrent_investments` for that test alone and never stores it): a total with nothing
   non-current beside it is all current, while beside one it would count long-dated securities as liquid.
+- **The chains were widened from a measurement, not a guess** (2026-11-15, after the owner
+  reported figures missing on the Company tab). Every quarter of the last ten years that a served
+  figure lacked, across the 132 companies on production, was matched against the concepts the
+  company did tag for that period. The concepts added above are the ones that continued a
+  series with the right magnitude (VZ's capex 17–23B a year exactly where
+  `PaymentsToAcquireProductiveAssets` stopped; LLY's 7.8B in 2025). Each goes **last**, so it only
+  fills: rerun over all 132 documents, no figure that existed changed except share counts (the
+  next two items) and NBIS (the reporting currency, below). `tests/test_company_financials_gaps.py`.
+- **A count tagged for basic and diluted alike is the diluted count**, and **in a loss period the
+  reported basic count is the diluted one** (ASC 260: every potential share is anti-dilutive in a
+  loss, so the two are equal by definition). TTWO tags only the basic count in its loss quarters
+  from mid-2025. Never in a profitable period, and never a basic quarter differenced from two
+  year-to-date averages (TTWO's FY2014 Q4 came to 121M between 112M and 79M).
+  `WeightedAverageNumberOfSharesOutstandingBasic` is also the split witness; it is read as the
+  internal `basic_shares` metric and dropped before rows are written. Where it replaced net
+  income / EPS the reported count moved the figure under 2% (rounded EPS), except before an IPO
+  (ZS, MRNA: up to 40%, the estimate being distorted by preferred stock).
+- **A current-debt half of zero where the balance sheet shows no current debt**
+  (`_no_current_debt_line`, source `no current debt on the balance sheet`). Debt is the total, else
+  the halves added, and a company with no current maturities tags no current line: META, ABNB,
+  TTWO, PYPL and WDAY had no debt, so no net cash, in most quarters. The zero is read off the
+  filing: the newest filing reporting the noncurrent half at that date reports nothing current and
+  debt-like there, under **any** concept (`CURRENT_DEBT_LIKE`; a lease alone does not count, debt
+  and leases together do). companyfacts carries no company-specific concept, so a current portion
+  tagged under one is invisible: **the maturity table is the witness**. A company whose table states
+  principal due within twelve months (`DUE_SOON_SHARE`, 2% of the noncurrent half) on any date
+  that would be zeroed gets no zero anywhere. Measured: of 661 candidate zeros, the 36 a table
+  covered were contradicted 24 times, all at PYPL (current notes in a `pypl:` concept, wrong) and
+  ORLY (classes notes due within the year as noncurrent, refinanced through its revolver — right,
+  but indistinguishable); both are withheld, leaving 588 zeros at 54 companies.
 - **EBITDA is not served**: depreciation and amortization are tagged inconsistently (GOOGL and
   AVGO tag depreciation alone, without the amortization of intangibles that dominates AVGO's).
 
@@ -812,8 +842,13 @@ All three were misses: the normaliser read 10-K/10-Q facts in us-gaap only.
   vote applies unchanged; only exact equivalents (revenue, profit attributable to owners, diluted EPS,
   operating profit, operating cash flow, capex, diluted shares, dividends, buybacks, cash, equity).
   A filer with any us-gaap chain concept is read in us-gaap alone, never both.
-  A concept reported in two currencies keeps the one it reports most, so TSMC is in TWD and its ADR's
-  USD closes match nothing: no multiples, rather than wrong ones.
+  The company reports in **the currency its newest periodic filing states most of its figures
+  in** (`_reporting_currency`), and a concept stated only in another currency is not read
+  (`_unit_for`), so two currencies never meet in one series. Until 2026-11-15 each concept kept
+  the currency *it* reported most, which kept NBIS (Yandex until 2024) in fifteen years of RUB and
+  ended its series at FY2023. TSMC stays in TWD: its 20-F translates only the latest year into
+  USD, beside TWD for every year, so its ADR's USD closes match nothing — no multiples, rather
+  than wrong ones.
 - **An annual-only filer's TTM is its fiscal years** (`_series_points`): each year is its own
   trailing twelve months, so the default view and the key figures show the latest year; the
   quarterly view stays empty.
@@ -824,6 +859,22 @@ All three were misses: the normaliser read 10-K/10-Q facts in us-gaap only.
   small requests a filer a year, accepted rather than a second cadence for three companies.
 
 ## Known gaps and out of scope
+
+Measured over the 132 companies on 2026-11-15 (the last eight quarters, what the tab shows
+first), after the widening above. What remains is not a concept the chains miss:
+
+- **Operating income is not a line** at LLY, JNJ, IBM, ADP, KLAC, PCAR, XOM and the banks (BAC,
+  JPM, IBKR); BKR and COHR stopped presenting one (2024). Pre-tax income is not operating income,
+  so none is derived.
+- **Capex no longer tagged**: ABNB from 2023 and APP from 2024 fold it into another investing line,
+  so their FCF ends there. ROP's `PaymentsToAcquireOtherProductiveAssets` is read and matches its
+  reported capex.
+- **Gross margin** where the income statement has no cost of revenue (utilities, VZ, ORCL, INTU
+  since 2020, PYPL, MA…): `CostsAndExpenses` is every cost, not the cost of revenue.
+- **Debt left unknown** at PYPL and ORLY by the maturity-table witness above, and at companies whose
+  only debt concepts are company-specific.
+- **NU and TSMC's FY2025** (20-F, IFRS): filed months ago and not in companyfacts; `_filing_behind`
+  does not read an IFRS instance. Their figures end at FY2024.
 
 - **NVDA capex, FY2013–FY2021**: NVDA tagged its annual capex ("purchases related to property
   and equipment and intangible assets") as an `nvda:` extension concept, which companyfacts does

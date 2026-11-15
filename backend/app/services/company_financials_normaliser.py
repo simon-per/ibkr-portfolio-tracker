@@ -86,6 +86,9 @@ COVER_SHARES = "EntityCommonStockSharesOutstanding"
 # is all current (`_total_only_when_current`, review item CO8).
 AFS_TOTAL = "AvailableForSaleSecuritiesDebtSecurities"
 NONCURRENT_INVESTMENTS = "noncurrent_investments"
+# The basic count, read only to stand in for the diluted one in a loss period
+# (`_basic_in_a_loss`); never stored as a figure.
+BASIC_SHARES = "basic_shares"
 
 # Verified across the book's SEC filers (2026-10-25). Order is preference.
 #
@@ -105,6 +108,9 @@ METRICS: Dict[str, MetricSpec] = {
             "SalesRevenueNet",
             # ODFL's revenue before 2018: freight services.
             "SalesRevenueServicesNet",
+            # A utility's top line (XEL from 2019, when it stopped tagging `Revenues`: its
+            # revenue had ended there). Last, so no company that tags another concept moves.
+            "RegulatedAndUnregulatedOperatingRevenue",
         ),
         non_negative=True,
     ),
@@ -147,6 +153,11 @@ METRICS: Dict[str, MetricSpec] = {
             "PaymentsToAcquirePropertyPlantAndEquipment",
             "PaymentsToAcquireProductiveAssets",
             "PaymentsForCapitalImprovements",
+            # LLY's "purchases of property and equipment" (7.8B in 2025), and VZ's capex from
+            # 2019 (17-23B a year, continuing `PaymentsToAcquireProductiveAssets` exactly) and
+            # ROP's: without them their FCF ended in 2019-2022 (checked 2026-11-15).
+            "PaymentsToAcquireOtherPropertyPlantAndEquipment",
+            "PaymentsToAcquireOtherProductiveAssets",
         ),
         non_negative=True,
     ),
@@ -159,10 +170,15 @@ METRICS: Dict[str, MetricSpec] = {
         ),
         non_negative=True,
     ),
+    # A company with nothing dilutive, or in a loss quarter where dilution is anti-dilutive,
+    # may tag one count for both (ZS, WDAY, PANW, DDOG): it is then the diluted count.
     "diluted_shares": MetricSpec(
         SHARES,
         FLOW,
-        ("WeightedAverageNumberOfDilutedSharesOutstanding",),
+        (
+            "WeightedAverageNumberOfDilutedSharesOutstanding",
+            "WeightedAverageNumberOfShareOutstandingBasicAndDiluted",
+        ),
         non_negative=True,
     ),
     "operating_income": MetricSpec(MONETARY, FLOW, ("OperatingIncomeLoss",)),
@@ -181,6 +197,8 @@ METRICS: Dict[str, MetricSpec] = {
         (
             "CashAndCashEquivalentsAtCarryingValue",
             "CashCashEquivalentsRestrictedCashAndRestrictedCashEquivalents",
+            # The balance sheet's cash while a business was held for sale (MDLZ 2016-2018).
+            "CashAndCashEquivalentsAtCarryingValueIncludingDiscontinuedOperations",
         ),
     ),
     # Cash and short-term investments as one line (MSFT, GOOGL, ADBE), and the investments
@@ -203,6 +221,10 @@ METRICS: Dict[str, MetricSpec] = {
             # non-current tagged beside it (`NONCURRENT_INVESTMENTS`, `_total_only_when_current`).
             AFS_TOTAL,
         ),
+    ),
+    # Only read where the diluted count is missing in a loss period; never stored.
+    BASIC_SHARES: MetricSpec(
+        SHARES, FLOW, ("WeightedAverageNumberOfSharesOutstandingBasic",), non_negative=True
     ),
     # Only read to decide whether `AFS_TOTAL` is all current; never stored as a figure.
     NONCURRENT_INVESTMENTS: MetricSpec(
@@ -269,12 +291,25 @@ METRICS: Dict[str, MetricSpec] = {
             "LongTermDebtNoncurrent",
             "LongTermDebtAndCapitalLeaseObligations",
             "LongTermNotesAndLoans",
+            # A company whose only debt is convertible notes (PANW, DDOG, ZS) tags nothing else.
+            "ConvertibleDebtNoncurrent",
+            "ConvertibleLongTermNotesPayable",
         ),
     ),
     "debt_current": MetricSpec(
         MONETARY,
         INSTANT,
-        ("LongTermDebtCurrent", "DebtCurrent", "NotesPayableCurrent", "ShortTermBorrowings"),
+        (
+            "LongTermDebtCurrent",
+            "DebtCurrent",
+            "NotesPayableCurrent",
+            "ShortTermBorrowings",
+            # Current maturities with the finance leases (ODFL to 2022, CSX throughout). After
+            # the others, so a company that tags `DebtCurrent` beside it keeps that figure.
+            "LongTermDebtAndCapitalLeaseObligationsCurrent",
+            "ConvertibleNotesPayableCurrent",
+            "ConvertibleDebtCurrent",
+        ),
     ),
     # The balance sheet's count at the period end, for the market cap. A company with several
     # classes tags it per class, which companyfacts leaves out: none is read for it.
@@ -544,6 +579,50 @@ def _taxonomy(companyfacts: Dict[str, Any], wanted: Dict[str, str]) -> Dict[str,
     return {twin: ifrs[name] for name, twin in IFRS_TWINS.items() if name in ifrs}
 
 
+def _reporting_currency(gaap: Dict[str, Any], wanted: Dict[str, str]) -> Optional[str]:
+    """
+    The currency the company reports in now: the one its newest periodic filing states its
+    monetary figures in most. None when it states none.
+
+    Per concept, "the currency it reports most" kept a company's past: NBIS (Yandex until
+    2024) reported in RUB for fifteen years and in USD since, so every concept kept RUB and
+    the series ended at FY2023 (2026-11-15). The newest filing is the company as it is;
+    TSMC's 20-F adds a USD translation of its latest year beside TWD for every year, so it
+    stays in TWD.
+    """
+    newest: Optional[Tuple[date, str]] = None
+    by_filing: Dict[str, Counter] = defaultdict(Counter)
+    for concept, kind in wanted.items():
+        if kind != MONETARY:
+            continue
+        for unit, rows in ((gaap.get(concept) or {}).get("units") or {}).items():
+            if not _is_currency(unit):
+                continue
+            for row in rows:
+                filed, accn = _date(row.get("filed")), row.get("accn")
+                if row.get("form") not in FORMS or filed is None or not accn:
+                    continue
+                by_filing[accn][unit] += 1
+                if newest is None or (filed, accn) > newest:
+                    newest = (filed, accn)
+    if newest is None:
+        return None
+    return max(by_filing[newest[1]].items(), key=lambda item: (item[1], item[0]))[0]
+
+
+def _unit_for(kind: str, fitting: Dict[str, Any], reporting: Optional[str]) -> Optional[str]:
+    """
+    The unit to read a concept in: the reporting currency's (or its per-share unit), and a
+    concept stated only in another currency is not read at all — it is the company's past
+    in an old currency, and beside the new one's figures it would mix the two in one series.
+    A share count has no currency; without a reporting currency, the unit reported most.
+    """
+    if reporting is None or kind == SHARES:
+        return max(fitting, key=lambda u: (len(fitting[u]), u))
+    wanted = reporting if kind == MONETARY else f"{reporting}/shares"
+    return wanted if wanted in fitting else None
+
+
 def _facts(companyfacts: Dict[str, Any]) -> List[Fact]:
     """Every usable fact of every concept a chain names, in the concept's main unit."""
     wanted = {c: spec.kind for spec in METRICS.values() for c in spec.concepts}
@@ -553,14 +632,16 @@ def _facts(companyfacts: Dict[str, Any]) -> List[Fact]:
         c for spec in METRICS.values() if spec.non_negative for c in spec.concepts
     }
     gaap = _taxonomy(companyfacts, wanted)
+    reporting = _reporting_currency(gaap, wanted)
     out: List[Fact] = []
     for concept, kind in wanted.items():
         units = (gaap.get(concept) or {}).get("units") or {}
         fitting = {u: rows for u, rows in units.items() if _unit_fits(kind, u) and rows}
         if not fitting:
             continue
-        # A concept reported in two currencies keeps the one it reports most.
-        unit = max(fitting, key=lambda u: (len(fitting[u]), u))
+        unit = _unit_for(kind, fitting, reporting)
+        if unit is None:
+            continue
         for row in fitting[unit]:
             if row.get("form") not in FORMS:
                 continue
@@ -859,6 +940,27 @@ def _unchained_investments(companyfacts: Dict[str, Any], end: date) -> List[str]
     return sorted(out)
 
 
+def _basic_in_a_loss(values: Dict[str, Dict[Tuple[str, date], Obs]]) -> None:
+    """
+    The basic count as the diluted one for a period with a net loss and no diluted count.
+
+    In a loss every potential share is anti-dilutive, so diluted equals basic by definition
+    (ASC 260), and some companies then tag only the basic count: TTWO's loss quarters from
+    mid-2025 had no share count, so no per-share figure (2026-11-15). Never in a profitable
+    period, where the two differ. Only a reported count: a quarter differenced out of two
+    year-to-date averages is no count (TTWO's FY2014 Q4 came to 121M between 112M and 79M).
+    The basic figures are dropped here, read for this alone.
+    """
+    basic = values.pop(BASIC_SHARES, {})
+    diluted, income = values["diluted_shares"], values["net_income"]
+    for key, obs in basic.items():
+        loss = income.get(key)
+        if obs.derived or key in diluted:
+            continue
+        if loss is not None and loss.value < 0:
+            diluted[key] = obs
+
+
 def _total_only_when_current(values: Dict[str, Dict[Tuple[str, date], Obs]]) -> None:
     """
     `AFS_TOTAL` stands for the short-term investments only where the company tagged no
@@ -872,6 +974,91 @@ def _total_only_when_current(values: Dict[str, Dict[Tuple[str, date], Obs]]) -> 
     for key, obs in list(investments.items()):
         if obs.concept == AFS_TOTAL and key in noncurrent:
             del investments[key]
+
+
+#: The source recorded for a current-debt half read as zero (`_no_current_debt_line`).
+NO_CURRENT_DEBT_LINE = "no current debt on the balance sheet"
+# A balance-sheet line that is current debt under any concept, chained or not: the filing
+# shows one, so a zero would be a guess. A lease alone is not debt here (no chain counts one
+# beside the notes) — but debt and leases together are (CSX); securities, receivables and
+# investments are assets, and a maturity schedule or a cash flow is no balance.
+CURRENT_DEBT_LIKE = re.compile(r"(Debt|Notes|Borrowing|CommercialPaper).*Current|Current.*(Debt|Borrowing)")
+# The maturity table's principal due within twelve months, and the share of the noncurrent
+# half from which it contradicts a zero current half (`_no_current_debt_line`).
+DUE_WITHIN_A_YEAR = (
+    "LongTermDebtMaturitiesRepaymentsOfPrincipalInNextTwelveMonths",
+    "LongtermDebtMaturitiesRepaymentsOfPrincipalInNextTwelveMonths",
+)
+DUE_SOON_SHARE = 0.02
+NOT_CURRENT_DEBT = re.compile(
+    r"AvailableForSale|Securities|Receivable|Investment|Asset|Maturities|Repayments|Proceeds"
+    r"|Payments|FairValue|^(Finance|Operating|CapitalLease)Lease|LeaseLiabilit"
+)
+
+
+def _no_current_debt_line(
+    values: Dict[str, Dict[Tuple[str, date], Obs]],
+    facts: Sequence[Fact],
+    companyfacts: Dict[str, Any],
+    mapping: Dict[date, date],
+) -> None:
+    """
+    A current-debt half of zero where the balance sheet has no current debt to show.
+
+    Debt is the tagged total, else the two halves added (`company_financials_service._debt`),
+    and a company with no current maturities tags no current line at all — so META, ABNB,
+    TTWO, PYPL and WDAY had no debt, and no net cash, in most quarters (measured over the
+    132 companies, 2026-11-15). The zero is read off the filing itself, not assumed: the
+    newest filing that reports the noncurrent half at that date reports nothing current and
+    debt-like there, under any concept (`CURRENT_DEBT_LIKE`), chained or not.
+
+    companyfacts carries no company-specific concept, so a current portion tagged under one
+    is invisible here (PYPL's current notes, about 1.4B). The maturity table is the witness:
+    a company whose table states principal due within twelve months (`DUE_SOON_SHARE` of the
+    noncurrent half or more) on any date this would zero gets no zero anywhere — debt stays
+    unknown for it, as before. That also costs ORLY its zeros, which were right (it classes
+    notes due within the year as noncurrent, refinanced through its revolver): a missed
+    figure is the cheaper error.
+    """
+    noncurrent_chain = set(METRICS["debt_noncurrent"].concepts)
+    newest: Dict[date, Tuple[date, str]] = {}
+    for f in facts:
+        if f.concept in noncurrent_chain and f.start is None and f.end in mapping:
+            end = mapping[f.end]
+            if end not in newest or (f.filed, f.accn) > newest[end]:
+                newest[end] = (f.filed, f.accn)
+    if not newest:
+        return
+    gaap = ((companyfacts or {}).get("facts") or {}).get("us-gaap") or {}
+    shown: set = set()
+    for concept, body in gaap.items():
+        if not CURRENT_DEBT_LIKE.search(concept) or NOT_CURRENT_DEBT.search(concept):
+            continue
+        for rows in ((body or {}).get("units") or {}).values():
+            for row in rows:
+                end = _date(row.get("end"))
+                if end is not None and "start" not in row:
+                    shown.add((row.get("accn"), mapping.get(end, end)))
+    due_soon: Dict[date, float] = {}
+    for concept in DUE_WITHIN_A_YEAR:
+        for rows in ((gaap.get(concept) or {}).get("units") or {}).values():
+            for row in rows:
+                end = _date(row.get("end"))
+                if end is not None and isinstance(row.get("val"), (int, float)):
+                    due_soon[mapping.get(end, end)] = float(row["val"])
+    current, total = values["debt_current"], values["debt_total"]
+    zeros = {}
+    for key, half in values["debt_noncurrent"].items():
+        filing = newest.get(key[1])
+        if key in current or key in total or filing is None or (filing[1], key[1]) in shown:
+            continue
+        if due_soon.get(key[1], 0.0) >= DUE_SOON_SHARE * abs(half.value) > 0:
+            return
+        zeros[key] = Obs(
+            value=0.0, filed=half.filed, start=None, end=half.end, unit=half.unit,
+            concept=NO_CURRENT_DEBT_LINE, derived=True,
+        )
+    current.update(zeros)
 
 
 def filed_splits(events: Iterable[Dict[str, Any]]) -> List[Dict[str, Any]]:
@@ -1477,7 +1664,9 @@ def normalise(
     events: List[Dict[str, Any]] = []
     multiplier = adjustments(facts, events)
     result.splits = filed_splits(events)
-    latest = _latest([f for f in facts if f.concept != SPLIT_WITNESS], multiplier)
+    # The witness is read like any concept since it also stands in for a loss period's
+    # diluted count (`BASIC_SHARES`, `_basic_in_a_loss`); it is never stored either way.
+    latest = _latest(facts, multiplier)
     totals = {c: latest.pop(c) for c in DIVIDEND_TOTALS if c in latest}
 
     quarters: Dict[str, Dict[date, Obs]] = {}
@@ -1538,6 +1727,8 @@ def normalise(
 
     _flat_rate_years(values, keys, calendar, latest, totals, mapping)
     _total_only_when_current(values)
+    _basic_in_a_loss(values)
+    _no_current_debt_line(values, facts, companyfacts, mapping)
 
     # Q4 = FY less the three quarters, across the chain, when no single concept could give
     # it: ORCL tags the year as `Revenues` and its quarters as `RevenueFromContract...`, so

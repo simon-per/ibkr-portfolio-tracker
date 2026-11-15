@@ -99,6 +99,14 @@ code trace; all of them shipped that evening (waves 1–3, the product issues #7
 
 Only what is still unverified.
 
+- **Company tab gaps filled (2026-11-15, normaliser only):** nothing moves until each company is
+  refetched — the Sunday 2026-11-22 05:00 pass does all of them (fetched > 6 days ago). Do not
+  `--force` it sooner: that re-asks Yahoo for every profile. Then, on the public API: XEL's quarterly
+  revenue reaching 2026; LLY's, VZ's and ROP's FCF past 2019–2022; PANW, DDOG and ZS with debt;
+  META's net cash in most quarters; TTWO's loss quarters with a share count; NBIS in USD through
+  FY2025. The 2026-11-15 measurement, run before and after over all 132 documents, is in
+  docs/company-financials.md (*The normaliser*, *Known gaps*).
+
 - **GBP as a base currency, and every base's FX history from the first purchase (2026-11-14):**
   deployed 13:41 Berlin (`/health` on `54bf2a2`; `/api/settings` lists GBP). Still unseen: the first
   slot's exchange-rate result (15:00 Berlin onward; `sync_runs`, ssh only) should carry
@@ -506,6 +514,9 @@ Rough priority. Re-verify each `path:line` in code before fixing; lines move.
     hidden Analytics tab's `segments` through `decompose` before that tab returns (it still
     classifies basket rows itself, with raw countries). Researched future sources (N-PORT,
     commercial APIs — do not re-shop) are in docs/lookthrough.md.
+7b. **NU's and TSMC's FY2025 (held: NU).** Their 20-F (IFRS) was filed months ago and is not in
+    companyfacts; `edgar_filing_facts.parse_instance` reads the us-gaap namespace only, so
+    `_filing_behind` cannot fill it. Reading `ifrs-full` facts under their `IFRS_TWINS` would.
 7a. **Read an older quarter companyfacts skipped, automatically.** `_filing_behind` reads only
     the newest filing `submissions` lists; AEP's and EXC's Q2 2026 were filled by hand
     (docs/company-financials.md, *When companyfacts lags the filing list*). For a recent quarter
@@ -527,6 +538,11 @@ Rough priority. Re-verify each `path:line` in code before fixing; lines move.
 
 One line each, newest first; drop the oldest.
 
+- **2026-11-15 (Company tab gaps)** — measured every missing quarter over the 132 companies,
+  matched each to what SEC did carry; widened the chains, a zero current-debt half off the balance
+  sheet, a loss quarter's basic count, the newest filing's currency (NBIS). GBP checked in the
+  browser; the tax report follows the base currency (docs corrected).
+
 - **2026-11-14 (GBP base currency, merged to `main` and pushed)** — GBP joined EUR/CHF/USD as a
   switchable base; the daily FX job's hard-coded `("CHF", "USD")` became `eur_to_base_pairs()`,
   and the job now backfills every base's EUR→base history to the first lot (`ensure_base_history`).
@@ -543,7 +559,3 @@ One line each, newest first; drop the oldest.
   pass on production; Allocation's Sectors and Regions became the look-through rolled up (new
   `region_taxonomy`; `etf_mappings.py`'s estimates and the client's maps deleted), and a Company
   screener reads each company against its own 5-year multiples.
-- **2026-11-07/08 (/goal run of the 14-reviewer audit, waves 0–7)** — ~90 findings fixed across
-  safety, performance, dividends, the ledger, Yahoo, company data and features, look-through and
-  tax; one local branch per wave merged into `main`; R6 built after an approved read. Pushed 2026-11-08
-  (`65784c0`); the post-deploy read found VI4 missing the EM 3a fund, fixed in `77962ea`.
