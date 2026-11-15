@@ -7,7 +7,7 @@
 > [docs/troubleshooting.md](docs/troubleshooting.md); local-dev traps in
 > [docs/local-development.md](docs/local-development.md).
 
-**Last updated: 2026-11-14.** The **Company tab** (one company's SEC EDGAR fundamentals history,
+**Last updated: 2026-11-15.** The **Company tab** (one company's SEC EDGAR fundamentals history,
 docs/company-financials.md) is deployed and filled for the held filers **and the Nasdaq-100**
 (102 companies with figures, keyed by CIK), with key figures, valuation multiples (weekly Yahoo closes), ROE and net cash, gross margin, operating income,
 buybacks & dividends, cash & debt and 3/5/10Y CAGRs (docs/shipped-log.md 2026-10-25). PR #80 (Swiss residency)
@@ -104,7 +104,9 @@ Only what is still unverified.
   slot's exchange-rate result (15:00 Berlin onward; `sync_runs`, ssh only) should carry
   `base_history: {"EUR->GBP": "backfilled"}` (one Frankfurter request — no Yahoo, no Flex; CHF and
   USD appear too only if their history fell short) and no such key on the slot after. Then switch
-  the header to GBP: 200, `GBP` in `supported_currencies`, figures in `£`, the tax tab still CHF.
+  the header to GBP: 200, `GBP` in `supported_currencies`, figures in `£` — the Tax tab too: it
+  follows the switch like every tab (every tab and Crypto checked in GBP locally on the smoke
+  fixture, 2026-11-15: no console errors, no `€`/`CHF` label left on a base figure).
 
 - **BKR's EPS, median spans, screener spans and cache (pushed 2026-11-09, `3c1aea5`):** BKR,
   MRNA and the screener's cache verified on production (docs/shipped-log.md 2026-11-09).

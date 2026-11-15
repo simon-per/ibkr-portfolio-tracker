@@ -331,9 +331,10 @@ day older each morning. `tests/test_base_currency_family.py` walks `app/` for an
 base currencies outside that module. Adding a base is the list, a symbol in the frontend's
 `CURRENCY_SYMBOLS` (`lib/utils.ts`; an unmapped code prints as `XXX `), and `DEFAULT_SUPPORTED` in
 `lib/CurrencyContext.tsx` (the fallback when `/api/settings` cannot be read). Nothing branches on a
-particular base: the tax report is CHF by construction and ignores the switch, and the benchmark
-inherits the base through `_apply_base_currency` — including its known gap (STATUS.md *Worth doing
-next*), unchanged for GBP.
+particular base — **the Swiss tax report included**: `tax_service` converts through
+`_load_base_fx()` like every other reader, so under a GBP base the report is in GBP (checked in the
+browser on the smoke fixture, 2026-11-15). The benchmark inherits the base through
+`_apply_base_currency`, including its known gap (STATUS.md *Worth doing next*), unchanged for GBP.
 
 **Every base's history reaches the first purchase, switched to or not** (2026-11-14,
 `base_fx.ensure_base_history`). Cost basis converts at each lot's own `open_date`, and `BaseFx`
