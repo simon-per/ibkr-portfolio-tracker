@@ -224,7 +224,7 @@ the SEC lists no such ticker" needs a row of its own, with its own stamp (the `I
 | net income | `NetIncomeLoss` → `NetIncomeLossAvailableToCommonStockholdersBasic` → `ProfitLoss` |
 | diluted EPS | `EarningsPerShareDiluted` → `EarningsPerShareBasicAndDiluted` (ALNY to 2021) → `IncomeLossFromContinuingOperationsPerDilutedShare` (ABNB; MNST after 2011), then net income / diluted shares (below) |
 | operating cash flow | `NetCashProvidedByUsedInOperatingActivities` → `…ContinuingOperations` |
-| capex | `PaymentsToAcquirePropertyPlantAndEquipment` → `PaymentsToAcquireProductiveAssets` → `PaymentsForCapitalImprovements` → `PaymentsToAcquireOtherPropertyPlantAndEquipment` (LLY) → `PaymentsToAcquireOtherProductiveAssets` (VZ, ROP from 2019) |
+| capex | `PaymentsToAcquirePropertyPlantAndEquipment` → `PaymentsToAcquireProductiveAssets` → `PaymentsForCapitalImprovements` → `PaymentsToAcquireOtherPropertyPlantAndEquipment` (LLY) → `PaymentsToAcquireOtherProductiveAssets` (VZ, ROP from 2019) → `PaymentsToAcquireOilAndGasPropertyAndEquipment` → `PaymentsToAcquireOilAndGasProperty` (FANG) |
 | SBC | `ShareBasedCompensation` → `AllocatedShareBasedCompensationExpense` |
 | diluted shares | `WeightedAverageNumberOfDilutedSharesOutstanding` → `WeightedAverageNumberOfShareOutstandingBasicAndDiluted` (ZS, WDAY, PANW, DDOG); in a loss period the reported basic count (below); then net income / EPS |
 | operating income | `OperatingIncomeLoss` |
@@ -270,8 +270,9 @@ derived inside one concept before the chains merge (one exception, Q4 below).
   plus the investments chain. A period without them, of a company that tagged them within
   `INVESTMENTS_LOOKBACK_DAYS` (two years), has no net cash: NVDA's `MarketableSecuritiesCurrent`
   stops in late 2025, so its net cash ends there rather than turning into cash alone. A company
-  that never tagged any (AVGO) holds cash alone. No debt tagged is no net cash, never debt of 0
-  (a debt-free MNST has none). Enterprise value = market cap less net cash; EV/EBIT over TTM
+  that never tagged any (AVGO) holds cash alone. No debt tagged is no net cash, never an assumed debt
+  of 0 — **unless the balance sheet itself shows none** (`_no_debt_at_all`, below): MNST, ISRG
+  and ANET now have net cash. Enterprise value = market cap less net cash; EV/EBIT over TTM
   operating income, both in the key figures only.
 - **An investments concept outside the chain is named, never read** (`_unchained_investments`,
   review item CO8, 2026-11-08). KLAC's net cash was cash alone: its marketable securities sit in a
@@ -316,6 +317,44 @@ derived inside one concept before the chains merge (one exception, Q4 below).
   covered were contradicted 24 times, all at PYPL (current notes in a `pypl:` concept, wrong) and
   ORLY (classes notes due within the year as noncurrent, refinanced through its revolver — right,
   but indistinguishable); both are withheld, leaving 588 zeros at 54 companies.
+- **Bridging: the chains extend themselves** (`_bridge`, `BRIDGE_FAMILIES`; owner, 2026-11-15:
+  "this should be closed in the script, not one by one"). The weekly pass already re-reads every
+  company's whole history; what left gaps was the reading — a hand-kept list of concept names per
+  figure, so a company that moved a line to another standard concept had its series stop until
+  someone added it. Now, for every company and every flow figure and cash, each us-gaap concept
+  outside the chains that is *named* like the figure (`BRIDGE_FAMILIES`: a pattern, and one for what
+  it must not be named) is read like a chain concept and **proves itself**: on the periods both
+  report it agrees with the chain's figure within 0.5% (`BRIDGE_TOLERANCE`), at least twice and on
+  90% of them. Only then does it fill the periods the chain lacks; it never replaces a figure. A
+  part named like the whole (`RegulatedOperatingRevenueGas`) never agrees; a concept that never
+  overlaps proves nothing. With the hand-added concepts above taken out again, it rediscovers XEL's
+  revenue, ROP's and LLY's capex on its own (VZ's two capex concepts share one period only). Over
+  the 132 companies it fills 216 more periods of history (JNJ, MNST and WDC's pre-2018
+  `SalesRevenueGoodsNet`; ALNY's and FANG's pre-2017 revenue; CSX's and TXN's buybacks). Each pass
+  records what filled what in its summary (`bridged`: "JNJ revenue <- SalesRevenueGoodsNet (n)") —
+  information, not a warning. Debt is not bridged: a total agrees with its noncurrent half whenever
+  nothing is current, so agreement proves less there.
+- **A balance sheet with no borrowing at all has no debt** (`_no_debt_at_all`, source `no debt on
+  the balance sheet`, both halves 0). ANET, ISRG, PLTR, MPWR, TER and MNST carry no debt and tag
+  none, so their net cash — the figure that matters most for them — was unknown in every quarter.
+  The zero is read off the filing whose **balance sheet** is at that date
+  (`LiabilitiesAndStockholdersEquity`: a cash figure alone can be a cash flow statement's opening
+  balance, and 2009–2010 quarters read debt-free beside billions of notes until this was keyed to
+  the balance sheet). It fires only when, at that date, the filing states nothing debt-like under
+  any concept (`DEBT_LIKE`, a maturity table included; securities held and a facility's capacity
+  are not borrowings), and three witnesses agree:
+  - **interest**: no material interest (`INTEREST_SHARE`, 0.2% of the balance sheet a year,
+    annualised from periods of a quarter or more — MPWR tags stub periods) for a period ending within
+    `INTEREST_WINDOW_DAYS` (200) of the date, in any filing — PCAR states interest only yearly;
+  - **a borrower companyfacts is blind to** — material interest and no debt figure ever (BRK and PCAR
+    report debt per segment, which companyfacts leaves out; banks) — gets no zero up to its last
+    material interest (BRK tags interest only from 2025);
+  - **no zero between debt** within `DEBT_GAP_DAYS` (400) on both sides: a balance sheet does not
+    shed its debt for a quarter (FAST's 2015 line of credit, LIN's 2018, AMZN's 2011). Years without
+    debt between two borrowings stay (META 2013–2021).
+  Measured over the 132 companies: 668 zeros at 40 companies, none between real debt; Apple before
+  its 2013 bonds, NVDA before 2013, Visa before 2015, META 2013–2021, MSTR before 2020, Fortinet
+  before 2021 — each a known debt-free period.
 - **EBITDA is not served**: depreciation and amortization are tagged inconsistently (GOOGL and
   AVGO tag depreciation alone, without the amortization of intangibles that dominates AVGO's).
 
@@ -860,15 +899,19 @@ All three were misses: the normaliser read 10-K/10-Q facts in us-gaap only.
 
 ## Known gaps and out of scope
 
-Measured over the 132 companies on 2026-11-15 (the last eight quarters, what the tab shows
-first), after the widening above. What remains is not a concept the chains miss:
+Measured over the 132 companies on 2026-11-15 over the last eight quarters, what the tab shows
+first (before → after the chains, bridging and both debt rules): revenue 9 → 1 missing quarters,
+FCF 95 → 55, debt 273 → 95 (46 → 23 companies), share counts 30 → 28. Bridging closed none of the
+recent ones: **what remains is not in companyfacts under any standard concept** — not filed
+separately, or filed only under a company's own extension concept, which companyfacts omits:
 
 - **Operating income is not a line** at LLY, JNJ, IBM, ADP, KLAC, PCAR, XOM and the banks (BAC,
   JPM, IBKR); BKR and COHR stopped presenting one (2024). Pre-tax income is not operating income,
   so none is derived.
-- **Capex no longer tagged**: ABNB from 2023 and APP from 2024 fold it into another investing line,
-  so their FCF ends there. ROP's `PaymentsToAcquireOtherProductiveAssets` is read and matches its
-  reported capex.
+- **Capex no longer tagged**: ABNB from 2023 and APP from 2024 fold it into another investing line
+  (ABNB's 10-Q for Q3 2026 has no capex line at all, read 2026-11-15), so their FCF ends there.
+- **Banks and brokers** (BAC, JPM, IBKR, SOFI, BRK): FCF, operating income and debt in the
+  industrial sense do not apply; absent by design.
 - **Gross margin** where the income statement has no cost of revenue (utilities, VZ, ORCL, INTU
   since 2020, PYPL, MA…): `CostsAndExpenses` is every cost, not the cost of revenue.
 - **Debt left unknown** at PYPL and ORLY by the maturity-table witness above, and at companies whose

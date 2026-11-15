@@ -281,3 +281,134 @@ def test_a_concept_only_in_the_old_currency_is_not_mixed_in():
     result = normalise(doc)
     assert _value(result, "revenue", Q1, "Q1") is None
     assert {r["unit"] for r in result.rows} == {"USD"}
+
+
+# ── bridging: a concept outside the chains that proves itself ────────────────
+
+
+def _quarters(*values, start_year=2023):
+    """Discrete quarters of one year, Q1..Qn, each filed a month after it ends."""
+    ends = ["03-31", "06-30", "09-30", "12-31"]
+    starts = ["01-01", "04-01", "07-01", "10-01"]
+    out = []
+    for i, v in enumerate(values):
+        y = start_year + i // 4
+        q = i % 4
+        filed_month = {0: "05", 1: "08", 2: "11", 3: "02"}[q]
+        filed_year = y + 1 if q == 3 else y
+        out.append(_f(f"{y}-{starts[q]}", f"{y}-{ends[q]}", v, f"{filed_year}-{filed_month}-01",
+                      accn=f"a-{y}-{q}"))
+    return out
+
+
+def _bridge_doc(chain, other, other_name="SalesRevenueGoodsNet"):
+    # The 10-K years place the quarters in fiscal years, as every filer's do.
+    income = _quarters(*([10e6] * 8)) + [
+        _f("2023-01-01", "2023-12-31", 40e6, "2024-02-15", "10-K", "k-2023"),
+        _f("2024-01-01", "2024-12-31", 40e6, "2025-02-15", "10-K", "k-2024"),
+    ]
+    return {"cik": 1, "entityName": "Example", "facts": {"us-gaap": {
+        "NetIncomeLoss": {"units": {"USD": income}},
+        "Revenues": {"units": {"USD": _quarters(*chain)}},
+        other_name: {"units": {"USD": _quarters(*other)}},
+    }}}
+
+
+def _revenue(result):
+    return {r["period_end"]: r for r in result.rows
+            if r["metric"] == "revenue" and r["fiscal_period"] != "FY"}
+
+
+def test_a_concept_that_agrees_where_both_report_fills_where_the_chain_is_silent():
+    """JNJ, MNST and WDC tagged revenue as `SalesRevenueGoodsNet` before 2018: on the
+    quarters both report they agree, so it fills the ones the chain lacks."""
+    result = normalise(_bridge_doc(chain=(100e6, 110e6, 120e6), other=(100e6, 110e6, 120e6, 130e6, 140e6)))
+    revenue = _revenue(result)
+    assert revenue[date(2024, 3, 31)]["value"] == 140e6
+    assert revenue[date(2024, 3, 31)]["source_concept"] == "SalesRevenueGoodsNet"
+    assert revenue[date(2023, 3, 31)]["source_concept"] == "Revenues"
+    assert result.bridged == {"revenue": {"SalesRevenueGoodsNet": 2}}
+
+
+def test_a_part_named_like_the_figure_never_agrees_and_never_fills():
+    """A utility's gas revenue is named like revenue and is a part of it."""
+    result = normalise(_bridge_doc(chain=(100e6, 110e6, 120e6), other=(40e6, 45e6, 50e6, 55e6, 60e6),
+                                   other_name="RegulatedOperatingRevenueGas"))
+    assert date(2024, 3, 31) not in _revenue(result)
+    assert result.bridged == {}
+
+
+def test_one_agreement_is_no_proof():
+    result = normalise(_bridge_doc(chain=(100e6,), other=(100e6, 105e6, 110e6)))
+    assert date(2023, 6, 30) not in _revenue(result)
+
+
+def test_a_concept_that_disagrees_often_is_not_proven():
+    result = normalise(_bridge_doc(chain=(100e6, 110e6, 120e6, 130e6),
+                                   other=(100e6, 110e6, 99e6, 77e6, 140e6)))
+    assert date(2024, 3, 31) not in _revenue(result)
+
+
+def test_bridging_never_replaces_a_figure():
+    result = normalise(_bridge_doc(chain=(100e6, 110e6, 120e6), other=(100e6, 110e6, 121e6, 130e6)))
+    assert _revenue(result)[date(2023, 9, 30)]["value"] == 120e6
+
+
+# ── a balance sheet with no debt at all ──────────────────────────────────────
+
+
+def _balance(cash=5e9, total=20e9, end="2024-06-30", filed="2024-08-01", accn="10q", **more):
+    concepts = {
+        "CashAndCashEquivalentsAtCarryingValue": {"USD": [_instant(end, cash, filed, accn)]},
+        "LiabilitiesAndStockholdersEquity": {"USD": [_instant(end, total, filed, accn)]},
+    }
+    concepts.update(more)
+    return _doc(**concepts)
+
+
+def test_a_balance_sheet_without_any_borrowing_has_no_debt():
+    """ANET, ISRG, PLTR: no debt and nothing tagged, so no net cash before."""
+    result = normalise(_balance())
+    for half in ("debt_noncurrent", "debt_current"):
+        row = _value(result, half, Q2)
+        assert row["value"] == 0
+        assert row["source_concept"] == "no debt on the balance sheet"
+
+
+def test_debt_securities_held_are_no_borrowing():
+    result = normalise(_balance(AvailableForSaleSecuritiesDebtSecuritiesCurrent={
+        "USD": [_instant("2024-06-30", 3e9, accn="10q")]}))
+    assert _value(result, "debt_current", Q2)["value"] == 0
+
+
+def test_a_borrowing_under_any_concept_leaves_debt_unknown():
+    result = normalise(_balance(OtherLongTermDebtNoncurrent={
+        "USD": [_instant("2024-06-30", 1e9, accn="10q")]}))
+    assert _value(result, "debt_current", Q2) is None
+
+
+def test_a_maturity_table_is_a_borrowing():
+    result = normalise(_balance(LongTermDebtMaturitiesRepaymentsOfPrincipalInNextTwelveMonths={
+        "USD": [_instant("2024-06-30", 1e9, accn="10q")]}))
+    assert _value(result, "debt_current", Q2) is None
+
+
+def test_material_interest_says_there_is_debt_companyfacts_does_not_show():
+    """BRK and PCAR report their debt per segment, which companyfacts leaves out."""
+    result = normalise(_balance(InterestExpense={"USD": [
+        _f("2024-04-01", "2024-06-30", 0.05e9, "2024-08-01", accn="10q")]}))
+    assert _value(result, "debt_current", Q2) is None
+
+
+def test_a_few_days_interest_is_no_rate():
+    """MPWR tags stub periods: a few days' interest annualised looks like a borrower's."""
+    result = normalise(_balance(InterestExpenseOther={"USD": [
+        _f("2024-06-20", "2024-06-30", 0.003e9, "2024-08-01", accn="10q")]}))
+    assert _value(result, "debt_current", Q2)["value"] == 0
+
+
+def test_a_cash_flow_statements_closing_cash_is_no_balance_sheet():
+    """A later filing's cash flow statement reports the date's cash without its balance sheet;
+    only a filing whose balance sheet is at that date may say there is no debt."""
+    doc = _doc(CashAndCashEquivalentsAtCarryingValue={"USD": [_instant("2024-06-30", 5e9)]})
+    assert _value(normalise(doc), "debt_current", Q2) is None

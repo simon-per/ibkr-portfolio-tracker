@@ -931,6 +931,13 @@ class CompanyFinancialsSync:
             summary.setdefault("unchained_investments", []).append(
                 f"{label} ({', '.join(result.unchained_investments)})"
             )
+        # Recorded, not warned: a gap a proven concept filled is the normaliser working
+        # (`company_financials_normaliser._bridge`); the record is what audits it.
+        for metric, by_concept in sorted(result.bridged.items()):
+            for concept, periods in sorted(by_concept.items()):
+                summary.setdefault("bridged", []).append(
+                    f"{label} {metric} <- {concept} ({periods})"
+                )
         await self.db.commit()
         summary["fetched"] += 1
         summary["rows_written"] += len(result.rows)

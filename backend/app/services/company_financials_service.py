@@ -20,7 +20,8 @@ given. TTM, free cash flow, margins, per-share figures and growth:
   line when tagged, else cash plus the investments. A period without the investments, of a
   company that tagged them within `INVESTMENTS_LOOKBACK_DAYS`, has none: NVDA stopped tagging
   its $49B of securities in 2025, and cash alone showed it as a net debtor. A company that
-  never tagged any (AVGO) holds cash alone. No debt tagged is no net cash, never debt of 0.
+  never tagged any (AVGO) holds cash alone. No debt tagged is no net cash, never an assumed debt of 0; a balance sheet that shows
+  no borrowing at all carries both halves as 0 from the normaliser (`_no_debt_at_all`).
 - **Enterprise value** = market cap less net cash; **EV/EBIT** over TTM operating income, null
   when either is not positive (key figures only).
 - **CAGR** over the range's first and last known values: null when the start is not

@@ -135,3 +135,21 @@ def test_a_current_concept_wins_over_the_total():
     }))
     assert _investments(result) == {"2026-06-30": 2.0e9}
 
+
+
+@pytest.mark.asyncio
+async def test_the_pass_records_what_a_proven_concept_filled(db, configured):  # noqa: F811
+    """`_bridge` (2026-11-15): a concept outside the chains that agrees with the chain's
+    figure fills its gaps, and the pass records which — information, never a warning."""
+    nvda = copy.deepcopy(FIXTURE)
+    gaap = nvda["facts"]["us-gaap"]
+    revenue = next(c for c in METRICS["revenue"].concepts if c in gaap)
+    rows = gaap[revenue]["units"]["USD"]
+    newest_year = max(r["end"] for r in rows)[:4]
+    gaap["SalesRevenueGoodsNet"] = {"units": {"USD": [dict(r) for r in rows]}}
+    gaap[revenue]["units"]["USD"] = [r for r in rows if not r["end"].startswith(newest_year)]
+    await _book(db)
+    summary = await _sync(db, Edgar(facts={NVDA_CIK: nvda})).refresh()
+    bridged = summary["bridged"]
+    assert len(bridged) == 1 and bridged[0].startswith("NVDA revenue <- SalesRevenueGoodsNet (")
+    assert not any("SalesRevenueGoodsNet" in w for w in summary.get("warnings", []))

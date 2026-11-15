@@ -158,6 +158,9 @@ METRICS: Dict[str, MetricSpec] = {
             # ROP's: without them their FCF ended in 2019-2022 (checked 2026-11-15).
             "PaymentsToAcquireOtherPropertyPlantAndEquipment",
             "PaymentsToAcquireOtherProductiveAssets",
+            # An oil producer's capex is its drilling: FANG tags nothing else.
+            "PaymentsToAcquireOilAndGasPropertyAndEquipment",
+            "PaymentsToAcquireOilAndGasProperty",
         ),
         non_negative=True,
     ),
@@ -509,6 +512,9 @@ class Normalised:
     # Current-investment concepts outside every chain carrying a value at the newest
     # balance sheet where no chained one does (`_unchained_investments`).
     unchained_investments: List[str] = field(default_factory=list)
+    # The concepts outside every chain that filled a figure's gaps (`_bridge`):
+    # {metric: {concept: periods filled}}.
+    bridged: Dict[str, Dict[str, int]] = field(default_factory=dict)
 
     @property
     def has_data(self) -> bool:
@@ -940,6 +946,130 @@ def _unchained_investments(companyfacts: Dict[str, Any], end: date) -> List[str]
     return sorted(out)
 
 
+# ── Bridging: a gap filled from a concept that proves itself ─────────────────
+
+#: Per metric, the us-gaap concepts that may stand in for it where its chain is silent:
+#: (named like it, not named like something else). Flows and cash only — a debt total
+#: agrees with its noncurrent half whenever nothing is current, so agreement proves less
+#: there (debt has `_no_current_debt_line` instead).
+BRIDGE_FAMILIES: Dict[str, Tuple[str, str]] = {
+    "revenue": (
+        r"Revenue|Sales",
+        r"Cost|Deferred|Receivable|Unearned|Remaining|Liabilit|Tax|Gain|Loss|Proceeds"
+        r"|Percent|Allowance|Discount|Reserve|Return|Adjustment|Per|Excise",
+    ),
+    "net_income": (
+        r"^(NetIncomeLoss|ProfitLoss)",
+        r"PerShare|Noncontrolling|Discontinued|Adjustment|Preferred|Participating|Diluted",
+    ),
+    "operating_income": (r"^OperatingIncomeLoss", r"Segment|Other"),
+    "operating_cash_flow": (r"^NetCashProvidedByUsedInOperatingActivities", r"Discontinued"),
+    "capex": (
+        r"^PaymentsToAcquire.*(PropertyPlant|ProductiveAssets|CapitalAssets|FixedAssets)"
+        r"|^PaymentsForCapitalImprovements|CapitalExpenditure",
+        r"Incurred|Accrued|NotYetPaid|Business|Investment|Intangible|RealEstate|Held",
+    ),
+    "sbc": (r"ShareBasedCompensation$|StockBasedCompensation$", r"Tax|Capitalized|Unrecognized"),
+    "cost_of_revenue": (
+        r"^Cost(Of)?(Revenue|GoodsAndServicesSold|GoodsSold)",
+        r"Amortization|Depreciation|Excluding|Member|Other|Related",
+    ),
+    "gross_profit": (r"^GrossProfit", r"Percent"),
+    "buybacks": (r"^PaymentsForRepurchaseOf(Common|Equity)", r"Preferred|Redeemable"),
+    "dividends_paid": (r"^PaymentsOf(Ordinary)?Dividends", r"Preferred|Noncontrolling|Minority"),
+    "cash": (r"^Cash(AndCashEquivalents|CashEquivalents)", r"Increase|Decrease|Period|Restricted|Segregated|Disposal"),
+}
+#: How close a stand-in must be to the chain's own figure to count as agreeing, how many
+#: periods must agree, and the share of the shared periods that must.
+BRIDGE_TOLERANCE = 0.005
+BRIDGE_MIN_AGREEMENTS = 2
+BRIDGE_MIN_SHARE = 0.9
+
+
+def _candidate_series(
+    gaap: Dict[str, Any], concept: str, spec: MetricSpec, unit: str, mapping: Dict[date, date]
+) -> Dict[Tuple[str, date], Obs]:
+    """One concept outside the chains, read like a chain concept: its quarters and years
+    (flows) or its balances (instants), by (grain, canonical end)."""
+    rows = (((gaap.get(concept) or {}).get("units") or {}).get(unit)) or []
+    facts = []
+    for row in rows:
+        end, filed = _date(row.get("end")), _date(row.get("filed"))
+        val, accn = row.get("val"), row.get("accn")
+        if row.get("form") not in FORMS or end is None or filed is None or not accn:
+            continue
+        if isinstance(val, bool) or not isinstance(val, (int, float)):
+            continue
+        if spec.non_negative and val < 0:
+            continue
+        facts.append(Fact(concept, spec.kind, unit, _date(row.get("start")), end,
+                          float(val), accn, filed, row["form"]))
+    periods = _latest(facts, {}).get(concept, {})
+    out: Dict[Tuple[str, date], Obs] = {}
+    if spec.timing == INSTANT:
+        for (start, end), obs in periods.items():
+            if start is None:
+                for grain in ("Q", ANNUAL):
+                    out[(grain, mapping.get(end, end))] = obs
+        return out
+    quarters, years, _ = _quarters_and_years(spec.kind, periods, spec.non_negative)
+    for grain, by_end in (("Q", quarters), (ANNUAL, years)):
+        for end, obs in _rekey(by_end, mapping).items():
+            out[(grain, end)] = obs
+    return out
+
+
+def _bridge(
+    values: Dict[str, Dict[Tuple[str, date], Obs]],
+    keys: Dict[Tuple[str, date], Tuple[int, str]],
+    companyfacts: Dict[str, Any],
+    mapping: Dict[date, date],
+) -> Dict[str, Dict[str, int]]:
+    """
+    Fill a figure's missing periods from a concept outside every chain that has proved to
+    be the same line: on the periods both report, it agrees with the chain's figure within
+    `BRIDGE_TOLERANCE`, at least `BRIDGE_MIN_AGREEMENTS` times and on `BRIDGE_MIN_SHARE` of
+    them. Only fills; never replaces a figure.
+
+    The chains name the concepts seen so far, and a company that moves its line to another
+    standard concept had its series stop there until someone noticed and added the concept
+    by hand (owner, 2026-11-15: "this should be closed in the script, not one by one"). The
+    agreement is the proof a name alone is not: `RegulatedOperatingRevenueGas` is named like
+    revenue and is a part of it, so it never agrees and never fills. A concept that agrees
+    but never overlaps — a company whose chain was empty from the start — proves nothing and
+    fills nothing. Returns what filled what, which the pass records.
+    """
+    gaap = ((companyfacts or {}).get("facts") or {}).get("us-gaap") or {}
+    if not gaap:
+        return {}
+    chained = {c for spec in METRICS.values() for c in spec.concepts}
+    filled: Dict[str, Dict[str, int]] = {}
+    for metric, (named, not_named) in BRIDGE_FAMILIES.items():
+        spec, own = METRICS[metric], values[metric]
+        missing = [k for k in keys if k not in own]
+        if not missing or not own:
+            continue
+        unit = next(iter(own.values())).unit
+        proven = []
+        for concept in gaap:
+            if concept in chained or not re.search(named, concept) or re.search(not_named, concept):
+                continue
+            series = _candidate_series(gaap, concept, spec, unit, mapping)
+            if not any(k in series for k in missing):
+                continue
+            shared = [k for k in series if k in own and own[k].value]
+            agree = [k for k in shared
+                     if abs(series[k].value / own[k].value - 1) <= BRIDGE_TOLERANCE]
+            if len(agree) >= BRIDGE_MIN_AGREEMENTS and len(agree) >= BRIDGE_MIN_SHARE * len(shared):
+                proven.append((len(agree), concept, series))
+        for _, concept, series in sorted(proven, key=lambda p: (-p[0], p[1])):
+            for key in [k for k in keys if k not in own and k in series]:
+                own[key] = series[key]
+                filled.setdefault(metric, {}).setdefault(concept, 0)
+                filled[metric][concept] += 1
+    return filled
+
+
 def _basic_in_a_loss(values: Dict[str, Dict[Tuple[str, date], Obs]]) -> None:
     """
     The basic count as the diluted one for a period with a net loss and no diluted count.
@@ -1059,6 +1189,143 @@ def _no_current_debt_line(
             concept=NO_CURRENT_DEBT_LINE, derived=True,
         )
     current.update(zeros)
+
+
+BALANCE_SHEET_TOTAL = "LiabilitiesAndStockholdersEquity"
+# The witness that a balance sheet carries debt companyfacts does not show (BRK and PCAR
+# report theirs per segment, which companyfacts leaves out): interest paid on borrowings,
+# annualised, above `INTEREST_SHARE` of the balance sheet. A debt-free company pays next to
+# none (a lease's interest, a customer deposit's); BRK and PCAR pay about 1%.
+INTEREST = re.compile(r"^Interest(Expense|Paid|AndDebtExpense)")
+NOT_INTEREST = re.compile(r"Income|Capitalized|Receivable|Deposits|Operating")
+INTEREST_SHARE = 0.002
+# Interest for a period ending this close to a balance-sheet date speaks for it: a 10-Q's
+# quarter, or the year a 10-K reports (PCAR states interest paid only annually).
+INTEREST_WINDOW_DAYS = 200
+DEBT_GAP_DAYS = 400
+#: The source recorded for both halves of a debt-free balance sheet (`_no_debt_at_all`).
+NO_DEBT_LINE = "no debt on the balance sheet"
+# A borrowing of any kind, current or not, under any concept — a maturity table included,
+# since one states principal owed (only balances are read, so a repayment or a proceeds
+# flow never counts). Securities, receivables and investments are what the company holds,
+# a facility's capacity or rate is not a drawn balance, and "liabilities other than
+# long-term debt" (ISRG) is the opposite of a borrowing.
+DEBT_LIKE = re.compile(r"Debt|Notes|Borrowing|CommercialPaper|LoansPayable|LineOfCredit")
+NOT_DEBT = re.compile(
+    r"AvailableForSale|Securities|Receivable|Investment|Asset|OtherThanLongtermDebt"
+    r"|Capacity|Commitment|Percent|Rate|Covenant|Fee"
+)
+
+
+def _no_debt_at_all(
+    values: Dict[str, Dict[Tuple[str, date], Obs]],
+    facts: Sequence[Fact],
+    companyfacts: Dict[str, Any],
+    mapping: Dict[date, date],
+) -> None:
+    """
+    Both debt halves of zero for a balance sheet that shows no borrowing at all.
+
+    ANET, ISRG, PLTR, MPWR, TER and others carry no debt and tag none, so their debt — and
+    with it their net cash, the figure that matters most for them — was unknown in every
+    quarter (2026-11-15). The zero is read off the filing: the newest one reporting the
+    company's cash at that date states nothing debt-like there (`DEBT_LIKE`), no maturity
+    table either, under any concept, and it pays no material interest (`INTEREST_SHARE`):
+    BRK and PCAR report their debt per segment, which companyfacts leaves out, and only
+    their interest shows it. A balance sheet with a borrowing the chains cannot read keeps
+    no debt, as before; this never fires beside any debt figure.
+    """
+    gaap = ((companyfacts or {}).get("facts") or {}).get("us-gaap") or {}
+    # The filing whose balance sheet is at that date: its total. A cash figure alone can be a
+    # cash flow statement's opening or closing balance for a date whose balance sheet that
+    # filing does not carry (2009-2010 quarters read debt-free beside billions of notes).
+    newest: Dict[date, Tuple[date, str]] = {}
+    for rows in ((gaap.get(BALANCE_SHEET_TOTAL) or {}).get("units") or {}).values():
+        for row in rows:
+            end, filed, accn = _date(row.get("end")), _date(row.get("filed")), row.get("accn")
+            if end is None or filed is None or not accn or "start" in row or end not in mapping:
+                continue
+            if row.get("form") not in FORMS:
+                continue
+            end = mapping[end]
+            if end not in newest or (filed, accn) > newest[end]:
+                newest[end] = (filed, accn)
+    if not newest:
+        return
+    shown: set = set()
+    for concept, body in gaap.items():
+        if not DEBT_LIKE.search(concept) or NOT_DEBT.search(concept):
+            continue
+        for rows in ((body or {}).get("units") or {}).values():
+            for row in rows:
+                end = _date(row.get("end"))
+                if end is not None and "start" not in row:
+                    shown.add((row.get("accn"), mapping.get(end, end)))
+    size: Dict[Tuple[str, date], float] = {}
+    for rows in ((gaap.get(BALANCE_SHEET_TOTAL) or {}).get("units") or {}).values():
+        for row in rows:
+            end = _date(row.get("end"))
+            if end is not None and isinstance(row.get("val"), (int, float)):
+                size[(row.get("accn"), mapping.get(end, end))] = float(row["val"])
+    # Interest paid in any filing, annualised, by period end.
+    interest: List[Tuple[date, float]] = []
+    for concept, body in gaap.items():
+        if not INTEREST.search(concept) or NOT_INTEREST.search(concept):
+            continue
+        for rows in ((body or {}).get("units") or {}).values():
+            for row in rows:
+                start, end = _date(row.get("start")), _date(row.get("end"))
+                val = row.get("val")
+                if start is None or end is None or not isinstance(val, (int, float)):
+                    continue
+                # A few days' interest annualised is no rate (MPWR tags stub periods).
+                if _days(start, end) < QUARTER_DAYS[0]:
+                    continue
+                interest.append((end, abs(float(val)) * 365 / _days(start, end)))
+    by_date = {at: total for (_, at), total in size.items()}
+    material = [
+        end for end, paid in interest
+        if any(paid > INTEREST_SHARE * total
+               for at, total in by_date.items() if abs((at - end).days) <= 7)
+    ]
+    halves = ("debt_total", "debt_noncurrent", "debt_current")
+    ever_debt = any(o.value for m in halves for o in values[m].values())
+    # A borrower whose debt never shows here (segment-only: BRK, PCAR; a bank) gets no zero
+    # up to its last material interest: BRK tags interest only from 2025, so before that
+    # nothing nearer says it borrows. After it (VRTX repaid its notes by 2014) the
+    # balance sheet speaks for itself again.
+    blind_until = max(material) if material and not ever_debt else None
+    zeros: Dict[Tuple[str, date], Obs] = {}
+    for key, cash in values["cash"].items():
+        filing = newest.get(key[1])
+        if filing is None or (filing[1], key[1]) in shown:
+            continue
+        if blind_until is not None and key[1] <= blind_until + timedelta(days=INTEREST_WINDOW_DAYS):
+            continue
+        where = (filing[1], key[1])
+        total = size.get(where)
+        if total is None or any(
+            paid > INTEREST_SHARE * total
+            for end, paid in interest if abs((end - key[1]).days) <= INTEREST_WINDOW_DAYS
+        ):
+            continue
+        if any(key in values[m] for m in halves):
+            continue
+        zeros[key] = Obs(
+            value=0.0, filed=cash.filed, start=None, end=cash.end, unit=cash.unit,
+            concept=NO_DEBT_LINE, derived=True,
+        )
+    # A balance sheet does not shed its debt for a quarter or two: a zero with debt on both
+    # sides within `DEBT_GAP_DAYS` is a borrowing the filing did not tag (FAST's 2015 line of
+    # credit, LIN's 2018). Years without debt between two borrowings are years without debt
+    # (META from 2013 to its 2022 bonds).
+    debt_ends = {k[1] for m in halves for k, o in values[m].items() if o.value}
+    for key, obs in zeros.items():
+        near = [(e - key[1]).days for e in debt_ends if abs((e - key[1]).days) <= DEBT_GAP_DAYS]
+        if any(d < 0 for d in near) and any(d > 0 for d in near):
+            continue
+        for metric in ("debt_noncurrent", "debt_current"):
+            values[metric][key] = obs
 
 
 def filed_splits(events: Iterable[Dict[str, Any]]) -> List[Dict[str, Any]]:
@@ -1727,8 +1994,10 @@ def normalise(
 
     _flat_rate_years(values, keys, calendar, latest, totals, mapping)
     _total_only_when_current(values)
+    result.bridged = _bridge(values, keys, companyfacts, mapping)
     _basic_in_a_loss(values)
     _no_current_debt_line(values, facts, companyfacts, mapping)
+    _no_debt_at_all(values, facts, companyfacts, mapping)
 
     # Q4 = FY less the three quarters, across the chain, when no single concept could give
     # it: ORCL tags the year as `Revenues` and its quarters as `RevenueFromContract...`, so

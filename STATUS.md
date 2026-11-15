@@ -103,8 +103,10 @@ Only what is still unverified.
   refetched — the Sunday 2026-11-22 05:00 pass does all of them (fetched > 6 days ago). Do not
   `--force` it sooner: that re-asks Yahoo for every profile. Then, on the public API: XEL's quarterly
   revenue reaching 2026; LLY's, VZ's and ROP's FCF past 2019–2022; PANW, DDOG and ZS with debt;
-  META's net cash in most quarters; TTWO's loss quarters with a share count; NBIS in USD through
-  FY2025. The 2026-11-15 measurement, run before and after over all 132 documents, is in
+  META's net cash in most quarters; ANET's, ISRG's and MPWR's net cash (debt-free balance sheets);
+  TTWO's loss quarters with a share count; NBIS in USD through FY2025; and the pass's `sync_runs`
+  row carrying `bridged` (what a proven concept filled). BRK and PCAR must still show no debt (never
+  a zero). The 2026-11-15 measurement, run before and after over all 132 documents, is in
   docs/company-financials.md (*The normaliser*, *Known gaps*).
 
 - **GBP as a base currency, and every base's FX history from the first purchase (2026-11-14):**
@@ -539,8 +541,9 @@ Rough priority. Re-verify each `path:line` in code before fixing; lines move.
 One line each, newest first; drop the oldest.
 
 - **2026-11-15 (Company tab gaps)** — measured every missing quarter over the 132 companies,
-  matched each to what SEC did carry; widened the chains, a zero current-debt half off the balance
-  sheet, a loss quarter's basic count, the newest filing's currency (NBIS). GBP checked in the
+  matched each to what SEC did carry; widened the chains, then made them extend themselves
+  (bridging: a concept that agrees where both report fills the gaps); zero debt read off balance
+  sheets that show none; a loss quarter's basic count; the newest filing's currency (NBIS). GBP checked in the
   browser; the tax report follows the base currency (docs corrected).
 
 - **2026-11-14 (GBP base currency, merged to `main` and pushed)** — GBP joined EUR/CHF/USD as a
