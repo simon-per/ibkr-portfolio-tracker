@@ -531,8 +531,8 @@ class CompanyFinancialsSync:
         f = summary["filing_errors"]
         if f:
             warnings.append(
-                f"{f} filing{'' if f == 1 else 's'} could not be read from EDGAR for a "
-                f"missing dividend per share; asked again next week."
+                f"{f} filing{'' if f == 1 else 's'} could not be read from EDGAR "
+                f"(a figure companyfacts leaves out); that company's reads resume next week."
             )
         u = summary["filings_unreadable"]
         if u:
