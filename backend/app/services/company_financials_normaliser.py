@@ -1180,14 +1180,19 @@ def _extend(
 
 #: The source recorded for a debt summed over segment columns: `segments:<axis>`.
 SEGMENTS = "segments"
-#: The total-debt concepts a segment's column may state, in order of preference (BRK:
+#: The total-debt concepts a segment's column may state, in order of preference — carrying
+#: amounts, as the balance sheet states them, before a principal (BRK:
 #: `DebtAndCapitalLeaseObligations`; PCAR's Financial Services:
-#: `DebtLongtermAndShorttermCombinedAmount`), and the concepts whose members, summed to
-#: the total the filing states undimensioned, prove the members partition the company.
+#: `CommercialPaperBankLoansAndTermDebtAtCarryingValue`, 15,895.0M at 2024-12-31, the
+#: balance sheet's commercial paper and bank loans plus term notes, where its
+#: `DebtLongtermAndShorttermCombinedAmount`, 15,946.7M, is the maturity table's principal),
+#: and the concepts whose members, summed to the total the filing states undimensioned,
+#: prove the members partition the company.
 SEGMENT_DEBT = (
     "LongTermDebt",
     "LongTermDebtAndCapitalLeaseObligationsIncludingCurrentMaturities",
     "DebtAndCapitalLeaseObligations",
+    "CommercialPaperBankLoansAndTermDebtAtCarryingValue",
     "DebtLongtermAndShorttermCombinedAmount",
 )
 SEGMENT_WITNESSES = ("Assets", "Liabilities")

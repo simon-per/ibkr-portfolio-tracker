@@ -8,8 +8,9 @@ free cash flow (before and after stock-based compensation, in total and per shar
 share count, gross, operating, net and FCF margins, buybacks and dividends paid, cash and debt, and
 dividends per share, quarterly, TTM or by fiscal year, over 5 years, 10 years or everything filed,
 with a key-figures strip at the newest TTM point. **For every held US filer and the Nasdaq-100**
-(owner's request, 2026-10-25), held or not. **Sourced from SEC EDGAR only** — never Yahoo,
-never IBKR.
+(owner's request, 2026-10-25), held or not. **Sourced from SEC EDGAR**, and since 2026-11-16 —
+last, fill-only and proven against SEC — **Alpha Vantage** for an interior gap SEC's layers left
+(*The source waterfall*); never Yahoo, never IBKR.
 
 | piece | file |
 |---|---|
@@ -21,6 +22,8 @@ never IBKR.
 | tables | `backend/app/models/company_financials.py` (migration `d1e3f5a7b9c2`) |
 | reads | `backend/app/routers/company_financials.py`, `backend/app/schemas/company_financials.py` |
 | first fill | `backend/app/cli/fetch_company_financials.py` |
+| Alpha Vantage's statements, last and fill-only (*The source waterfall*) | `backend/app/services/company_vendor_fill.py` (table `vendor_statements`, migration `a2c4e6f8b0d1`) |
+| the one door to Alpha Vantage and its daily budget, shared with the price fallback | `backend/app/services/alpha_vantage.py` |
 
 ## Sources
 
@@ -42,7 +45,13 @@ never IBKR.
   is read for a filing companyfacts skipped**, only when the figures show one and at most monthly
   a company (*When companyfacts lags the filing list*, below).
 - `https://www.sec.gov/Archives/edgar/data/<cik>/<accession>/index.json` and the filing's
-  XBRL instance beside it — *Filing instances* below. Once per filing, ever.
+  XBRL instance beside it — *Filing instances* below — and, for a company whose own concepts are
+  read, its label linkbase (`_lab.xml`, *The source waterfall*). Once per filing, ever. The
+  `index.json` endpoint answers 503 now and then (seen often on 2026-11-16, a retry a second later
+  answering 200): the client's bounded retries, then that company's reads stop for the pass and
+  resume next week.
+- `https://www.alphavantage.co/query` — `INCOME_STATEMENT`, `BALANCE_SHEET`, `CASH_FLOW`, last
+  and fill-only (*The source waterfall*, *Alpha Vantage, last*), through `alpha_vantage.py` only.
 
 **The SEC requires a User-Agent naming the client and a contact address** and answers 403
 without one. It is `EDGAR_USER_AGENT` in `backend/.env` (`.env.example` has the placeholder
@@ -999,7 +1008,9 @@ unknown and `_no_debt_at_all` rightly withheld a zero.
   of assets at 2024-12-31; PCAR: 21.0B + 22.4B = 43.4B). Then each member of that partition either
   states one total-debt concept (`SEGMENT_DEBT`: `LongTermDebt`, `…CapitalLeaseObligations
   IncludingCurrentMaturities`, `DebtAndCapitalLeaseObligations` — BRK's —,
-  `DebtLongtermAndShorttermCombinedAmount` — PCAR's Financial Services), the same for all, or
+  `CommercialPaperBankLoansAndTermDebtAtCarryingValue` — PCAR's Financial Services, the balance
+  sheet's 15,895.0M at 2024-12-31 —, then `DebtLongtermAndShorttermCombinedAmount`, which PCAR
+  tags on its maturity table's principal, 15,946.7M: carrying amounts first), the same for all, or
   shows no borrowing under any concept (PCAR's truck column: it owes nothing); a member showing a
   borrowing the concept does not state refuses the sum whole, and so does a partial view (a parent
   company's column, one segment of three). Otherwise the debt stays blank. Fills `debt_total` only
