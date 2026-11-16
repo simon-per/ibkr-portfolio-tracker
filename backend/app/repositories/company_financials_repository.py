@@ -188,6 +188,11 @@ class CompanyFinancialsRepository:
         row.fiscal_year_end = profile.get("fiscal_year_end")
         row.submissions_checked_at = checked_at
 
+    async def record_listing(self, cik: int, checked_at: datetime) -> None:
+        """The filing list was asked for a skipped filing (`filings_listed_at`)."""
+        row = await self.ensure_company(cik)
+        row.filings_listed_at = checked_at
+
     # ── company_financials ───────────────────────────────────────────────────
 
     async def replace_rows(

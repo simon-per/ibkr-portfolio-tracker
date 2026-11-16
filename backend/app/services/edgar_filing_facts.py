@@ -112,14 +112,16 @@ def _date(value: Any) -> Optional[date]:
 
 def filings(companyfacts: Dict[str, Any]) -> Dict[str, Filing]:
     """
-    Every 10-Q/10-K (and amendment) the document's us-gaap facts come from, by accession
-    number. Its period is the newest end carrying more than half as many duration facts as
-    the commonest: a few carry a later date (a dividend declared after the quarter, as a
+    Every 10-Q/10-K/20-F (and amendment) the document's us-gaap or ifrs-full facts come
+    from, by accession number. Its period is the newest end carrying more than half as many
+    duration facts as the commonest: a few carry a later date (a dividend declared after the quarter, as a
     subsequent event), while the commonest alone can be last year's comparatives — BKR's
     Q2 2026 10-Q has 102 facts ending in June 2025 and 101 in June 2026, so the quarter it
     reports had no filing and its EPS and dividend were never read (2026-11-09).
     """
-    gaap = ((companyfacts or {}).get("facts") or {}).get("us-gaap") or {}
+    facts = (companyfacts or {}).get("facts") or {}
+    # An IFRS filer's 20-F (NU, TSMC) is a filing like any other.
+    gaap = {**(facts.get("ifrs-full") or {}), **(facts.get("us-gaap") or {})}
     ends: Dict[str, Counter] = defaultdict(Counter)
     meta: Dict[str, Tuple[str, date]] = {}
     for body in gaap.values():
@@ -142,6 +144,80 @@ def _own_period(ends: Counter) -> date:
     """The newest end with more than half the facts of the commonest one (`filings`)."""
     top = max(ends.values())
     return max(end for end, n in ends.items() if 2 * n > top)
+
+
+#: How far back a filing companyfacts skipped is looked for (STATUS 7a): the last eight
+#: quarters, what the tab's newest TTM points and the pass's gap count read.
+SKIPPED_LOOKBACK = timedelta(days=730)
+#: A quarter's span at most (the normaliser's `QUARTER_DAYS`): two stored quarter ends
+#: further apart than this have a quarter between them that no filing gave.
+MAX_QUARTER_DAYS = 120
+#: Newest figures older than this mean a filing is due that companyfacts has not served:
+#: a 10-Q is due 40-45 days after its quarter, a 10-K 60-90 days after the year
+#: (`company_financials_sync.FIGURES_STALE_AFTER`), and an annual-only filer's 20-F a year
+#: and four months after its last one.
+STALE_QUARTERLY = timedelta(days=150)
+STALE_ANNUAL = timedelta(days=365 + 150)
+
+
+def companyfacts_accns(companyfacts: Dict[str, Any]) -> set:
+    """Every accession number companyfacts carries a statement fact of (us-gaap or
+    ifrs-full). Not the cover page's (`dei`, `srt`): TSMC's FY2025 20-F was in companyfacts
+    with two cover facts and none of its figures (2026-11-16)."""
+    out = set()
+    facts = (companyfacts or {}).get("facts") or {}
+    for block in (facts.get("us-gaap"), facts.get("ifrs-full")):
+        for body in (block or {}).values():
+            for rows in ((body or {}).get("units") or {}).values():
+                out.update(r.get("accn") for r in rows or () if r.get("accn"))
+    return out
+
+
+def read_period(facts: Sequence[Dict[str, Any]]) -> Optional[date]:
+    """The period a filing read whole reports (`_own_period` over its duration facts),
+    or None when it held none."""
+    ends: Counter = Counter()
+    for f in facts:
+        start, end = _date(f.get("start")), _date(f.get("end"))
+        if start is not None and end is not None:
+            ends[end] += 1
+    return _own_period(ends) if ends else None
+
+
+def skipped(
+    rows: Sequence[Dict[str, Any]],
+    companyfacts: Dict[str, Any],
+    read_periods: Iterable[date],
+    today: date,
+) -> List[date]:
+    """
+    The signs that companyfacts skipped a filing the SEC holds (STATUS 7a), newest first:
+    a recent quarter end (within `SKIPPED_LOOKBACK`) that the figures carry — derived from
+    a later filing's year-to-date ladder — but no filing companyfacts names (or a filing
+    already read) reports as its own period, as AEP's and EXC's Q2 2026; a quarter missing
+    between two recent ones; and figures stale enough that the next report is overdue (NU's
+    and TSMC's FY2025 20-F). An annual-only filer is judged by its years. Pure; the pass
+    then asks the filing list (`company_financials_sync._read_skipped`).
+    """
+    own = [f.period_end for f in filings(companyfacts).values()]
+    own += [p for p in read_periods if p is not None]
+    quarters = sorted({r["period_end"] for r in rows if r["fiscal_period"] != "FY"})
+    years = sorted({r["period_end"] for r in rows if r["fiscal_period"] == "FY"})
+    ends = quarters or years
+    if not ends:
+        return []
+    signs = set()
+    if today - ends[-1] > (STALE_QUARTERLY if quarters else STALE_ANNUAL):
+        signs.add(today)
+    recent = [e for e in ends if today - e <= SKIPPED_LOOKBACK]
+    for end in recent:
+        if not any(abs((p - end).days) <= SAME_PERIOD_DAYS for p in own):
+            signs.add(end)
+    if quarters:
+        for earlier, later in zip(recent, recent[1:]):
+            if (later - earlier).days > MAX_QUARTER_DAYS:
+                signs.add(earlier + timedelta(days=(later - earlier).days // 2))
+    return sorted(signs, reverse=True)
 
 
 def dividend_gaps(rows: Iterable[Dict[str, Any]]) -> List[date]:

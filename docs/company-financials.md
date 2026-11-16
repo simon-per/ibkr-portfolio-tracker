@@ -38,7 +38,9 @@ never IBKR.
   Sunday pass, so a refusal there leaves the figures whole: the first Sunday asks every company
   once, then about one in four a week. A 404 or a document stating nothing is an answer (stamped,
   stored as NULL); a failure stamps nothing and warns (*The industry of N companies could not be
-  read*). The run reports `profiles_due`, `profiles_fetched`, `profile_errors`.
+  read*). The run reports `profiles_due`, `profiles_fetched`, `profile_errors`. **Its filing list
+  is read for a filing companyfacts skipped**, only when the figures show one and at most monthly
+  a company (*When companyfacts lags the filing list*, below).
 - `https://www.sec.gov/Archives/edgar/data/<cik>/<accession>/index.json` and the filing's
   XBRL instance beside it — *Filing instances* below. Once per filing, ever.
 
@@ -704,15 +706,31 @@ weekday (about sixty fetches that moved nothing) and past it never looked. Three
   `CHASE_WEEKDAY` (Monday), until `FILING_CHASE_UNTIL` (400 days): past a year of missing
   10-Qs it has stopped filing. Not on Sunday: the weekly pass's tests count every URL, and a
   date-relative ask there would start failing them once the fixture aged.
-- **An older quarter it skipped — by hand only.** `_filing_behind` looks at the newest filing
-  alone. AEP's and EXC's Q2 2026 10-Qs (filed 2026-07-30) never reached companyfacts although
-  their Q3s did, so Q2's net income was derived from the YTD ladder and its diluted EPS (not
-  additive) stayed empty, and with it the TTM P/E. Filled on 2026-11-11 by reading the 10-Q
-  `submissions` lists for that `reportDate` through `_read_filing(..., whole=True)`, storing it
-  with `record_filing_read`, then `fetch_company_financials --symbol AEP --symbol EXC --force`.
-  Automating it — a recent quarter with no companyfacts filing looked up in `submissions` — is
-  in STATUS.md's *Worth doing next*. SEC stays the one source: the gap is in companyfacts' index,
-  not in what the SEC holds.
+- **A filing it skipped, older than the newest — automatic since 2026-11-16** (STATUS 7a,
+  `CompanyFinancialsSync._read_skipped`, `tests/test_company_skipped_filings.py`). `_filing_behind`
+  looks at the newest filing the weekday check is told about, alone. AEP's and EXC's Q2 2026
+  10-Qs (filed 2026-07-30) never reached companyfacts although their Q3s did, so Q2's net income
+  was derived from the YTD ladder and its diluted EPS (not additive) stayed empty, and with it
+  the TTM P/E; they were read by hand on 2026-11-11. Now every fetch (the weekly pass and the
+  check) asks the figures whether companyfacts skipped a filing (`edgar_filing_facts.skipped`),
+  in three signs: a quarter end within `SKIPPED_LOOKBACK` (730 days, the last eight quarters)
+  the figures carry that no filing reports as its own period — neither one companyfacts names
+  (`filings`, us-gaap or ifrs-full) nor one already read (`read_period`); a quarter missing
+  between two recent ones (more than `MAX_QUARTER_DAYS`, 120, apart); figures older than
+  `STALE_QUARTERLY` (150 days), or `STALE_ANNUAL` (a year and 150 days) for an annual-only
+  filer. On a sign it asks the filing list (`EdgarClient.periodic_filings`, `submissions`), **at
+  most once in `LISTING_RECHECK_AFTER` (30 days) a company**, stamped on
+  `sec_companies.filings_listed_at` (migration `f1b3d5e7a9c2`) whatever it holds, and reads
+  whole, once ever, every periodic filing listed within the lookback that companyfacts carries
+  **no statement fact** of (`companyfacts_accns`: us-gaap or ifrs-full — TSMC's FY2025 20-F was
+  in companyfacts with two cover-page facts and none of its figures), newest first, within
+  `FILING_READS_PER_COMPANY`. They only fill, like every filing read. A sign nothing answers (a
+  new filer's comparative quarters, HONA, SPCX; a company that stopped filing) costs one small
+  request a month. The run records `filings_listed` and `skipped_filings` ("AEP 10-Q
+  2026-06-30"). **Measured over the 132 companies (2026-11-16): 11 lists asked, 8 filings read**
+  — AEP's and EXC's Q2 and Q3 2026, ALNY's Q1 2026, NU's and TSMC's FY2025 20-F, SPGI's FY2024
+  10-K — and no figure that existed changed. SEC stays the one source: the gap is in
+  companyfacts' index, not in what the SEC holds.
 
 **What each pass checks** (owner's request, 2026-11-07): the Sunday pass tests the stored rows
 of **every** company in scope after its loop, fetched or not, and the weekday check the companies
@@ -916,8 +934,6 @@ separately, or filed only under a company's own extension concept, which company
   since 2020, PYPL, MA…): `CostsAndExpenses` is every cost, not the cost of revenue.
 - **Debt left unknown** at PYPL and ORLY by the maturity-table witness above, and at companies whose
   only debt concepts are company-specific.
-- **NU and TSMC's FY2025** (20-F, IFRS): filed months ago and not in companyfacts; `_filing_behind`
-  does not read an IFRS instance. Their figures end at FY2024.
 
 - **NVDA capex, FY2013–FY2021**: NVDA tagged its annual capex ("purchases related to property
   and equipment and intangible assets") as an `nvda:` extension concept, which companyfacts does
@@ -937,8 +953,6 @@ separately, or filed only under a company's own extension concept, which company
   before XBRL (MA, PCAR, FAST, ROP); TMUS before 2018 and LITE paid preferred or other dividends, not common.
 - **KDP before 2018** mixes Dr Pepper Snapple's and Keurig's filings (the 2018 reverse merger moved
   the fiscal year): its 2016-2017 share counts jump. Accepted; the figures since 2018 are one company's.
-- **A 10-Q missing from companyfacts**: ALNY's Q1 2026 is in no fact, so it has no TTM from
-  then until its Q1 2027 10-Q restates the quarter. Deriving it as six months less Q2 is not done.
 - **New filers**: HONA and SPCX have too few quarters for a TTM.
 - Non-US listings; a 40-F filer; a 20-F filer's quarters (its 6-Ks carry no XBRL figures this
   reads); IFRS concepts without an exact US-GAAP twin (`Borrowings`, so no net cash for NU or TSMC).

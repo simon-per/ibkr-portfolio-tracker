@@ -96,12 +96,16 @@ from app.services.edgar_filing_facts import (
     GAP_CONCEPTS,
     READ_SINCE,
     READER,
+    SKIPPED_LOOKBACK,
     Filing,
+    companyfacts_accns,
     covers,
     filings,
     gaps,
     instance_name,
     parse_instance,
+    read_period,
+    skipped,
     sources,
     ttm_dividend_gap,
 )
@@ -160,6 +164,10 @@ CHECKED_WITHIN = timedelta(hours=20)
 #: A filing's period counts as new only this far past the stored one. A quarter is ~91 days
 #: on; a `reportDate` a few days off the stored period end must not refetch every day.
 NEW_PERIOD_MARGIN = timedelta(days=14)
+#: How long one ask of a company's filing list for a filing companyfacts skipped
+#: (`_read_skipped`) stands: a hole no listed filing fills — a new filer's comparative
+#: quarters, a company that stopped filing — costs one small request a month.
+LISTING_RECHECK_AFTER = timedelta(days=30)
 
 NOT_CONFIGURED_WARNING = (
     "EDGAR_USER_AGENT is not set; company financials were not refreshed."
@@ -912,6 +920,15 @@ class CompanyFinancialsSync:
                 summary["filings_read"] += 1
                 stored = await self.repo.filing_reads(cik)
                 result = normalise(facts, _filing_facts(stored))
+        if refused is None:
+            # A filing companyfacts skipped, older than the newest (STATUS 7a): AEP's and
+            # EXC's Q2 2026, NU's and TSMC's FY2025 20-F.
+            skipped_read, refused = await self._read_skipped(
+                client, cik, facts, result.rows, stored, summary, label
+            )
+            if skipped_read:
+                stored = await self.repo.filing_reads(cik)
+                result = normalise(facts, _filing_facts(stored))
         read = 0
         if refused is None:
             read, refused = await self._read_filings(
@@ -945,6 +962,74 @@ class CompanyFinancialsSync:
             # The figures are written; the refusal still stops the pass.
             raise refused
         return f"{len(result.rows)} rows"
+
+    async def _read_skipped(
+        self,
+        client: EdgarClient,
+        cik: int,
+        companyfacts: Dict[str, Any],
+        rows: Sequence[dict],
+        stored: Dict[str, Any],
+        summary: Dict[str, Any],
+        label: str,
+    ) -> Tuple[int, Optional[EdgarRefused]]:
+        """
+        The filings companyfacts skipped (STATUS 7a), read whole once each. When the figures
+        show one (`edgar_filing_facts.skipped`: a recent quarter no filing it names reports,
+        a quarter missing between two, figures past due), the filing list (`submissions`)
+        is asked — at most once in `LISTING_RECHECK_AFTER`, stamped whatever it holds — and
+        every periodic filing it lists within `SKIPPED_LOOKBACK` that companyfacts carries no
+        fact of and nothing read yet is read whole (`parse_instance(whole=True)`), newest
+        first, at most `FILING_READS_PER_COMPANY`. They only fill, like every filing read.
+        Returns how many were read, and the refusal that stopped them, if one did.
+        """
+        periods = [read_period(row.facts or ()) for row in stored.values()]
+        if not skipped(rows, companyfacts, periods, utc_today()):
+            return 0, None
+        company = (await self.repo.companies([cik])).get(cik)
+        asked = company.filings_listed_at if company is not None else None
+        now = utcnow()
+        if asked is not None and asked > now - LISTING_RECHECK_AFTER:
+            return 0, None
+        try:
+            listed = await client.periodic_filings(cik)
+        except EdgarRefused as refused:
+            return 0, refused
+        except EdgarError as e:
+            summary["filing_errors"] += 1
+            logger.warning(f"the filing list of CIK {cik} failed: {e}")
+            return 0, None
+        await self.repo.record_listing(cik, now)
+        await self.db.commit()
+        summary["filings_listed"] = summary.get("filings_listed", 0) + 1
+        known = companyfacts_accns(companyfacts) | set(stored)
+        since = utc_today() - SKIPPED_LOOKBACK
+        todo = [
+            f
+            for f in listed or ()
+            if f.accn and f.filed and f.accn not in known and f.period_end >= since
+        ]
+        count = 0
+        for listing in todo[:FILING_READS_PER_COMPANY]:
+            filing = Filing(listing.accn, listing.form, listing.filed, listing.period_end)
+            try:
+                found = await self._read_filing(client, cik, filing, summary, whole=True)
+            except EdgarRefused as refused:
+                return count, refused
+            except EdgarError as e:
+                summary["filing_errors"] += 1
+                logger.warning(f"filing {filing.accn} of CIK {cik} failed: {e}")
+                return count, None
+            await self.repo.record_filing_read(
+                cik, filing.accn, filing.form, filing.filed, found, utcnow(), READER
+            )
+            await self.db.commit()
+            count += 1
+            summary["filings_read"] += 1
+            summary.setdefault("skipped_filings", []).append(
+                f"{label} {filing.form} {filing.period_end.isoformat()}"
+            )
+        return count, None
 
     async def _read_filings(
         self,

@@ -1027,4 +1027,8 @@ async def test_a_refused_filing_read_stops_the_pass_after_writing_the_figures(
     assert summary["stopped"] == 403
     assert await _count(db, SecFilingRead) == 0  # nothing stamped: asked next pass
     assert await _dps_rows(db) == {("2020-12-31", "FY"): 1.60}  # companyfacts' written
-    assert not [u for u in edgar.urls() if "/submissions/" in u]  # the pass stopped
+    # The pass stopped: nothing after the refused read (its profile lookups included).
+    # The filing list asked before it is the skipped-filing check: the fixture is stale.
+    urls = edgar.urls()
+    refused_at = urls.index(filing_url(APPLE_CIK, Q2_10Q, "index.json"))
+    assert not [u for u in urls[refused_at + 1:] if "/submissions/" in u]

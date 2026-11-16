@@ -91,6 +91,12 @@ class SecCompany(Base):
     submissions_checked_at: Mapped[Optional[datetime]] = mapped_column(
         DateTime, nullable=True
     )
+    # When the filing list (`submissions`) was last asked for a filing companyfacts
+    # skipped (`company_financials_sync._read_skipped`, STATUS 7a): at most once in
+    # `LISTING_RECHECK_AFTER`, so a hole no filing fills costs one request a month.
+    filings_listed_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime, nullable=True
+    )
 
     def __repr__(self) -> str:
         return f"<SecCompany cik={self.cik} {self.ticker}>"
