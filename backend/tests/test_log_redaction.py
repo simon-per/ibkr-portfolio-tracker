@@ -29,6 +29,7 @@ from app.config import settings
 from app.redact import RedactingFormatter
 from app.services import ibkr_service as ibkr_module
 from app.services import market_data_service as mds
+from app.services import alpha_vantage as av
 from tests.memory_db import memory_engine
 
 APP_DIR = Path(__file__).resolve().parent.parent / "app"
@@ -113,25 +114,27 @@ async def test_an_ssl_failure_traceback_is_redacted(
 
 @pytest.mark.asyncio
 async def test_an_alpha_vantage_http_error_is_redacted(
-    monkeypatch, caplog, production_log_handlers
+    db, monkeypatch, caplog, production_log_handlers
 ):
-    """market_data_service logs f"Error fetching Alpha Vantage data: {e}"; an httpx
-    HTTPStatusError stringifies with the full URL, `apikey=` included."""
+    """An httpx HTTPStatusError stringifies with the full URL, `apikey=` included; the one
+    Alpha Vantage door (`alpha_vantage.ask`) logs its type only, and the formatter would
+    mask the key anyway."""
     key = "ALPHAVANTAGEKEY1234567"
-    monkeypatch.setattr(mds.settings, "alpha_vantage_api_key", key)
+    monkeypatch.setattr(av.settings, "alpha_vantage_api_key", key)
 
     real_client = httpx.AsyncClient
     transport = httpx.MockTransport(lambda request: httpx.Response(503, request=request))
     monkeypatch.setattr(
-        mds.httpx, "AsyncClient", lambda **kw: real_client(transport=transport, **kw)
+        av.httpx, "AsyncClient", lambda **kw: real_client(transport=transport, **kw)
     )
 
     service = mds.MarketDataService.__new__(mds.MarketDataService)
     service.alpha_vantage_capped = False
+    service.db = db
     security = SimpleNamespace(
         symbol="AMZN", exchange="NASDAQ", currency="USD", alpha_vantage_asked_at=None
     )
-    with caplog.at_level(logging.ERROR):
+    with caplog.at_level(logging.WARNING):
         assert await service.fetch_prices_from_alpha_vantage(security) == []
 
     logged = _formatted(production_log_handlers.root, caplog.records)

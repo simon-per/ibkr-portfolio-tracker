@@ -60,7 +60,7 @@ from app import rate_limit  # noqa: E402
 from app.config import settings  # noqa: E402
 from app.services.company_financials_service import reset_screener_cache  # noqa: E402
 from app.services.currency_service import reset_frankfurter_rejections  # noqa: E402
-from app.services import yahoo_rate_limit  # noqa: E402
+from app.services import alpha_vantage, yahoo_rate_limit  # noqa: E402
 from tests.memory_db import memory_engine  # noqa: E402
 
 
@@ -83,6 +83,10 @@ def _neutral_process_state(monkeypatch):
     monkeypatch.setattr(settings, "coin_stats_share_passcode", "", raising=False)
     monkeypatch.setattr(settings, "coingecko_api_key", "", raising=False)
     monkeypatch.setattr(settings, "logo_dev_secret_key", "", raising=False)
+    # A developer's .env key must never reach Alpha Vantage from a test; a test that needs
+    # one sets its own. Its pacing clock is per process, like the Yahoo hold.
+    monkeypatch.setattr(settings, "alpha_vantage_api_key", "", raising=False)
+    monkeypatch.setattr(alpha_vantage, "_last_call", None)
     # The Yahoo hold (issue #57) is process-wide by design, so one test's 429 would hold
     # every later test in the worker. Memory only here: persisting would write the
     # per-process database; `test_yahoo_hold.py` points it at a database of its own.

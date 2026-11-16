@@ -7,20 +7,19 @@ from typing import List, Dict, Optional, Tuple
 from datetime import date, datetime, timedelta
 from decimal import Decimal
 import logging
-import httpx
 import yfinance as yf
 import random
 import asyncio
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.clock import utc_today, utcnow
-from app.config import settings
 from app.repositories.market_price_repository import MarketPriceRepository
 from app.repositories.security_repository import held
 from app.models.security import Security
 from app.models.taxlot import TaxLot
 from app.models.ticker_mapping import TickerMapping
 from app.services.miss_backoff import miss_backoff_until
+from app.services import alpha_vantage
 from app.services.yahoo_rate_limit import check_yahoo_hold, is_rate_limit
 from app.services.yahoo_eligibility import is_sibling_priced, is_yahoo_eligible
 from app.services.yahoo_minor_units import (
@@ -575,7 +574,7 @@ class MarketDataService:
         Returns:
             List of dicts with date, close_price, currency
         """
-        if not settings.alpha_vantage_api_key or settings.alpha_vantage_api_key == "your_api_key_here":
+        if not alpha_vantage.is_configured():
             return []  # Skip if no API key
 
         # This endpoint serves US listings and quotes them in USD, and the response
@@ -601,62 +600,42 @@ class MarketDataService:
         # Stamped before the request: the free tier counts a call whatever it answers.
         security.alpha_vantage_asked_at = utcnow()
 
-        params = {
-            "function": "TIME_SERIES_DAILY",
-            "symbol": security.symbol,  # Alpha Vantage uses US symbols primarily
-            "outputsize": outputsize,
-            "apikey": settings.alpha_vantage_api_key
-        }
-
+        # The one door to Alpha Vantage and its one daily budget, shared with the Company
+        # tab's statement fill (`alpha_vantage`); prices may spend all of it.
         try:
-            async with httpx.AsyncClient(timeout=30.0) as client:
-                response = await client.get(
-                    "https://www.alphavantage.co/query",
-                    params=params
-                )
-                response.raise_for_status()
-                data = response.json()
-
-                if "Error Message" in data:
-                    logger.error(f"Alpha Vantage error: {data['Error Message']}")
-                    return []
-
-                # `Note` is the older rate-limit notice, `Information` the current one —
-                # the daily cap, or a premium-only parameter. Either way AV will answer
-                # the next security the same, so stop asking it for the rest of the pass.
-                for notice in ("Note", "Information"):
-                    if notice in data:
-                        logger.warning(
-                            f"Alpha Vantage {notice} for {security.symbol}: {data[notice]} "
-                            f"— not asking it again this run"
-                        )
-                        self.alpha_vantage_capped = True
-                        return []
-
-                if "Time Series (Daily)" not in data:
-                    logger.warning(f"Alpha Vantage returned no daily series for {security.symbol}")
-                    return []
-
-                time_series = data["Time Series (Daily)"]
-                prices = []
-
-                for date_str, price_data in time_series.items():
-                    price_date = datetime.strptime(date_str, "%Y-%m-%d").date()
-                    close_price = price_data["4. close"]
-
-                    prices.append({
-                        'date': price_date,
-                        'close_price': Decimal(str(close_price)),
-                        # Safe only because of the USD guard above.
-                        'currency': security.currency,
-                        'source': 'alpha_vantage',
-                    })
-
-                return prices
-
-        except Exception as e:
-            logger.error(f"Error fetching Alpha Vantage data: {e}")
+            data = await alpha_vantage.ask(
+                self.db,
+                "TIME_SERIES_DAILY",
+                alpha_vantage.PRICES,
+                symbol=security.symbol,  # Alpha Vantage uses US symbols primarily
+                outputsize=outputsize,
+            )
+        except alpha_vantage.AlphaVantageCapped as e:
+            # A notice (its daily cap, or a premium-only parameter) holds every caller
+            # for the rest of the UTC day; stop asking it for the rest of the pass too.
+            logger.warning(f"Alpha Vantage for {security.symbol}: {e} — not asking it again this run")
+            self.alpha_vantage_capped = True
             return []
+        if data is None:
+            return []
+
+        if "Time Series (Daily)" not in data:
+            logger.warning(f"Alpha Vantage returned no daily series for {security.symbol}")
+            return []
+        prices = []
+        try:
+            for date_str, price_data in data["Time Series (Daily)"].items():
+                prices.append({
+                    'date': datetime.strptime(date_str, "%Y-%m-%d").date(),
+                    'close_price': Decimal(str(price_data["4. close"])),
+                    # Safe only because of the USD guard above.
+                    'currency': security.currency,
+                    'source': 'alpha_vantage',
+                })
+        except (KeyError, TypeError, ValueError, ArithmeticError) as e:
+            logger.error(f"Alpha Vantage's daily series for {security.symbol} is malformed: {e}")
+            return []
+        return prices
 
     async def fetch_and_cache_prices(
         self,

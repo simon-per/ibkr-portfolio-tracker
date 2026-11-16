@@ -1940,10 +1940,12 @@ class SchedulerService:
         """
         from app.services.company_financials_sync import SCHEDULED_SYNC_TYPE
 
-        return await self._edgar_job(
+        result = await self._edgar_job(
             SCHEDULED_SYNC_TYPE, "company_financials_result", "Company financials refresh",
             lambda sync: sync.refresh(),
         )
+        await self.company_vendor_fill_job()
+        return result
 
     async def company_filings_check_job(self) -> dict:
         """
@@ -1953,9 +1955,33 @@ class SchedulerService:
         """
         from app.services.company_financials_sync import CHECK_SYNC_TYPE
 
-        return await self._edgar_job(
+        result = await self._edgar_job(
             CHECK_SYNC_TYPE, "company_filings_result", "Company filings check",
             lambda sync: sync.check_filings(),
+        )
+        await self.company_vendor_fill_job()
+        return result
+
+    async def company_vendor_fill_job(self) -> dict:
+        """
+        Alpha Vantage, last (docs/company-financials.md, *Alpha Vantage, last*): right after
+        each EDGAR job — the Sunday pass and the weekday check — so it fills only what every
+        SEC layer left, daily, which spreads a backlog over the free tier's days. Under
+        `EDGAR_GATE`, after the EDGAR job released it: both write a company's rows, and
+        the fill must read the rows the SEC layers just wrote. No new slot: the 05:00 hour
+        is already in ALL_SYNC_HOURS. Its own `sync_runs` row (`company_vendor_fill`, body
+        `company_vendor_result`): what it asked, filled and spent. Without a key it records
+        nothing — a daily "skipped" row would teach the reader to skip the history.
+        """
+        from app.services import alpha_vantage
+        from app.services.company_vendor_fill import SYNC_TYPE, CompanyVendorFill
+
+        if not alpha_vantage.is_configured():
+            return {"type": SYNC_TYPE, "status": "skipped", "message": "no Alpha Vantage key"}
+
+        return await self._edgar_job(
+            SYNC_TYPE, "company_vendor_result", "Company statements fill",
+            lambda sync: CompanyVendorFill(sync.db).run(),
         )
 
     async def _edgar_job(self, sync_type: str, result_key: str, label: str, run) -> dict:

@@ -97,6 +97,11 @@ class SecCompany(Base):
     filings_listed_at: Mapped[Optional[datetime]] = mapped_column(
         DateTime, nullable=True
     )
+    # When Alpha Vantage was last asked for this company's statements, and how many asks
+    # in a row filled nothing (`company_vendor_fill.vendor_backoff_until`): at most weekly,
+    # longer on the shared doubling while it fills nothing.
+    vendor_checked_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    vendor_miss_count: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
 
     def __repr__(self) -> str:
         return f"<SecCompany cik={self.cik} {self.ticker}>"
@@ -209,6 +214,24 @@ class SecFilingRead(Base):
 
     def __repr__(self) -> str:
         return f"<SecFilingRead {self.cik} {self.accn} facts={len(self.facts or [])}>"
+
+
+class VendorStatement(Base):
+    """
+    One company's statement as Alpha Vantage last answered it (`company_vendor_fill`):
+    `function` (`INCOME_STATEMENT`, `BALANCE_SHEET`, `CASH_FLOW`) and `body`, only the
+    fields the fill reads (`compact`). Kept so every rewrite of the company's rows (the
+    weekly EDGAR pass) applies the proven fill again without asking.
+    """
+
+    __tablename__ = "vendor_statements"
+
+    cik: Mapped[int] = mapped_column(
+        ForeignKey("sec_companies.cik", ondelete="CASCADE"), primary_key=True
+    )
+    function: Mapped[str] = mapped_column(String(32), primary_key=True)
+    body: Mapped[dict] = mapped_column(JSON, nullable=False)
+    fetched_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
 
 
 class CompanyPrice(Base):

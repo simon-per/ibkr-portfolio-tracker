@@ -935,9 +935,10 @@ JNJ's operating income, the banks' FCF). Yahoo is not part of it (CLAUDE.md rule
 3. **IFRS instances** (*Annual-only filers*): a 20-F's `ifrs-full` lines under their twins.
 4. **The company's own concepts, by their labels** (below).
 5. **Segment columns summed where no total exists** (below).
+6. **Alpha Vantage, last** (below).
 
-The weekly pass records what layers 1, 4 and 5 filled — `bridged`, `extended`, `segments`,
-`skipped_filings` — as information, never a warning.
+The passes record what bridging and layers 2 to 6 filled — `bridged`, `extended`, `segments`,
+`skipped_filings`, and the statement fill's own `sync_runs` row — as information, never a warning.
 
 ### The company's own concepts, by their labels
 
@@ -1006,6 +1007,39 @@ unknown and `_no_debt_at_all` rightly withheld a zero.
   company as one whose debt companyfacts cannot see. `tests/test_company_segment_debt.py`.
 
 The measurement over the 132 companies is in *Known gaps and out of scope*.
+
+### Alpha Vantage, last
+
+`INCOME_STATEMENT`, `BALANCE_SHEET` and `CASH_FLOW` (`company_vendor_fill`), after every SEC layer.
+
+- **Which gaps** (`interior_gaps`): a recent quarter (the newest eight, `RECENT_QUARTERS`) where
+  SEC's rows lack a figure **while reporting it in an earlier and a later quarter** — a hole, not a
+  line the company stopped or never started reporting. ABNB's capex since 2023 is a trailing gap
+  and stays blank: a vendor's number there would be an estimate of a line the filing does not
+  have. The fields (`FIELDS`): revenue `totalRevenue`, operating income `operatingIncome`,
+  operating cash flow `operatingCashflow`, capex `capitalExpenditures`, cash
+  `cashAndCashEquivalentsAtCarryingValue`, the debt halves `currentLongTermDebt` and
+  `longTermDebtNoncurrent`. No diluted share count: Alpha Vantage carries none.
+- **The proof, per company and metric** (`_proven`): on the periods SEC also reports (quarters and
+  years, matched within a week), Alpha Vantage agrees within `BRIDGE_TOLERANCE` at least
+  `BRIDGE_MIN_AGREEMENTS` times and on `BRIDGE_MIN_SHARE` of them; otherwise none of it is used for
+  that metric. Its `"None"`, `0` and a missing field are no figure; a report in another currency
+  than SEC's rows is not read; no bank, broker or insurer (`FINANCIAL_SIC`). Source
+  `alpha_vantage:<field>`, `filed` the day it answered.
+- **Asked** (`CompanyVendorFill.run`): daily, right after each EDGAR job (the Sunday pass and the
+  weekday check, `SchedulerService.company_vendor_fill_job`, under `EDGAR_GATE` — no new slot, the
+  05:00 hour is already in `ALL_SYNC_HOURS`), only the statements a company's gaps need, stalest
+  ask first. A company at most once a week (`sec_companies.vendor_checked_at`), longer on the
+  shared doubling while its asks fill nothing (`vendor_miss_count`, `miss_backoff`); a backlog waits
+  for the next day's budget. The budget is the one `alpha_vantage` keeps for every caller: 25 calls
+  a UTC day less the price fallback's reserve of 10 (docs/flex-and-sync.md). What it answered is
+  kept (`vendor_statements`, the mapped fields only; migration `a2c4e6f8b0d1`), and every rewrite
+  of the company's rows — the weekly EDGAR fetch included — proves and applies it again, so SEC's
+  newer figure always wins. Its own `sync_runs` row (`company_vendor_fill`, body
+  `company_vendor_result`): `asked`, `filled`, `unproven`, `spent`, `capped`, `budget`. Without a
+  key the job records nothing. `tests/test_company_vendor_fill.py`.
+
+Nothing is asked from this session: the key lives only on the VPS (*Known gaps and out of scope* has what it may fill).
 
 ## Known gaps and out of scope
 

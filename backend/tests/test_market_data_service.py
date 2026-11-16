@@ -6,6 +6,7 @@ import pandas as pd
 import pytest
 
 from app.services import market_data_service as mds
+from app.services import alpha_vantage as av
 from app.services.market_data_service import MarketDataService
 
 
@@ -237,21 +238,21 @@ async def test_alpha_vantage_refuses_a_security_it_cannot_quote_honestly(monkeyp
     with. Stamping a non-USD security's own currency onto a USD quote is exactly how
     SBI was carried 61% high, so the fallback refuses instead.
     """
-    monkeypatch.setattr(mds.settings, "alpha_vantage_api_key", "test-key")
+    monkeypatch.setattr(av.settings, "alpha_vantage_api_key", "test-key")
     service = make_service()
 
     # Would otherwise be a network call; reaching it at all is the failure.
     def _explode(*_args, **_kwargs):
         raise AssertionError("Alpha Vantage must not be called for a non-USD security")
 
-    monkeypatch.setattr(mds.httpx, "AsyncClient", _explode)
+    monkeypatch.setattr(av.httpx, "AsyncClient", _explode)
 
     assert await service.fetch_prices_from_alpha_vantage(make_security(currency="CAD")) == []
 
 
 @pytest.mark.asyncio
 async def test_alpha_vantage_is_skipped_without_a_key(monkeypatch):
-    monkeypatch.setattr(mds.settings, "alpha_vantage_api_key", "")
+    monkeypatch.setattr(av.settings, "alpha_vantage_api_key", "")
     service = make_service()
     security = make_security(symbol="AMZN", exchange="NASDAQ", currency="USD")
     assert await service.fetch_prices_from_alpha_vantage(security) == []
@@ -280,7 +281,7 @@ async def test_a_fallback_price_is_cached_as_alpha_vantage_not_yahoo(monkeypatch
     """
     # Yahoo returns nothing for every ticker, so the fallback is reached.
     _install_fake_yahoo(monkeypatch, {})
-    monkeypatch.setattr(mds.settings, "alpha_vantage_api_key", "test-key")
+    monkeypatch.setattr(av.settings, "alpha_vantage_api_key", "test-key")
     monkeypatch.setattr(mds.asyncio, "sleep", _no_sleep)
 
     day = date(2026, 7, 24)
@@ -420,7 +421,7 @@ async def test_a_rate_limited_yahoo_does_not_fall_through_to_alpha_vantage(monke
     """
     monkeypatch.setattr(mds.random, "uniform", lambda *_: 0)
     monkeypatch.setattr(mds.asyncio, "sleep", _no_sleep)
-    monkeypatch.setattr(mds.settings, "alpha_vantage_api_key", "test-key")
+    monkeypatch.setattr(av.settings, "alpha_vantage_api_key", "test-key")
 
     class RefusingTicker:
         def __init__(self, ticker):

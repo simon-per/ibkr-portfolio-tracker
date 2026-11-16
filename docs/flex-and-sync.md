@@ -101,6 +101,19 @@ reader checking only for `yfinance` will miss it. Two things about it are load-b
   back is not sent to AV at all. `securities.alpha_vantage_asked_at` is stamped before each call
   (the free tier counts it whatever it answers) and survives a restart. A `Note` or `Information`
   body is logged and latches `alpha_vantage_capped`, so no later security in the pass asks.
+- **One door and one daily budget for every Alpha Vantage call** (2026-11-16,
+  `app/services/alpha_vantage.py`). A second caller arrived — the Company tab's statement fill
+  (docs/company-financials.md, *Alpha Vantage, last*) — on the same free-tier key, so the URL, the
+  key, the pacing (5 a minute) and the reading of a notice moved into one module both call
+  (`alpha_vantage.ask`), and `tests/test_alpha_vantage_family.py` fails any other module naming the
+  host. The budget is a UTC day's 25 calls (`DAILY_LIMIT`), counted before each call and persisted
+  in `app_settings` (`alpha_vantage_spent`); **the price fallback goes first**: the statement fill
+  may spend only what leaves `PRICE_RESERVE` (10) for it, prices all of it. A `Note`/`Information`
+  answer (HTTP 200, AV's way of saying "limit") is persisted as `alpha_vantage_capped_on` and holds
+  every caller until the next UTC day — never retried within it — which is also how a key on a
+  stricter tier than 25 a day shows itself. A transport error is logged by its type only (its text
+  carries the URL, and the URL the key); `app/redact.py` masks `apikey=` and the key wherever a
+  message is stored anyway.
 
 ### 2. Never loop the IBKR Flex sync
 IBKR allows **1 request/second and 10 requests/minute per token**, and one `ibflex.client.download()`

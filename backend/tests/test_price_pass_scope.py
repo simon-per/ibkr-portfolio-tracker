@@ -34,6 +34,7 @@ from app.models.security import Security
 from app.models.taxlot import TaxLot
 from app.repositories.market_price_repository import MarketPriceRepository
 from app.services import market_data_service as mds
+from app.services import alpha_vantage as av
 from app.services.market_data_service import (
     SOLD_PRICE_GRACE_DAYS,
     MarketDataService,
@@ -105,10 +106,10 @@ class Upstream:
             return None
 
         monkeypatch.setattr(mds.yf, "Ticker", FakeTicker)
-        monkeypatch.setattr(mds.httpx, "AsyncClient", FakeAsyncClient)
+        monkeypatch.setattr(av.httpx, "AsyncClient", FakeAsyncClient)
         monkeypatch.setattr(mds.asyncio, "sleep", _no_sleep)
         monkeypatch.setattr(mds.random, "uniform", lambda *_: 0)
-        monkeypatch.setattr(mds.settings, "alpha_vantage_api_key", "test-key")
+        monkeypatch.setattr(av.settings, "alpha_vantage_api_key", "test-key")
         monkeypatch.setattr(mds, "utcnow", lambda: upstream.clock)
 
     def asked(self, symbol):

@@ -24,6 +24,7 @@ from app.models.company_financials import (
     SecFilingRead,
     SecTicker,
     SecurityCik,
+    VendorStatement,
 )
 from app.services.miss_backoff import miss_backoff_until
 
@@ -188,6 +189,13 @@ class CompanyFinancialsRepository:
         row.fiscal_year_end = profile.get("fiscal_year_end")
         row.submissions_checked_at = checked_at
 
+    async def record_vendor_ask(self, cik: int, checked_at: datetime, filled: bool) -> None:
+        """Alpha Vantage was asked (`company_vendor_fill`): stamped, and a miss counted
+        while it fills nothing, cleared once it does."""
+        row = await self.ensure_company(cik)
+        row.vendor_checked_at = checked_at
+        row.vendor_miss_count = None if filled else (row.vendor_miss_count or 0) + 1
+
     async def record_listing(self, cik: int, checked_at: datetime) -> None:
         """The filing list was asked for a skipped filing (`filings_listed_at`)."""
         row = await self.ensure_company(cik)
@@ -220,6 +228,38 @@ class CompanyFinancialsRepository:
         company.fetched_at = fetched_at
         company.facts_checked_at = None
         company.facts_miss_count = None
+
+    async def replace_vendor_rows(
+        self, cik: int, rows: Sequence[dict], fetched_at: datetime
+    ) -> None:
+        """This company's Alpha Vantage rows (`alpha_vantage:` sources), replaced as one
+        set; SEC's rows are not touched."""
+        await self.session.execute(
+            delete(CompanyFinancial).where(
+                CompanyFinancial.cik == cik,
+                CompanyFinancial.source_concept.like("alpha_vantage:%"),
+            )
+        )
+        self.session.add_all(
+            CompanyFinancial(cik=cik, fetched_at=fetched_at, **row) for row in rows
+        )
+
+    # ── vendor_statements ────────────────────────────────────────────────────
+
+    async def vendor_statements(self, cik: int) -> Dict[str, dict]:
+        """function -> the stored statement (`company_vendor_fill.compact`)."""
+        result = await self.session.execute(
+            select(VendorStatement).where(VendorStatement.cik == cik)
+        )
+        return {row.function: row.body for row in result.scalars()}
+
+    async def write_vendor_statement(
+        self, cik: int, function: str, body: dict, fetched_at: datetime
+    ) -> None:
+        await self.ensure_company(cik)
+        await self.session.merge(
+            VendorStatement(cik=cik, function=function, body=body, fetched_at=fetched_at)
+        )
 
     # ── sec_filing_reads ─────────────────────────────────────────────────────
 

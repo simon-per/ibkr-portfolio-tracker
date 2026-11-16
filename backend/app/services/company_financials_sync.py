@@ -84,6 +84,7 @@ from app.repositories.etf_basket_repository import EtfBasketRepository
 from app.repositories.security_repository import held
 from app.repositories.sync_run_repository import SyncRunRepository
 from app.services.company_financials_normaliser import normalise
+from app.services.company_vendor_fill import fill as vendor_fill
 from app.services.edgar_client import (
     FINANCIAL_SIC,
     EdgarClient,
@@ -955,8 +956,14 @@ class CompanyFinancialsSync:
             )
         if read:
             result = normalise(facts, _filing_facts(await self.repo.filing_reads(cik)))
+        # Alpha Vantage, last: what it answered before, proven again on these rows
+        # (`company_vendor_fill.fill`), so a rewrite keeps it; SEC's rows win.
+        rows = result.rows
+        statements = await self.repo.vendor_statements(cik)
+        if statements:
+            rows, _ = vendor_fill(result.rows, statements, utc_today())
         await self.repo.replace_rows(
-            cik, result.rows, utcnow(), result.entity_name, result.splits
+            cik, rows, utcnow(), result.entity_name, result.splits
         )
         if result.unchained_investments:
             summary.setdefault("unchained_investments", []).append(
@@ -983,7 +990,7 @@ class CompanyFinancialsSync:
                 )
         await self.db.commit()
         summary["fetched"] += 1
-        summary["rows_written"] += len(result.rows)
+        summary["rows_written"] += len(rows)
         if refused is not None:
             # The figures are written; the refusal still stops the pass.
             raise refused

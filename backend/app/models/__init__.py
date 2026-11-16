@@ -41,6 +41,7 @@ from app.models.company_financials import (
     SecFilingRead,
     SecTicker,
     SecurityCik,
+    VendorStatement,
 )
 # The crypto book (docs/crypto.md): its own tables, read by nothing on the stock side.
 from app.models.crypto import (
@@ -49,6 +50,7 @@ from app.models.crypto import (
 )
 
 __all__ = [
+    "VendorStatement",
     "Security",
     "TaxLot",
     "ExchangeRate",
