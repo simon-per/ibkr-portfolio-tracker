@@ -347,7 +347,7 @@ class CompanyVendorFill:
                     summary["asked"].append(f"{label} {function}")
                     body = await alpha_vantage.ask(
                         self.db, function, alpha_vantage.STATEMENTS, sleep=self._sleep,
-                        symbol=label,
+                        symbol=label.replace("-", "."),  # SEC's BRK-B is its BRK.B
                     )
                     if body is not None:
                         docs[function] = {**compact(function, body), "fetched": today.isoformat()}
