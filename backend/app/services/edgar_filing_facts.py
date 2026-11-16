@@ -38,6 +38,8 @@ from app.services.company_financials_normaliser import (
     FORMS,
     IFRS_TWINS,
     METRICS,
+    SEGMENT_DEBT,
+    SEGMENT_WITNESSES,
 )
 from app.services.edgar_client import ANNUAL_FORM_PREFIXES
 
@@ -113,12 +115,27 @@ EXTENSION_FAMILIES = {
     "extension:debt": frozenset({"debt_total", "debt_current", "debt_noncurrent"}),
 }
 
+#: Segment members summed where no total exists (2026-11-16, the waterfall's fourth layer):
+#: BRK and PCAR state their debt per segment, which companyfacts leaves out, so their debt
+#: was unknown. What is read is the normaliser's (`SEGMENT_DEBT`, `SEGMENT_WITNESSES`).
+#: A borrowing under any concept on a member's column (the normaliser's `DEBT_LIKE`, less
+#: what is held rather than owed): a member showing one that `SEGMENT_DEBT` does not
+#: state cannot count as owing nothing.
+SEGMENT_DEBT_LIKE = re.compile(r"Debt|Notes|Borrowing|CommercialPaper|LoansPayable|LineOfCredit")
+SEGMENT_NOT_DEBT = re.compile(
+    r"AvailableForSale|Securities|Receivable|Investment|Asset|Capacity|Commitment|Percent"
+    r"|Rate|Covenant|Fee|FairValue|Face|Maturit|Repayment|Proceeds|Payments|Interest"
+    r"|DeferredTax|Discount|Premium|Issuance"
+)
+SEGMENT_FAMILY = "segments:debt"
+
 #: The concepts each gap's read must hold to fill it, by the metric missing; an extension
 #: gap is held by a fact a label named for one of its family's metrics (`covers`).
 GAP_CONCEPTS: Dict[str, Any] = {
     "dividends_per_share": DIVIDEND_CONCEPTS,
     "eps_diluted": EPS_CONCEPTS,
     **EXTENSION_FAMILIES,
+    SEGMENT_FAMILY: frozenset(SEGMENT_DEBT),
 }
 #: What a stored read looked for (`sec_filing_reads.reader`): 1 the dividend per share
 #: alone (2026-11-07), 2 the diluted EPS too (2026-11-08), 3 the company's own concepts
@@ -129,6 +146,7 @@ READ_SINCE = {
     "dividends_per_share": 1,
     "eps_diluted": 2,
     **{family: 3 for family in EXTENSION_FAMILIES},
+    SEGMENT_FAMILY: 3,
 }
 
 #: A gap and a filing's period are one period when their ends are this close (the
@@ -401,6 +419,33 @@ def extension_gaps(rows: Sequence[Dict[str, Any]]) -> List[Tuple[date, str]]:
     return sorted(out, key=lambda gap: gap[0], reverse=True)
 
 
+#: How far back a debt companyfacts cannot show is looked for in segment columns: the
+#: tab's default ten-year range.
+SEGMENT_LOOKBACK = timedelta(days=3653)
+
+
+def debt_blind(rows: Sequence[Dict[str, Any]]) -> bool:
+    """A company no source but segment columns gives a debt figure for (BRK, PCAR): no
+    debt row at all, a segment sum's aside. A debt-free balance sheet's zeros count as
+    figures (`_no_debt_at_all`)."""
+    return not any(
+        r["metric"] in ("debt_total", "debt_noncurrent", "debt_current")
+        and not str(r.get("source_concept", "")).startswith("segments:")
+        for r in rows
+    )
+
+
+def segment_gaps(rows: Sequence[Dict[str, Any]], today: date) -> List[Tuple[date, str]]:
+    """The period ends within `SEGMENT_LOOKBACK` with no debt figure, newest first, as
+    (end, `SEGMENT_FAMILY`): the balance sheets whose own filing may state it per segment."""
+    debt = {
+        r["period_end"] for r in rows
+        if r["metric"] in ("debt_total", "debt_noncurrent", "debt_current")
+    }
+    ends = {r["period_end"] for r in rows if today - r["period_end"] <= SEGMENT_LOOKBACK}
+    return [(end, SEGMENT_FAMILY) for end in sorted(ends - debt, reverse=True)]
+
+
 def label_linkbase(index: Any) -> Optional[str]:
     """The filing's label linkbase (`<prefix>-<YYYYMMDD>_lab.xml`) among its files, or
     None when there is not exactly one."""
@@ -493,6 +538,7 @@ def parse_instance(
     body: bytes,
     whole: bool = False,
     extensions: Optional[Dict[str, Tuple[str, str]]] = None,
+    segments: bool = False,
 ) -> List[Dict[str, Any]]:
     """
     The dividend-per-share facts of one XBRL instance that sit on exactly one whitelisted
@@ -513,14 +559,19 @@ def parse_instance(
     `extensions` (`extension_metrics` of the filing's label linkbase) adds the company's
     own concepts its labels name like a metric, undimensioned and in one currency, a flow
     as a duration and a balance as an instant: `{concept: "nvda:Name", metric, label, ...}`.
+
+    `segments` adds, at each balance-sheet date, the `SEGMENT_DEBT` and `SEGMENT_WITNESSES`
+    facts on exactly one explicit member (`{..., axis, member}`) and the witnesses'
+    undimensioned totals (`axis` ""), and names every debt-like concept a member shows
+    (`{concept, end, axis, member, debt_like: True}`, no value) — what the normaliser's
+    `_segments` needs to prove a partition and sum it.
     """
-    contexts: Dict[
-        str, Tuple[Optional[str], Optional[str], List[Tuple[str, str]], bool]
-    ] = {}
+    contexts: Dict[str, Tuple[Any, ...]] = {}
     units: Dict[str, str] = {}
     candidates: List[Tuple[str, str, Optional[str], str]] = []
     ifrs: List[Tuple[str, str, Optional[str], str]] = []
     own: List[Tuple[str, str, Optional[str], str, str]] = []
+    segmented: List[Tuple[str, str, Optional[str], str]] = []
     prefixes: Dict[str, str] = {}
     depth = 0
     events = ("start-ns", "start", "end")
@@ -542,7 +593,7 @@ def parse_instance(
             if period is not None:
                 start = (period.findtext(XBRLI + "startDate") or "").strip() or None
                 end = (period.findtext(XBRLI + "endDate") or "").strip() or None
-                if end is None and (whole or extensions):
+                if end is None and (whole or extensions or segments):
                     end = (period.findtext(XBRLI + "instant") or "").strip() or None
             dims = [
                 (
@@ -552,12 +603,18 @@ def parse_instance(
                 for m in elem.iter(XBRLDI + "explicitMember")
             ]
             typed = any(True for _ in elem.iter(XBRLDI + "typedMember"))
-            contexts[elem.get("id")] = (start, end, dims, typed)
+            # Every explicit member by its local name, whatever its namespace: a segment's
+            # axis is often `srt:` and its member the company's own (`pcar:`, `brka:`).
+            raw = [
+                (_local(m.get("dimension") or ""), _local(m.text or ""))
+                for m in elem.iter(XBRLDI + "explicitMember")
+            ]
+            contexts[elem.get("id")] = (start, end, dims, typed, raw)
         elif tag == XBRLI + "unit":
             measures = [_local(m.text or "") for m in elem.iter(XBRLI + "measure")]
             if len(measures) == 2 and measures[1] == "shares":
                 units[elem.get("id")] = f"{measures[0]}/shares"
-            elif len(measures) == 1 and (whole or extensions):
+            elif len(measures) == 1 and (whole or extensions or segments):
                 units[elem.get("id")] = measures[0]
         elif tag.startswith("{" + US_GAAP) and tag.split("}", 1)[1] in (
             CHAIN_CONCEPTS if whole else CONCEPTS
@@ -570,6 +627,15 @@ def parse_instance(
                         elem.get("unitRef"),
                         elem.text.strip(),
                     )
+                )
+        elif segments and tag.startswith("{" + US_GAAP) and (
+            (name := tag.split("}", 1)[1]) in SEGMENT_DEBT
+            or name in SEGMENT_WITNESSES
+            or (SEGMENT_DEBT_LIKE.search(name) and not SEGMENT_NOT_DEBT.search(name))
+        ):
+            if elem.get(XSI_NIL) != "true" and elem.text is not None:
+                segmented.append(
+                    (name, elem.get("contextRef") or "", elem.get("unitRef"), elem.text.strip())
                 )
         elif extensions and tag.startswith("{") and not _STANDARD_NS.search(tag):
             # The company's own concept: by the id its schema gives it, `<prefix>_<Name>`.
@@ -619,7 +685,7 @@ def parse_instance(
         context, unit = contexts.get(ctx_ref), units.get(unit_ref)
         if context is None or unit is None:
             continue
-        start, end, dims, typed = context
+        start, end, dims, typed, _ = context
         if typed:
             continue
         on_class = concept in EPS_CONCEPTS and len(dims) == 1 and dims[0][0] == CLASS_AXIS
@@ -657,7 +723,49 @@ def parse_instance(
         )
         if len(vals) == 1
     ]
-    return out + _own_facts(own, contexts, units, extensions or {})
+    return (
+        out
+        + _own_facts(own, contexts, units, extensions or {})
+        + _segment_facts(segmented, contexts, units)
+    )
+
+
+def _segment_facts(segmented, contexts, units) -> List[Dict[str, Any]]:
+    """The segment facts `parse_instance` kept (see its `segments`): instants only, a
+    value on one explicit member or none (a witness's total), and debt-like names."""
+    values: Dict[Tuple[str, str, str, str, str], set] = defaultdict(set)
+    named: set = set()
+    for concept, ctx_ref, unit_ref, text in segmented:
+        context, unit = contexts.get(ctx_ref), units.get(unit_ref)
+        if context is None or unit is None or "/" in unit:
+            continue
+        start, end, _, typed, dims = context
+        if start is not None or typed or _date(end) is None or len(dims) > 1:
+            continue
+        axis, member = dims[0] if dims else ("", "")
+        valued = concept in SEGMENT_DEBT or concept in SEGMENT_WITNESSES
+        if not dims and concept not in SEGMENT_WITNESSES:
+            continue
+        if dims and not valued:
+            named.add((concept, end, axis, member))
+            continue
+        try:
+            val = float(text)
+        except ValueError:
+            continue
+        if math.isfinite(val):
+            values[(concept, unit, end, axis, member)].add(val)
+    out = [
+        {"concept": c, "unit": u, "start": None, "end": e, "val": next(iter(vals)),
+         "axis": a, "member": m}
+        for (c, u, e, a, m), vals in sorted(values.items())
+        if len(vals) == 1
+    ]
+    out += [
+        {"concept": c, "end": e, "axis": a, "member": m, "debt_like": True}
+        for c, e, a, m in sorted(named)
+    ]
+    return out
 
 
 def _own_facts(own, contexts, units, extensions) -> List[Dict[str, Any]]:
@@ -668,7 +776,7 @@ def _own_facts(own, contexts, units, extensions) -> List[Dict[str, Any]]:
         context, unit = contexts.get(ctx_ref), units.get(unit_ref)
         if context is None or unit is None or "/" in unit:
             continue
-        start, end, dims, typed = context
+        start, end, dims, typed, _ = context
         if dims or typed or _date(end) is None:
             continue
         if (start is not None) != (metric in EXTENSION_FLOWS):

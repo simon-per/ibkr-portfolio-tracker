@@ -517,6 +517,8 @@ class Normalised:
     bridged: Dict[str, Dict[str, int]] = field(default_factory=dict)
     # The company's own concepts, named by their labels, that did (`_extend`).
     extended: Dict[str, Dict[str, int]] = field(default_factory=dict)
+    # The debt summed over segment columns that partition the company (`_segments`).
+    segments: Dict[str, Dict[str, int]] = field(default_factory=dict)
 
     @property
     def has_data(self) -> bool:
@@ -1174,6 +1176,114 @@ def _extend(
     return filled
 
 
+# ── Segment columns summed where no total exists ─────────────────────────────
+
+#: The source recorded for a debt summed over segment columns: `segments:<axis>`.
+SEGMENTS = "segments"
+#: The total-debt concepts a segment's column may state, in order of preference (BRK:
+#: `DebtAndCapitalLeaseObligations`; PCAR's Financial Services:
+#: `DebtLongtermAndShorttermCombinedAmount`), and the concepts whose members, summed to
+#: the total the filing states undimensioned, prove the members partition the company.
+SEGMENT_DEBT = (
+    "LongTermDebt",
+    "LongTermDebtAndCapitalLeaseObligationsIncludingCurrentMaturities",
+    "DebtAndCapitalLeaseObligations",
+    "DebtLongtermAndShorttermCombinedAmount",
+)
+SEGMENT_WITNESSES = ("Assets", "Liabilities")
+
+
+def _segments(
+    values: Dict[str, Dict[Tuple[str, date], Obs]],
+    keys: Dict[Tuple[str, date], Tuple[int, str]],
+    segment_facts: Iterable[Dict[str, Any]],
+    mapping: Dict[date, date],
+    reporting: Optional[str],
+) -> Dict[str, Dict[str, int]]:
+    """
+    A debt total summed over a balance sheet's segment columns, where no debt figure
+    exists at all (`edgar_filing_facts.SEGMENT_DEBT`, read only for a company whose debt
+    companyfacts never shows: BRK, PCAR).
+
+    Summed only when the members **provably partition the company**: a witness
+    (`SEGMENT_WITNESSES`: assets, liabilities) states its total undimensioned and its
+    members on the same axis add up to it within `BRIDGE_TOLERANCE` (BRK's Insurance and
+    Other and Railroad, Utilities and Energy; PCAR's Truck, Parts and Other and Financial
+    Services). Every member of that partition then either states one `SEGMENT_DEBT`
+    concept, the same for all, or shows no borrowing under any concept at all — PCAR's
+    truck column has no debt line, so it owes nothing; a member showing a borrowing the
+    concept does not state refuses the sum whole. Otherwise the debt stays blank. Only
+    fills a period with no debt figure. Source `segments:<axis>`.
+    """
+    stated: Dict[Tuple[str, date, str], Dict[str, float]] = defaultdict(dict)
+    totals: Dict[Tuple[str, date], float] = {}
+    borrowing: Dict[Tuple[date, str], set] = defaultdict(set)
+    filed: Dict[date, date] = {}
+    for f in segment_facts:
+        end = _date(f.get("end"))
+        if end is None:
+            continue
+        end = mapping.get(end, end)
+        axis, member, concept = f.get("axis") or "", f.get("member") or "", f.get("concept")
+        if f.get("debt_like"):
+            borrowing[(end, member if axis else "")].add((axis, concept))
+            continue
+        val, unit = f.get("val"), f.get("unit")
+        if isinstance(val, bool) or not isinstance(val, (int, float)):
+            continue
+        if reporting is not None and unit != reporting:
+            continue
+        day = _date(f.get("filed"))
+        if day is not None:
+            filed[end] = max(filed.get(end, day), day)
+        if not axis:
+            totals[(concept, end)] = float(val)
+        else:
+            stated[(concept, end, axis)][member] = float(val)
+    halves = ("debt_total", "debt_noncurrent", "debt_current")
+    filled: Dict[str, Dict[str, int]] = {}
+    for end in sorted({e for (_, e, _) in stated}):
+        targets = [k for k in keys if k[1] == end and not any(k in values[m] for m in halves)]
+        if not targets:
+            continue
+        found: Optional[Tuple[str, float]] = None
+        for axis in sorted({a for (_, e, a) in stated if e == end}):
+            members: Optional[set] = None
+            for witness in SEGMENT_WITNESSES:
+                parts = stated.get((witness, end, axis))
+                total = totals.get((witness, end))
+                if not parts or len(parts) < 2 or not total:
+                    continue
+                if abs(sum(parts.values()) / total - 1) <= BRIDGE_TOLERANCE:
+                    members = set(parts)
+                    break
+            if members is None:
+                continue
+            for concept in SEGMENT_DEBT:
+                debt = stated.get((concept, end, axis), {})
+                if not debt or not set(debt) <= members:
+                    continue
+                silent = members - set(debt)
+                if any(borrowing.get((end, m)) for m in silent):
+                    break  # a column shows a borrowing this concept does not state
+                found = (axis, sum(debt.values()))
+                break
+            if found is not None:
+                break
+        if found is None:
+            continue
+        axis, total = found
+        source = f"{SEGMENTS}:{axis}"
+        for key in targets:
+            values["debt_total"][key] = Obs(
+                value=total, filed=filed.get(end, end), start=None, end=end,
+                unit=reporting or "USD", concept=source, derived=True,
+            )
+            filled.setdefault("debt_total", {}).setdefault(source, 0)
+            filled["debt_total"][source] += 1
+    return filled
+
+
 def _basic_in_a_loss(values: Dict[str, Dict[Tuple[str, date], Obs]]) -> None:
     """
     The basic count as the diluted one for a period with a net loss and no diluted count.
@@ -1393,7 +1503,12 @@ def _no_debt_at_all(
                for at, total in by_date.items() if abs((at - end).days) <= 7)
     ]
     halves = ("debt_total", "debt_noncurrent", "debt_current")
-    ever_debt = any(o.value for m in halves for o in values[m].values())
+    # A segment sum (`_segments`) is the debt this rule cannot see: it does not make the
+    # company one whose debt shows, so the blind window below still holds around it.
+    ever_debt = any(
+        o.value for m in halves for o in values[m].values()
+        if not o.concept.startswith(f"{SEGMENTS}:")
+    )
     # A borrower whose debt never shows here (segment-only: BRK, PCAR; a bank) gets no zero
     # up to its last material interest: BRK tags interest only from 2025, so before that
     # nothing nearer says it borrows. After it (VRTX repaid its notes by 2014) the
@@ -2032,7 +2147,8 @@ def normalise(
     reporting = reporting_currency(companyfacts)
     filing_facts = list(filing_facts)
     own_concepts = [f for f in filing_facts if "metric" in f]
-    plain = [f for f in filing_facts if "metric" not in f]
+    segment_facts = [f for f in filing_facts if "axis" in f]
+    plain = [f for f in filing_facts if "metric" not in f and "axis" not in f]
     facts = _drop_lone_slips(base + _filing_facts(base, plain, reporting))
     if not facts:
         return result
@@ -2104,6 +2220,7 @@ def normalise(
     _total_only_when_current(values)
     result.bridged = _bridge(values, keys, companyfacts, mapping)
     result.extended = _extend(values, keys, own_concepts, mapping, reporting)
+    result.segments = _segments(values, keys, segment_facts, mapping, reporting)
     _basic_in_a_loss(values)
     _no_current_debt_line(values, facts, companyfacts, mapping)
     _no_debt_at_all(values, facts, companyfacts, mapping)

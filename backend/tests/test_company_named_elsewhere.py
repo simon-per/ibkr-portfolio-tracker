@@ -39,13 +39,14 @@ from app.config import settings
 
 @pytest.fixture(autouse=True)
 def _no_layer_reads(monkeypatch):
-    """This module's passes count every URL; the company's own concepts (which the
-    fixture's missing capex would send the pass to read) are
-    `test_company_extension_concepts`'."""
+    """This module's passes count every URL; the company's own concepts and segment
+    columns (which the fixture's missing capex and debt would send the pass to read) are
+    `test_company_extension_concepts`' and `test_company_segment_debt`'."""
     async def no(self, cik, facts):
         return False
 
     monkeypatch.setattr(CompanyFinancialsSync, "_reads_extensions", no)
+    monkeypatch.setattr(CompanyFinancialsSync, "_reads_segments", lambda *a: False)
 
 
 OTHER_FUND = "IE00B5BMR087"  # any fund's stored basket

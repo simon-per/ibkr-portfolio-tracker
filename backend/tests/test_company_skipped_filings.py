@@ -32,13 +32,14 @@ from tests.test_company_financials_sync import FIXTURE, NVDA_CIK, UA, Edgar, _sy
 
 @pytest.fixture(autouse=True)
 def _no_layer_reads(monkeypatch):
-    """This module's passes count every URL; the company's own concepts (which the
-    fixture's missing capex would send the pass to read) are
-    `test_company_extension_concepts`'."""
+    """This module's passes count every URL; the company's own concepts and segment
+    columns (which the fixture's missing capex and debt would send the pass to read) are
+    `test_company_extension_concepts`' and `test_company_segment_debt`'."""
     async def no(self, cik, facts):
         return False
 
     monkeypatch.setattr(CompanyFinancialsSync, "_reads_extensions", no)
+    monkeypatch.setattr(CompanyFinancialsSync, "_reads_segments", lambda *a: False)
 
 
 TODAY = date(2026, 11, 16)

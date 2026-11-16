@@ -20,6 +20,7 @@ from sqlalchemy import select
 from app.config import settings
 from app.models.company_financials import CompanyFinancial, SecCompany, SecFilingRead
 from app.services.company_financials_normaliser import normalise
+from app.services.company_financials_sync import CompanyFinancialsSync
 from app.services.edgar_filing_facts import (
     READER,
     extension_gaps,
@@ -238,9 +239,11 @@ NAMED_CAPEX = ("abc_PurchasesOfPropertyAndEquipment", "Purchases of property and
 
 
 @pytest.mark.asyncio
-async def test_the_pass_reads_a_years_10k_and_its_labels_once(db, configured):
+async def test_the_pass_reads_a_years_10k_and_its_labels_once(db, configured, monkeypatch):
     await _hold(db, 1, "NVDA")
     await db.commit()
+    # The fixture has no debt either: its segment reads are `test_company_segment_debt`'s.
+    monkeypatch.setattr(CompanyFinancialsSync, "_reads_segments", lambda *a: False)
     edgar = ExtensionEdgar()
 
     first = await _sync(db, edgar).refresh()

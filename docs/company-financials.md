@@ -934,8 +934,9 @@ JNJ's operating income, the banks' FCF). Yahoo is not part of it (CLAUDE.md rule
 2. **The filings companyfacts skipped** (*When companyfacts lags the filing list*): read whole.
 3. **IFRS instances** (*Annual-only filers*): a 20-F's `ifrs-full` lines under their twins.
 4. **The company's own concepts, by their labels** (below).
+5. **Segment columns summed where no total exists** (below).
 
-The weekly pass records what layers 1, 4 and 5 filled — `bridged`, `extended`,
+The weekly pass records what layers 1, 4 and 5 filled — `bridged`, `extended`, `segments`,
 `skipped_filings` — as information, never a warning.
 
 ### The company's own concepts, by their labels
@@ -974,6 +975,35 @@ more request beside the instance) names each concept in words.
   and since its Q3 2026 10-Q undimensioned (1.396B at 2025-12-31, 2.333B at 2026-09-30), which
   companyfacts now carries. Its older quarters stay withheld by the maturity-table witness
   (*The normaliser*).
+
+The measurement over the 132 companies is in *Known gaps and out of scope*.
+
+### Segment columns summed where no total exists
+
+BRK and PCAR state their debt per segment — Insurance and Other / Railroad, Utilities and Energy;
+Truck, Parts and Other / Financial Services — which companyfacts leaves out, so their debt was
+unknown and `_no_debt_at_all` rightly withheld a zero.
+
+- **Whose** (`edgar_filing_facts.debt_blind`, `CompanyFinancialsSync._reads_segments`): a us-gaap
+  filer with no debt figure from any other source in any period (a debt-free balance sheet's
+  zeros count as figures). Over the 132 companies that is BRK and PCAR alone.
+- **When** (`segment_gaps`): every period end within ten years (`SEGMENT_LOOKBACK`) without debt
+  asks its own filing, once ever, within the per-company cap; every read of such a company keeps
+  its segment columns (`parse_instance(segments=True)`: the `SEGMENT_DEBT` and
+  `SEGMENT_WITNESSES` facts on exactly one explicit member, the witnesses' undimensioned totals,
+  and the names of every borrowing a member shows). No extra request: the instance is read anyway.
+- **The proof** (`company_financials_normaliser._segments`): summed only when the members
+  **provably partition the company** — a witness (assets, liabilities) states its total and its
+  members on the same axis add up to it within `BRIDGE_TOLERANCE` (BRK: 917.8B + 236.1B = 1,153.9B
+  of assets at 2024-12-31; PCAR: 21.0B + 22.4B = 43.4B). Then each member of that partition either
+  states one total-debt concept (`SEGMENT_DEBT`: `LongTermDebt`, `…CapitalLeaseObligations
+  IncludingCurrentMaturities`, `DebtAndCapitalLeaseObligations` — BRK's —,
+  `DebtLongtermAndShorttermCombinedAmount` — PCAR's Financial Services), the same for all, or
+  shows no borrowing under any concept (PCAR's truck column: it owes nothing); a member showing a
+  borrowing the concept does not state refuses the sum whole, and so does a partial view (a parent
+  company's column, one segment of three). Otherwise the debt stays blank. Fills `debt_total` only
+  where no debt figure exists; source `segments:<axis>`. `_no_debt_at_all` still treats such a
+  company as one whose debt companyfacts cannot see. `tests/test_company_segment_debt.py`.
 
 The measurement over the 132 companies is in *Known gaps and out of scope*.
 
