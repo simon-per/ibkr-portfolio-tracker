@@ -7,7 +7,7 @@
 > [docs/troubleshooting.md](docs/troubleshooting.md); local-dev traps in
 > [docs/local-development.md](docs/local-development.md).
 
-**Last updated: 2026-11-15.** The **Company tab** (one company's SEC EDGAR fundamentals history,
+**Last updated: 2026-11-16.** The **Company tab** (one company's SEC EDGAR fundamentals history,
 docs/company-financials.md) is deployed and filled for the held filers **and the Nasdaq-100**
 (102 companies with figures, keyed by CIK), with key figures, valuation multiples (weekly Yahoo closes), ROE and net cash, gross margin, operating income,
 buybacks & dividends, cash & debt and 3/5/10Y CAGRs (docs/shipped-log.md 2026-10-25). PR #80 (Swiss residency)
@@ -29,6 +29,12 @@ code trace; all of them shipped that evening (waves 1–3, the product issues #7
 
 ## Needs a human
 
+- **Confirm the Alpha Vantage key's tier.** The Company tab's statement fill and the price
+  fallback now share one budget of 25 calls a UTC day (`alpha_vantage.DAILY_LIMIT`, the free
+  tier's; docs/flex-and-sync.md). Read the first `company_vendor_fill` rows in
+  `/api/scheduler/history`: `budget.capped` true after fewer than 15 calls (`spent`) means the key
+  is on a stricter tier, and `DAILY_LIMIT` should come down to what it answers. A premium key
+  would allow more; nothing asks for one.
 - **Decide on the non-root backend container (#51).** The plan, the per-deploy `chown` and what
   happens if it is missed are in docs/deployment.md *Not done: non-root container*.
 - **Raise HSTS's `max-age`** in steps (on at 300 s since 2026-10-18) once nothing has broken;
@@ -99,15 +105,23 @@ code trace; all of them shipped that evening (waves 1–3, the product issues #7
 
 Only what is still unverified.
 
-- **Company tab gaps filled (2026-11-15, normaliser only):** nothing moves until each company is
-  refetched — the Sunday 2026-11-22 05:00 pass does all of them (fetched > 6 days ago). Do not
-  `--force` it sooner: that re-asks Yahoo for every profile. Then, on the public API: XEL's quarterly
-  revenue reaching 2026; LLY's, VZ's and ROP's FCF past 2019–2022; PANW, DDOG and ZS with debt;
-  META's net cash in most quarters; ANET's, ISRG's and MPWR's net cash (debt-free balance sheets);
-  TTWO's loss quarters with a share count; NBIS in USD through FY2025; and the pass's `sync_runs`
-  row carrying `bridged` (what a proven concept filled). BRK and PCAR must still show no debt (never
-  a zero). The 2026-11-15 measurement, run before and after over all 132 documents, is in
-  docs/company-financials.md (*The normaliser*, *Known gaps*).
+- **The Company tab's source waterfall (2026-11-16; with the 2026-11-15 gap fills):** migrations
+  `f1b3d5e7a9c2` and `a2c4e6f8b0d1`. Nothing moves until each company is refetched — the Sunday
+  2026-11-22 05:00 pass does all of them (fetched > 6 days ago). Do not `--force` it sooner: that
+  re-asks Yahoo for every profile. That first pass reads more filings than any after it (the
+  companies' own capex and debt concepts, ten years of BRK's and PCAR's segment columns, the
+  filings companyfacts skipped) within 24 a company, and SEC's `index.json` answers 503 now and
+  then: a company whose read fails resumes the Sunday after. Then, on the public API: AEP's and
+  EXC's Q2 2026 EPS and TTM P/E; ALNY's Q1 2026; NU's and TSMC's FY2025; NVDA's capex FY2013–FY2021
+  and its TTM FCF before Q3 FY2024; CDNS's debt at its year ends; BRK's and PCAR's debt (from
+  segment columns, never a zero); XEL's quarterly revenue reaching 2026; LLY's, VZ's and ROP's FCF
+  past 2019–2022; PANW, DDOG and ZS with debt; META's, ANET's, ISRG's and MPWR's net cash; TTWO's
+  loss quarters with a share count; NBIS in USD through FY2025. The pass's `sync_runs` row carries
+  `bridged`, `extended`, `segments`, `skipped_filings`, `filings_listed`. **Alpha Vantage:** a
+  `company_vendor_fill` row after each 05:00 EDGAR job (none without a key), `spent` at most 15 a
+  day, `filled` and `unproven` per company; a price pass's fallback still asking on days the fill
+  ran (its reserve of 10). The measurement, before and after over all 132 documents, is in
+  docs/company-financials.md (*Known gaps*).
 
 - **GBP as a base currency, and every base's FX history from the first purchase (2026-11-14):**
   deployed 13:41 Berlin (`/health` on `54bf2a2`; `/api/settings` lists GBP). Still unseen: the first
@@ -516,21 +530,10 @@ Rough priority. Re-verify each `path:line` in code before fixing; lines move.
     hidden Analytics tab's `segments` through `decompose` before that tab returns (it still
     classifies basket rows itself, with raw countries). Researched future sources (N-PORT,
     commercial APIs — do not re-shop) are in docs/lookthrough.md.
-7c. **The Company tab's source waterfall (owner, 2026-11-16; a /goal run is planned).** After
-    companyfacts and bridging (on branch `ccr-47cc7bbe-8060um`): the filing's own instance for
-    skipped older quarters (7a) and IFRS (7b); company extension concepts matched by label and
-    proven by agreement (PYPL's current notes, NVDA's capex); segment members summed where no
-    total exists (BRK, PCAR debt); then Alpha Vantage as a fill-only, source-tagged fallback,
-    proven per company against SEC, one daily budget shared with the price fallback. Blanks a
-    company never reported stay blank (no vendor estimates, no zeros).
-7b. **NU's and TSMC's FY2025 (held: NU).** Their 20-F (IFRS) was filed months ago and is not in
-    companyfacts; `edgar_filing_facts.parse_instance` reads the us-gaap namespace only, so
-    `_filing_behind` cannot fill it. Reading `ifrs-full` facts under their `IFRS_TWINS` would.
-7a. **Read an older quarter companyfacts skipped, automatically.** `_filing_behind` reads only
-    the newest filing `submissions` lists; AEP's and EXC's Q2 2026 were filled by hand
-    (docs/company-financials.md, *When companyfacts lags the filing list*). For a recent quarter
-    with net income and no filing in `filings(companyfacts)`, look its 10-Q up in the same
-    `submissions` document and read it whole, once.
+7a. **The Company tab after the waterfall** (2026-11-16): read a quarter's own 10-Q for the
+    company's own debt concepts (years only today, so CDNS's quarters stay without debt); the
+    same for BRK's and PCAR's segment columns where a 10-Q tags them; and whatever the first
+    `company_vendor_fill` runs leave in `unproven` (docs/company-financials.md, *Known gaps*).
 8. **The look-through fundamentals card takes ~8 s** (uncached), the shape the screener had;
     the screener's key (`_screener_key`, docs/company-financials.md *Screener*) is the pattern.
 9. **Dividends: a forecast check** (owner asked 2026-11-08 what is best; proposal given, not
@@ -546,6 +549,12 @@ Rough priority. Re-verify each `path:line` in code before fixing; lines move.
 ## Recent sessions (last 5)
 
 One line each, newest first; drop the oldest.
+
+- **2026-11-16 (the Company tab's source waterfall, /goal run)** — measured all 132 companies
+  before and after; five layers, each its own commit: the filings companyfacts skipped (7a), IFRS
+  20-F instances (7b), the companies' own capex/debt concepts by label, BRK's and PCAR's segment
+  columns summed where they partition the company, and Alpha Vantage last (one daily budget shared
+  with the price fallback, proven per company and metric, fill-only).
 
 - **2026-11-15 (Company tab gaps)** — measured every missing quarter over the 132 companies,
   matched each to what SEC did carry; widened the chains, then made them extend themselves
@@ -565,7 +574,3 @@ One line each, newest first; drop the oldest.
   point; BKR's Class A-only EPS read from its filings, and a filing's period no longer lost to its
   comparatives (BKR's Q2 2026); the screener serves 3/5/10Y medians with a switch and a server
   cache. BKR fetched by hand on production; P/E back.
-- **2026-11-08 (feature survey; branch `allocation-one-source`, merged and pushed)** — verified the Sunday EDGAR
-  pass on production; Allocation's Sectors and Regions became the look-through rolled up (new
-  `region_taxonomy`; `etf_mappings.py`'s estimates and the client's maps deleted), and a Company
-  screener reads each company against its own 5-year multiples.
