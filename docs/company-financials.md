@@ -1054,6 +1054,27 @@ The measurement over the 132 companies is in *Known gaps and out of scope*.
 
 Nothing is asked from this session: the key lives only on the VPS. Its reach, estimated on the rows layers 2 and 3 leave: 89 interior gaps in recent quarters at 26 companies, mostly debt halves, 26 calls to ask them all — under two days of its budget.
 
+## Markets beyond the SEC (planned, owner 2026-11-16)
+
+Today a company has a page only if it files with the SEC (US filers, and foreign filers of a 20-F
+through their US listing: ASML, TSMC, NU, BABA, PDD, ARM). Xetra, Euronext and SIX listings, and the
+look-through's non-US companies, have none. The plan keeps this page's rule — **the company's own
+regulator first**, every other source a fill-only fallback — market by market, in the owner's order:
+
+| order | market | the regulator's source | what it gives | notes |
+|---|---|---|---|---|
+| 1 | EU, UK | ESEF annual reports, collected at filings.xbrl.org, found by **LEI** | every EU-listed annual report since 2021 in iXBRL, `ifrs-full`; half-years only where filed voluntarily | read through `IFRS_TWINS` as a 20-F is; ISIN → LEI from GLEIF, which the identity pass already caches; annual figures, so TTM is the fiscal year |
+| 2 | South Korea | OpenDART (the FSS), free key | structured statements, quarterly, K-IFRS; a Korean industry code | |
+| 2 | Taiwan | MOPS (the TWSE's filing system) | XBRL, no official API | fragile; TSMC is already a 20-F filer |
+| 3 | Japan | EDINET (the FSA), free key | XBRL for every listed company, J-GAAP or IFRS; the TSE's 33 sectors | needs a J-GAAP concept map |
+| later | China A/H, India, Middle East | CNINFO/HKEX, NSE/BSE/MCA21, Tadawul | no usable free structured source today | their US ADR filers only |
+
+Switzerland's SIX issuers are outside ESEF; only those that file voluntarily would have figures.
+Every figure stays in the company's reporting currency (*Why the reporting currency*), each source is
+a new upstream with its own bounded budget, and Alpha Vantage's free statements are effectively
+US-only. Classification works for the non-US companies before their figures do: with no SEC data
+they fall through to the fund baskets' GICS sector (STATUS.md, *Worth doing next* 7).
+
 ## Known gaps and out of scope
 
 **The source waterfall, measured 2026-11-16** over the 132 companies: the real pass (`_one`, three

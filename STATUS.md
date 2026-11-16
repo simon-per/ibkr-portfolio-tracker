@@ -526,10 +526,24 @@ Rough priority. Re-verify each `path:line` in code before fixing; lines move.
 6. **Should a trade still count as an external flow, now that cash is tracked?** Likely: serve
     both TWRs, labelled. `externalFlow`/`isMeasurable` in `portfolioKpis.ts`, `dailyReturnSeries`'
     five consumers and `betaAndCorrelation` must move together.
-7. **Look-through projects:** exact World ex CH; nested funds; an identity detector; route the
+6b. **Look-through projects:** exact World ex CH; nested funds; an identity detector; route the
     hidden Analytics tab's `segments` through `decompose` before that tab returns (it still
     classifies basket rows itself, with raw countries). Researched future sources (N-PORT,
     commercial APIs — do not re-shop) are in docs/lookthrough.md.
+7. **Company classification and markets beyond the SEC (owner, 2026-11-16).** Every company is
+   classified by a waterfall, **the company's own regulator first**, then the other sources as
+   fallback; never by hand or a per-company table. Two answers per company, each with the source
+   that decided it: the **business model** (industrial, bank/broker, insurer: it decides the KPI
+   set) — the statements' own concepts, then the segment note, then the SIC code, then SEC's
+   reviewing office (`ownerOrg`), the fund baskets' GICS never alone — and the **sector** — SIC,
+   then `ownerOrg` where the SIC is a catch-all, then the baskets' GICS, then Yahoo's (held only).
+   Order of work: **(1) US**: the classification, the Company tab hiding a KPI a company does not
+   report, bank and insurer KPI sets; **(2) Europe**: ESEF annual reports from filings.xbrl.org,
+   found by LEI (GLEIF, already cached), read through the existing IFRS twins; **(3) South Korea
+   (OpenDART) and Taiwan (MOPS)**, before Japan — the owner holds more there; **(4) Japan
+   (EDINET)**; **(5) the rest** (China A/H, India, the Middle East) later — no usable free
+   structured source today, so their US ADR filers only. The sources and caveats per market are in
+   docs/company-financials.md, *Markets beyond the SEC*.
 7a. **The Company tab after the waterfall** (2026-11-16): read a quarter's own 10-Q for the
     company's own debt concepts (years only today, so CDNS's quarters stay without debt), and
     PCAR's quarters (its 10-Qs state no segment total in a concept `SEGMENT_DEBT` reads); and whatever the first
