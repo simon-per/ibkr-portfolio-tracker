@@ -238,6 +238,12 @@ class EdgarClient(PacedGet):
         return None if response is None else response.content
 
 
+#: SIC codes of banks, credit institutions, brokers and insurers (6000-6411, the SEC's
+#: `sic` from `submissions`): their debt, capex and FCF are not the industrial figures the
+#: Company tab shows (BAC, JPM, IBKR, SOFI, BRK), so their filings' own concepts are not
+#: read for them (`company_financials_sync`).
+FINANCIAL_SIC = range(6000, 6412)
+
 _FISCAL_YEAR_END = re.compile(r"(0[1-9]|1[0-2])(0[1-9]|[12]\d|3[01])")
 
 #: The filings whose facts count — the one set (review item DR6): the normaliser keeps a

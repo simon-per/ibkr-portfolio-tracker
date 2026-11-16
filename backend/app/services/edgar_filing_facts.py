@@ -34,7 +34,11 @@ from dataclasses import dataclass
 from datetime import date, timedelta
 from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
 
-from app.services.company_financials_normaliser import FORMS, IFRS_TWINS, METRICS
+from app.services.company_financials_normaliser import (
+    FORMS,
+    IFRS_TWINS,
+    METRICS,
+)
 from app.services.edgar_client import ANNUAL_FORM_PREFIXES
 
 #: The concepts read from a filing on a dimension member: the dividend-per-share chain on
@@ -70,13 +74,62 @@ CLASS_AXIS = "StatementClassOfStockAxis"
 #: (Berkshire's A and B) has no one EPS to read, whichever class it is quoted by.
 EPS_MEMBERS = frozenset({(CLASS_AXIS, "CommonStockMember"), (CLASS_AXIS, "CommonClassAMember")})
 
-#: The concepts each gap's read must hold to fill it, by the metric missing.
-GAP_CONCEPTS = {"dividends_per_share": DIVIDEND_CONCEPTS, "eps_diluted": EPS_CONCEPTS}
+#: A company's own concepts (`nvda:PurchasesOfPropertyAndEquipmentAndIntangibleAssets`),
+#: which companyfacts never carries, named by their standard label in the filing's label
+#: linkbase (2026-11-16, the source waterfall's third layer): per metric, the label it
+#: must have and what it must not say. Capex and debt only — the figures the measurement
+#: found under extension concepts (NVDA's capex FY2013-FY2021, CDNS's carrying value of
+#: debt). A label is a name, not a proof: the normaliser takes the concept only where it
+#: agrees with the chain's figure on every period both report (`_extend`). Lower case.
+EXTENSION_LABELS: Dict[str, Tuple[str, str]] = {
+    "capex": (
+        r"^(purchases?|payments?|acquisitions?|additions?|expenditures?) (of|for|to|related"
+        r" to|to acquire|on) (property|premises)(,? plant)?(,| and| &)+ equipment"
+        r"|^capital expenditures?$",
+        r"business|proceeds|sale|accrued|unpaid|not yet paid|incurred|lease|held for"
+        r"|deposit|financ|payable|investment|software|leasehold|vehicles|rental",
+    ),
+    "debt_total": (
+        r"^(total )?((carrying|book) (value|amount) of )?(total )?(long-term )?debt"
+        r"( outstanding)?(, net)?(, including current (portion|maturities))?$",
+        r"fair|principal|face|maturit|interest|issuance|cost|discount|lease|securit"
+        r"|repay|proceeds|percent|ratio|related part",
+    ),
+    "debt_current": (
+        r"^((current portion|current maturities) of (long-term )?(debt|notes|borrowings)"
+        r"|short-term (debt|borrowings)|(notes payable|long-term debt|debt),? current)$",
+        r"lease|fair|related part",
+    ),
+    "debt_noncurrent": (
+        r"^(long-term (debt|notes|borrowings)|notes payable),? (net of|less|excluding)"
+        r" current (portion|maturities)$|^(long-term (debt|notes|borrowings)),? noncurrent$",
+        r"lease|fair|related part",
+    ),
+}
+#: The timing each metric's concept must have: a flow is a duration, a balance an instant.
+EXTENSION_FLOWS = frozenset({"capex"})
+EXTENSION_FAMILIES = {
+    "extension:capex": frozenset({"capex"}),
+    "extension:debt": frozenset({"debt_total", "debt_current", "debt_noncurrent"}),
+}
+
+#: The concepts each gap's read must hold to fill it, by the metric missing; an extension
+#: gap is held by a fact a label named for one of its family's metrics (`covers`).
+GAP_CONCEPTS: Dict[str, Any] = {
+    "dividends_per_share": DIVIDEND_CONCEPTS,
+    "eps_diluted": EPS_CONCEPTS,
+    **EXTENSION_FAMILIES,
+}
 #: What a stored read looked for (`sec_filing_reads.reader`): 1 the dividend per share
-#: alone (2026-11-07), 2 the diluted EPS too (2026-11-08). A filing read before a metric
-#: was looked for is read once more for that metric's gap, and never again after.
-READER = 2
-READ_SINCE = {"dividends_per_share": 1, "eps_diluted": 2}
+#: alone (2026-11-07), 2 the diluted EPS too (2026-11-08), 3 the company's own concepts
+#: by their labels too (2026-11-16). A filing read before a gap's kind was looked for is
+#: read once more for that gap, and never again after.
+READER = 3
+READ_SINCE = {
+    "dividends_per_share": 1,
+    "eps_diluted": 2,
+    **{family: 3 for family in EXTENSION_FAMILIES},
+}
 
 #: A gap and a filing's period are one period when their ends are this close (the
 #: normaliser's `_canonical_ends` folds ends within a week the same way).
@@ -309,13 +362,100 @@ def covers(
 ) -> bool:
     """Whether facts of `concepts` read from a filing end on this period (a comparative
     quarter, a year-to-date rung or a year), so its own filing need not be read in the
-    same pass."""
+    same pass. An extension family's `concepts` are metrics: a fact a label named for one
+    of them (`metric`)."""
     return any(
-        f.get("concept") in concepts
+        (f.get("metric") in concepts if "metric" in f else f.get("concept") in concepts)
         and (end := _date(f.get("end"))) is not None
         and abs((end - period_end).days) <= SAME_PERIOD_DAYS
         for f in facts
     )
+
+
+#: The years from which a fiscal year's missing capex or debt sends the pass to its 10-K
+#: for the company's own concepts: XBRL's first years (2009) on.
+EXTENSION_SINCE = date(2009, 1, 1)
+
+
+def extension_gaps(rows: Sequence[Dict[str, Any]]) -> List[Tuple[date, str]]:
+    """
+    Fiscal year ends missing capex, or debt (neither the total nor both halves), newest
+    first, as (year end, family): the years whose 10-K may state the figure under the
+    company's own concept (`EXTENSION_LABELS`). Years only: one 10-K holds a year's flows
+    and its balance sheet, and three years of the first; a quarter's is not asked.
+    """
+    have: Dict[date, set] = defaultdict(set)
+    for row in rows:
+        if row["fiscal_period"] == "FY":
+            have[row["period_end"]].add(row["metric"])
+    out = []
+    for end, metrics in have.items():
+        if end < EXTENSION_SINCE:
+            continue
+        if "capex" not in metrics:
+            out.append((end, "extension:capex"))
+        if "debt_total" not in metrics and not (
+            {"debt_current", "debt_noncurrent"} <= metrics
+        ):
+            out.append((end, "extension:debt"))
+    return sorted(out, key=lambda gap: gap[0], reverse=True)
+
+
+def label_linkbase(index: Any) -> Optional[str]:
+    """The filing's label linkbase (`<prefix>-<YYYYMMDD>_lab.xml`) among its files, or
+    None when there is not exactly one."""
+    items = ((index or {}).get("directory") or {}).get("item") or []
+    names = [
+        i["name"]
+        for i in items
+        if isinstance(i, dict)
+        and isinstance(i.get("name"), str)
+        and re.fullmatch(r"[a-z0-9][a-z0-9._-]*_lab\.xml", i["name"], re.IGNORECASE)
+    ]
+    return names[0] if len(names) == 1 else None
+
+
+_XLINK = "{http://www.w3.org/1999/xlink}"
+_STANDARD_LABEL = "http://www.xbrl.org/2003/role/label"
+
+
+def extension_metrics(body: bytes) -> Dict[str, Tuple[str, str]]:
+    """
+    The company's own concepts a label linkbase names like a metric: `{concept id ->
+    (metric, label)}`, the id as the schema spells it (`nvda_PurchasesOf...`), read by its
+    standard label (`EXTENSION_LABELS`). A concept whose label fits two metrics is none.
+    Raises `ET.ParseError` on a document that is not XML.
+    """
+    locs: Dict[str, str] = {}
+    arcs: List[Tuple[str, str]] = []
+    labels: Dict[str, str] = {}
+    for _, elem in ET.iterparse(io.BytesIO(body), events=("end",)):
+        tag = elem.tag.rsplit("}", 1)[-1]
+        if tag == "loc":
+            href = elem.get(_XLINK + "href") or ""
+            locs[elem.get(_XLINK + "label") or ""] = href.rpartition("#")[2]
+        elif tag == "labelArc":
+            arcs.append((elem.get(_XLINK + "from") or "", elem.get(_XLINK + "to") or ""))
+        elif tag == "label" and elem.get(_XLINK + "role") == _STANDARD_LABEL:
+            labels[elem.get(_XLINK + "label") or ""] = " ".join((elem.text or "").split())
+    out: Dict[str, Tuple[str, str]] = {}
+    for source, target in arcs:
+        concept, label = locs.get(source), labels.get(target)
+        if not concept or not label or concept.startswith(("us-gaap_", "dei_", "srt_")):
+            continue
+        text = label.lower()
+        named = [
+            metric
+            for metric, (named_like, not_named) in EXTENSION_LABELS.items()
+            if re.search(named_like, text) and not re.search(not_named, text)
+        ]
+        if len(named) == 1:
+            out[concept] = (named[0], label)
+    return out
+
+
+#: Namespaces that are no company's own: the standard taxonomies.
+_STANDARD_NS = re.compile(r"fasb\.org|xbrl\.org|sec\.gov|ifrs\.org|w3\.org")
 
 
 def instance_name(index: Any) -> Optional[str]:
@@ -349,7 +489,11 @@ def _gaap_name(qname: str, prefixes: Dict[str, str]) -> Optional[str]:
     return name if prefixes.get(prefix, "").startswith(US_GAAP) else None
 
 
-def parse_instance(body: bytes, whole: bool = False) -> List[Dict[str, Any]]:
+def parse_instance(
+    body: bytes,
+    whole: bool = False,
+    extensions: Optional[Dict[str, Tuple[str, str]]] = None,
+) -> List[Dict[str, Any]]:
     """
     The dividend-per-share facts of one XBRL instance that sit on exactly one whitelisted
     dimension member (`MEMBERS`), and the diluted EPS facts on one share class
@@ -365,6 +509,10 @@ def parse_instance(body: bytes, whole: bool = False) -> List[Dict[str, Any]]:
     undimensioned facts come too, and win over a member's value for the same period —
     they are what companyfacts would carry. An IFRS filing's (`ifrs-full`) lines come
     under their US-GAAP twins (`IFRS_TWINS`), only when it has no us-gaap chain fact.
+
+    `extensions` (`extension_metrics` of the filing's label linkbase) adds the company's
+    own concepts its labels name like a metric, undimensioned and in one currency, a flow
+    as a duration and a balance as an instant: `{concept: "nvda:Name", metric, label, ...}`.
     """
     contexts: Dict[
         str, Tuple[Optional[str], Optional[str], List[Tuple[str, str]], bool]
@@ -372,6 +520,7 @@ def parse_instance(body: bytes, whole: bool = False) -> List[Dict[str, Any]]:
     units: Dict[str, str] = {}
     candidates: List[Tuple[str, str, Optional[str], str]] = []
     ifrs: List[Tuple[str, str, Optional[str], str]] = []
+    own: List[Tuple[str, str, Optional[str], str, str]] = []
     prefixes: Dict[str, str] = {}
     depth = 0
     events = ("start-ns", "start", "end")
@@ -393,7 +542,7 @@ def parse_instance(body: bytes, whole: bool = False) -> List[Dict[str, Any]]:
             if period is not None:
                 start = (period.findtext(XBRLI + "startDate") or "").strip() or None
                 end = (period.findtext(XBRLI + "endDate") or "").strip() or None
-                if end is None and whole:
+                if end is None and (whole or extensions):
                     end = (period.findtext(XBRLI + "instant") or "").strip() or None
             dims = [
                 (
@@ -408,7 +557,7 @@ def parse_instance(body: bytes, whole: bool = False) -> List[Dict[str, Any]]:
             measures = [_local(m.text or "") for m in elem.iter(XBRLI + "measure")]
             if len(measures) == 2 and measures[1] == "shares":
                 units[elem.get("id")] = f"{measures[0]}/shares"
-            elif len(measures) == 1 and whole:
+            elif len(measures) == 1 and (whole or extensions):
                 units[elem.get("id")] = measures[0]
         elif tag.startswith("{" + US_GAAP) and tag.split("}", 1)[1] in (
             CHAIN_CONCEPTS if whole else CONCEPTS
@@ -420,6 +569,21 @@ def parse_instance(body: bytes, whole: bool = False) -> List[Dict[str, Any]]:
                         elem.get("contextRef") or "",
                         elem.get("unitRef"),
                         elem.text.strip(),
+                    )
+                )
+        elif extensions and tag.startswith("{") and not _STANDARD_NS.search(tag):
+            # The company's own concept: by the id its schema gives it, `<prefix>_<Name>`.
+            uri, _, name = tag[1:].partition("}")
+            prefix = next((p for p, u in prefixes.items() if u == uri and p), None)
+            named = extensions.get(f"{prefix}_{name}") if prefix else None
+            if named and elem.get(XSI_NIL) != "true" and elem.text is not None:
+                own.append(
+                    (
+                        f"{prefix}:{name}",
+                        elem.get("contextRef") or "",
+                        elem.get("unitRef"),
+                        elem.text.strip(),
+                        named[0],
                     )
                 )
         elif whole and tag.startswith("{"):
@@ -486,10 +650,43 @@ def parse_instance(body: bytes, whole: bool = False) -> List[Dict[str, Any]]:
         by_period[key] = classes[key]  # another class's value leaves the period out
     merged = {k: v for k, v in by_period.items() if k not in plain}
     merged.update(plain)
-    return [
+    out = [
         {"concept": c, "unit": u, "start": s, "end": e, "val": next(iter(vals))}
         for (c, u, s, e), vals in sorted(
             merged.items(), key=lambda kv: (kv[0][0], kv[0][1], kv[0][2] or "", kv[0][3])
+        )
+        if len(vals) == 1
+    ]
+    return out + _own_facts(own, contexts, units, extensions or {})
+
+
+def _own_facts(own, contexts, units, extensions) -> List[Dict[str, Any]]:
+    """The company's own concepts' facts `parse_instance` kept: undimensioned, in one
+    currency, timed as their metric is; a period given two values is left out."""
+    found: Dict[Tuple[str, str, Optional[str], str, str], set] = defaultdict(set)
+    for concept, ctx_ref, unit_ref, text, metric in own:
+        context, unit = contexts.get(ctx_ref), units.get(unit_ref)
+        if context is None or unit is None or "/" in unit:
+            continue
+        start, end, dims, typed = context
+        if dims or typed or _date(end) is None:
+            continue
+        if (start is not None) != (metric in EXTENSION_FLOWS):
+            continue
+        if start is not None and _date(start) is None:
+            continue
+        try:
+            val = float(text)
+        except ValueError:
+            continue
+        if math.isfinite(val):
+            found[(concept, unit, start, end, metric)].add(val)
+    labels = {f"{k.split('_', 1)[0]}:{k.split('_', 1)[1]}": v[1] for k, v in extensions.items() if "_" in k}
+    return [
+        {"concept": c, "unit": u, "start": s, "end": e, "val": next(iter(vals)),
+         "metric": m, "label": labels.get(c)}
+        for (c, u, s, e, m), vals in sorted(
+            found.items(), key=lambda kv: (kv[0][0], kv[0][2] or "", kv[0][3])
         )
         if len(vals) == 1
     ]

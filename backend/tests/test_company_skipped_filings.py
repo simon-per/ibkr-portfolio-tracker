@@ -18,13 +18,28 @@ import pytest
 from sqlalchemy import select
 
 from app.models.company_financials import CompanyFinancial, SecCompany, SecFilingRead
-from app.services.company_financials_sync import LISTING_RECHECK_AFTER
+from app.services.company_financials_sync import (
+    LISTING_RECHECK_AFTER,
+    CompanyFinancialsSync,
+)
 from app.services.edgar_client import SUBMISSIONS_URL, filing_url
 from app.services.edgar_filing_facts import companyfacts_accns, skipped
 from tests.test_company_filing_fallback import ACCN, INSTANCE, INSTANCE_NAME, Q3_END
 from tests.test_company_filings_check import _on, _stored
 from app.config import settings
 from tests.test_company_financials_sync import FIXTURE, NVDA_CIK, UA, Edgar, _sync
+
+
+@pytest.fixture(autouse=True)
+def _no_layer_reads(monkeypatch):
+    """This module's passes count every URL; the company's own concepts (which the
+    fixture's missing capex would send the pass to read) are
+    `test_company_extension_concepts`'."""
+    async def no(self, cik, facts):
+        return False
+
+    monkeypatch.setattr(CompanyFinancialsSync, "_reads_extensions", no)
+
 
 TODAY = date(2026, 11, 16)
 

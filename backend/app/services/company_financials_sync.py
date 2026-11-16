@@ -85,6 +85,7 @@ from app.repositories.security_repository import held
 from app.repositories.sync_run_repository import SyncRunRepository
 from app.services.company_financials_normaliser import normalise
 from app.services.edgar_client import (
+    FINANCIAL_SIC,
     EdgarClient,
     EdgarError,
     EdgarRefused,
@@ -100,9 +101,12 @@ from app.services.edgar_filing_facts import (
     Filing,
     companyfacts_accns,
     covers,
+    extension_gaps,
+    extension_metrics,
     filings,
     gaps,
     instance_name,
+    label_linkbase,
     parse_instance,
     read_period,
     skipped,
@@ -895,6 +899,7 @@ class CompanyFinancialsSync:
             return f"error: {e}"
         stored = await self.repo.filing_reads(cik) if facts is not None else {}
         result = normalise(facts, _filing_facts(stored)) if facts is not None else None
+        extensions = await self._reads_extensions(cik, facts)
         if result is None or not result.has_data:
             await self.repo.record_miss(cik, utcnow())
             await self.db.commit()
@@ -906,7 +911,9 @@ class CompanyFinancialsSync:
             # companyfacts has not taken in the filing the SEC lists: its own instance
             # gives its periods (review item CO5), read once ever like any other.
             try:
-                found = await self._read_filing(client, cik, newest, summary, whole=True)
+                found = await self._read_filing(
+                    client, cik, newest, summary, whole=True, extensions=extensions
+                )
             except EdgarRefused as e:
                 refused = e
             except EdgarError as e:
@@ -924,7 +931,7 @@ class CompanyFinancialsSync:
             # A filing companyfacts skipped, older than the newest (STATUS 7a): AEP's and
             # EXC's Q2 2026, NU's and TSMC's FY2025 20-F.
             skipped_read, refused = await self._read_skipped(
-                client, cik, facts, result.rows, stored, summary, label
+                client, cik, facts, result.rows, stored, summary, label, extensions
             )
             if skipped_read:
                 stored = await self.repo.filing_reads(cik)
@@ -938,6 +945,7 @@ class CompanyFinancialsSync:
                 result.rows,
                 {accn: row.reader for accn, row in stored.items()},
                 summary,
+                extensions,
             )
         if read:
             result = normalise(facts, _filing_facts(await self.repo.filing_reads(cik)))
@@ -953,6 +961,12 @@ class CompanyFinancialsSync:
         for metric, by_concept in sorted(result.bridged.items()):
             for concept, periods in sorted(by_concept.items()):
                 summary.setdefault("bridged", []).append(
+                    f"{label} {metric} <- {concept} ({periods})"
+                )
+        # The same for the company's own concepts its filings' labels named (`_extend`).
+        for metric, by_concept in sorted(result.extended.items()):
+            for concept, periods in sorted(by_concept.items()):
+                summary.setdefault("extended", []).append(
                     f"{label} {metric} <- {concept} ({periods})"
                 )
         await self.db.commit()
@@ -972,6 +986,7 @@ class CompanyFinancialsSync:
         stored: Dict[str, Any],
         summary: Dict[str, Any],
         label: str,
+        extensions: bool = False,
     ) -> Tuple[int, Optional[EdgarRefused]]:
         """
         The filings companyfacts skipped (STATUS 7a), read whole once each. When the figures
@@ -1013,7 +1028,9 @@ class CompanyFinancialsSync:
         for listing in todo[:FILING_READS_PER_COMPANY]:
             filing = Filing(listing.accn, listing.form, listing.filed, listing.period_end)
             try:
-                found = await self._read_filing(client, cik, filing, summary, whole=True)
+                found = await self._read_filing(
+                    client, cik, filing, summary, whole=True, extensions=extensions
+                )
             except EdgarRefused as refused:
                 return count, refused
             except EdgarError as e:
@@ -1031,6 +1048,17 @@ class CompanyFinancialsSync:
             )
         return count, None
 
+    async def _reads_extensions(self, cik: int, facts: Optional[Dict[str, Any]]) -> bool:
+        """Whether this company's filings are read for its own capex and debt concepts: a
+        us-gaap filer (an IFRS filer's lines are standard ones) that is no bank, broker or
+        insurer (`FINANCIAL_SIC`)."""
+        gaap = ((facts or {}).get("facts") or {}).get("us-gaap") or {}
+        if not gaap:
+            return False
+        company = (await self.repo.companies([cik])).get(cik)
+        sic = company.sic if company is not None else None
+        return sic is None or sic not in FINANCIAL_SIC
+
     async def _read_filings(
         self,
         client: EdgarClient,
@@ -1039,6 +1067,7 @@ class CompanyFinancialsSync:
         rows: Sequence[dict],
         read: Dict[str, int],
         summary: Dict[str, Any],
+        extensions: bool = False,
     ) -> Tuple[int, Optional[EdgarRefused]]:
         """
         The filings behind this company's dividend and EPS gaps (`gaps`), newest first, at
@@ -1050,19 +1079,31 @@ class CompanyFinancialsSync:
         year) is not asked for again. Returns how many were read, and the refusal that
         stopped them, if one did. A failure stamps nothing and stops this company's reads:
         next week asks again.
+
+        With `extensions` (`_reads_extensions`), a fiscal year missing capex or debt
+        (`extension_gaps`) is a gap too, asked of its own 10-K alone: every filing read
+        then reads its label linkbase beside its instance for the company's own concepts.
         """
         by_accn = filings(companyfacts)
         pending = gaps(rows)
+        if extensions:
+            pending += extension_gaps(rows)
+        pending.sort(key=lambda gap: gap[0], reverse=True)
         count = 0
         while pending and count < FILING_READS_PER_COMPANY:
             gap, metric = pending.pop(0)
-            for filing in sources(by_accn, gap):
+            asked = sources(by_accn, gap)
+            if metric.startswith("extension:"):
+                asked = asked[:1]  # the period's own filing; its comparatives repeat it
+            for filing in asked:
                 if read.get(filing.accn, 0) >= READ_SINCE[metric]:
                     continue
                 if count >= FILING_READS_PER_COMPANY:
                     break
                 try:
-                    found = await self._read_filing(client, cik, filing, summary)
+                    found = await self._read_filing(
+                        client, cik, filing, summary, extensions=extensions
+                    )
                 except EdgarRefused as refused:
                     return count, refused
                 except EdgarError as e:
@@ -1090,18 +1131,30 @@ class CompanyFinancialsSync:
         filing: Filing,
         summary: Dict[str, Any],
         whole: bool = False,
+        extensions: bool = False,
     ) -> List[dict]:
         """What one filing's instance holds; nothing when it has none, or none EDGAR lists.
-        `whole`: its undimensioned chain facts too (`parse_instance`)."""
+        `whole`: its undimensioned chain facts too (`parse_instance`). `extensions`: the
+        company's own concepts its label linkbase names like a metric too — one more
+        request (`extension_metrics`); a linkbase that is not XML names none."""
         index = await client.filing_index(cik, filing.accn)
         name = instance_name(index) if index is not None else None
         if name is None:
             return []
+        named = None
+        linkbase = label_linkbase(index) if extensions else None
+        if linkbase is not None:
+            labels = await client.filing_document(cik, filing.accn, linkbase)
+            try:
+                named = extension_metrics(labels) if labels is not None else None
+            except ET.ParseError as e:
+                summary["filings_unreadable"] += 1
+                logger.warning(f"filing {filing.accn} of CIK {cik}: {linkbase} ({e})")
         body = await client.filing_document(cik, filing.accn, name)
         if body is None:
             return []
         try:
-            return parse_instance(body, whole=whole)
+            return parse_instance(body, whole=whole, extensions=named)
         except ET.ParseError as e:
             summary["filings_unreadable"] += 1
             logger.warning(f"filing {filing.accn} of CIK {cik}: {name} is not XML ({e})")

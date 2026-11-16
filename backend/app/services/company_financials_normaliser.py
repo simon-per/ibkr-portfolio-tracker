@@ -515,6 +515,8 @@ class Normalised:
     # The concepts outside every chain that filled a figure's gaps (`_bridge`):
     # {metric: {concept: periods filled}}.
     bridged: Dict[str, Dict[str, int]] = field(default_factory=dict)
+    # The company's own concepts, named by their labels, that did (`_extend`).
+    extended: Dict[str, Dict[str, int]] = field(default_factory=dict)
 
     @property
     def has_data(self) -> bool:
@@ -1022,6 +1024,13 @@ def _candidate_series(
             continue
         facts.append(Fact(concept, spec.kind, unit, _date(row.get("start")), end,
                           float(val), accn, filed, row["form"]))
+    return _series(facts, concept, spec, mapping)
+
+
+def _series(
+    facts: Sequence[Fact], concept: str, spec: MetricSpec, mapping: Dict[date, date]
+) -> Dict[Tuple[str, date], Obs]:
+    """One concept's facts read like a chain concept's, by (grain, canonical end)."""
     periods = _latest(facts, {}).get(concept, {})
     out: Dict[Tuple[str, date], Obs] = {}
     if spec.timing == INSTANT:
@@ -1085,6 +1094,83 @@ def _bridge(
                 own[key] = series[key]
                 filled.setdefault(metric, {}).setdefault(concept, 0)
                 filled[metric][concept] += 1
+    return filled
+
+
+# ── A company's own concepts, named by their labels ──────────────────────────
+
+
+def _extend(
+    values: Dict[str, Dict[Tuple[str, date], Obs]],
+    keys: Dict[Tuple[str, date], Tuple[int, str]],
+    extension_facts: Iterable[Dict[str, Any]],
+    mapping: Dict[date, date],
+    reporting: Optional[str],
+) -> Dict[str, Dict[str, int]]:
+    """
+    Fill a figure's missing periods from a company's own concept, which companyfacts never
+    carries, read from its filings with the label the filing gives it
+    (`edgar_filing_facts.EXTENSION_LABELS`: NVDA's "Purchases of property and equipment
+    and intangible assets" FY2013-FY2021, CDNS's "Carrying value of debt outstanding").
+
+    A label is a name; the figures are the proof, as in `_bridge`: on every period the
+    concept and the chain both report it agrees with the chain's figure within
+    `BRIDGE_TOLERANCE` (`BRIDGE_MIN_SHARE` of them) — a debt total with the two halves
+    added where no total is tagged. Where they never overlap (the reason the concept is
+    needed at all) the label alone names it. Only fills; never replaces a figure. Returns
+    what filled what, which the pass records, and the source is the concept itself
+    (`nvda:PurchasesOf...`).
+    """
+    by: Dict[Tuple[str, str], List[Fact]] = defaultdict(list)
+    for row in extension_facts:
+        metric, concept, unit = row.get("metric"), row.get("concept"), row.get("unit")
+        spec = METRICS.get(metric) if isinstance(metric, str) else None
+        if spec is None or spec.kind != MONETARY or not isinstance(concept, str):
+            continue
+        if not isinstance(unit, str) or not _is_currency(unit):
+            continue
+        if reporting is not None and unit != reporting:
+            continue
+        start, end, filed = (_date(row.get(k)) for k in ("start", "end", "filed"))
+        val, accn, form = row.get("val"), row.get("accn"), row.get("form")
+        if None in (end, filed) or not accn or form not in FORMS:
+            continue
+        if (start is None) != (spec.timing == INSTANT):
+            continue
+        if isinstance(val, bool) or not isinstance(val, (int, float)):
+            continue
+        if spec.non_negative and val < 0:
+            continue
+        by[(metric, concept)].append(
+            Fact(concept, MONETARY, unit, start, end, float(val), accn, filed, form)
+        )
+    filled: Dict[str, Dict[str, int]] = {}
+    for (metric, concept), facts in sorted(by.items()):
+        spec, own = METRICS[metric], values[metric]
+        series = _series(facts, concept, spec, mapping)
+        missing = [k for k in keys if k not in own and k in series]
+        if not missing:
+            continue
+        reference = dict(own)
+        if metric == "debt_total":
+            current, noncurrent = values["debt_current"], values["debt_noncurrent"]
+            for key in current.keys() & noncurrent.keys():
+                reference.setdefault(key, Obs(
+                    value=current[key].value + noncurrent[key].value,
+                    filed=current[key].filed, start=None, end=current[key].end,
+                    unit=current[key].unit, concept="halves",
+                ))
+        shared = [k for k in series if k in reference and reference[k].value]
+        agree = [k for k in shared
+                 if abs(series[k].value / reference[k].value - 1) <= BRIDGE_TOLERANCE]
+        if len(agree) < BRIDGE_MIN_SHARE * len(shared):
+            continue
+        for key in missing:
+            if key in reference:  # a total the halves already give
+                continue
+            own[key] = series[key]
+            filled.setdefault(metric, {}).setdefault(concept, 0)
+            filled[metric][concept] += 1
     return filled
 
 
@@ -1943,9 +2029,11 @@ def normalise(
     """
     result = Normalised(entity_name=(companyfacts or {}).get("entityName"))
     base = _facts(companyfacts)
-    facts = _drop_lone_slips(
-        base + _filing_facts(base, filing_facts, reporting_currency(companyfacts))
-    )
+    reporting = reporting_currency(companyfacts)
+    filing_facts = list(filing_facts)
+    own_concepts = [f for f in filing_facts if "metric" in f]
+    plain = [f for f in filing_facts if "metric" not in f]
+    facts = _drop_lone_slips(base + _filing_facts(base, plain, reporting))
     if not facts:
         return result
     events: List[Dict[str, Any]] = []
@@ -2015,6 +2103,7 @@ def normalise(
     _flat_rate_years(values, keys, calendar, latest, totals, mapping)
     _total_only_when_current(values)
     result.bridged = _bridge(values, keys, companyfacts, mapping)
+    result.extended = _extend(values, keys, own_concepts, mapping, reporting)
     _basic_in_a_loss(values)
     _no_current_debt_line(values, facts, companyfacts, mapping)
     _no_debt_at_all(values, facts, companyfacts, mapping)

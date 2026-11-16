@@ -921,6 +921,62 @@ All three were misses: the normaliser read 10-K/10-Q facts in us-gaap only.
   year end it asks such a filer's filing list daily and finds that year already stored — about 75
   small requests a filer a year, accepted rather than a second cadence for three companies.
 
+## The source waterfall
+
+Owner, 2026-11-16: the Company tab closes its own gaps, source by source, **SEC first and Alpha
+Vantage last**; every layer only fills what the layers above left empty and never replaces a
+figure; every filled value names its source (`source_concept`); a figure the company never
+reported stays blank — no vendor estimate, no zero, no derived stand-in (ABNB's capex, LLY's and
+JNJ's operating income, the banks' FCF). Yahoo is not part of it (CLAUDE.md rule 1). In order:
+
+1. **companyfacts** and its chains (*The normaliser*), extended by **bridging** (a standard
+   concept that agrees with the chain fills its gaps).
+2. **The filings companyfacts skipped** (*When companyfacts lags the filing list*): read whole.
+3. **IFRS instances** (*Annual-only filers*): a 20-F's `ifrs-full` lines under their twins.
+4. **The company's own concepts, by their labels** (below).
+
+The weekly pass records what layers 1, 4 and 5 filled — `bridged`, `extended`,
+`skipped_filings` — as information, never a warning.
+
+### The company's own concepts, by their labels
+
+companyfacts carries the standard taxonomies only: NVDA tagged its capex FY2013–FY2021 as
+`nvda:PurchasesOfPropertyAndEquipmentAndIntangibleAssets`, CDNS its debt as
+`cdns:CarryingValueOfDebtOutstanding`, and neither is in companyfacts at all. They are in the
+filing: its instance holds the facts, and its **label linkbase** (`<prefix>-<date>_lab.xml`, one
+more request beside the instance) names each concept in words.
+
+- **When** (`edgar_filing_facts.extension_gaps`, `CompanyFinancialsSync._read_filings`): a fiscal
+  year from 2009 (`EXTENSION_SINCE`) whose rows lack capex, or debt (neither the total nor both
+  halves), asks **its own 10-K** — not the later ones that repeat it — once ever, inside the
+  per-company cap (`FILING_READS_PER_COMPANY`, 24 a pass), so a long history is read over a few
+  Sundays and resumes where it stopped. Every filing read for any gap then reads its label
+  linkbase too (`READER` 3: a filing read before is read once more for this gap, never again).
+  Only a us-gaap filer that is no bank, broker or insurer (`edgar_client.FINANCIAL_SIC`,
+  6000–6411): an IFRS filer's lines are standard ones, and a bank's capex and debt are not the
+  industrial figures. Years only: one 10-K holds a year's flows and its balance sheet; a quarter's
+  10-Q is not asked, and a Q4 then comes from the year less three quarters as before.
+- **Which concepts** (`EXTENSION_LABELS`, `extension_metrics`): the company's own concept (not
+  us-gaap, dei, srt) whose **standard label** fits one metric's pattern and not its exclusions —
+  capex ("Purchases of property and equipment…", "Capital expenditures"; not businesses, proceeds,
+  leases, accruals), a debt total ("Carrying value of debt outstanding", "Total debt"; not
+  principal, face or fair value), a current or noncurrent half ("Current portion of long-term
+  debt"; "Long-term debt, net of current portion"). A label fitting two metrics names none.
+  Undimensioned, one currency (the company's), a flow as a duration and a balance as an instant
+  (`parse_instance(extensions=…)`); stored in `sec_filing_reads` with `metric` and `label`.
+- **The proof** (`company_financials_normaliser._extend`): a label is a name, the figures are the
+  proof, as in bridging — on every period the concept and the chain both report it agrees within
+  `BRIDGE_TOLERANCE` (on `BRIDGE_MIN_SHARE` of them; a debt total against the two halves added where
+  no total is tagged). Where they never overlap — the reason the concept is needed at all — the
+  label alone names it. Only fills; source the concept (`nvda:PurchasesOf…`). `tests/test_company_extension_concepts.py`.
+- **PYPL's current notes are not an extension concept** (read 2026-11-16): its 10-Ks tag the
+  current portion as `LongTermDebtCurrent` on `LongtermDebtTypeAxis`/`SeniorNotesMember` only,
+  and since its Q3 2026 10-Q undimensioned (1.396B at 2025-12-31, 2.333B at 2026-09-30), which
+  companyfacts now carries. Its older quarters stay withheld by the maturity-table witness
+  (*The normaliser*).
+
+The measurement over the 132 companies is in *Known gaps and out of scope*.
+
 ## Known gaps and out of scope
 
 Measured over the 132 companies on 2026-11-15 over the last eight quarters, what the tab shows

@@ -39,6 +39,7 @@ from app.services.company_financials_sync import (
     STALE_AFTER,
     CompanyFinancialsSync,
 )
+from app.services.edgar_filing_facts import READER
 from app.services.edgar_client import (
     FACTS_URL,
     MIN_INTERVAL_S,
@@ -48,6 +49,18 @@ from app.services.edgar_client import (
     filing_url,
     sec_ticker,
 )
+
+
+@pytest.fixture(autouse=True)
+def _no_layer_reads(monkeypatch):
+    """This module's passes count every URL; the company's own concepts (which the
+    fixture's missing capex would send the pass to read) are
+    `test_company_extension_concepts`'."""
+    async def no(self, cik, facts):
+        return False
+
+    monkeypatch.setattr(CompanyFinancialsSync, "_reads_extensions", no)
+
 
 UA = "test-suite-agent contact@example.invalid"
 FIXTURE = json.loads(
@@ -901,7 +914,10 @@ async def test_an_eps_gap_reads_a_filing_read_before_eps_once_more(db, configure
     # second quarter is not derived).
     assert {(r.period_end.isoformat(), r.value) for r in eps} == {("2021-06-30", 0.41)}
     reads = {r.accn: r for r in (await db.execute(select(SecFilingRead))).scalars()}
-    assert {accn: r.reader for accn, r in reads.items()} == {Q1_10Q: 2, Q2_10Q: 2}
+    assert {accn: r.reader for accn, r in reads.items()} == {
+        Q1_10Q: READER,
+        Q2_10Q: READER,
+    }
     assert {f["concept"] for f in reads[Q2_10Q].facts} == {
         "EarningsPerShareDiluted", "CommonStockDividendsPerShareDeclared"}
 

@@ -19,6 +19,7 @@ from app.models.etf_basket import EtfHolding
 from app.models.isin_identity import IsinIdentity
 from app.models.watchlist_item import WatchlistItem
 from app.services import company_financials_sync
+from app.services.company_financials_sync import CompanyFinancialsSync
 from app.services.lookthrough_service import LookthroughService
 from tests.test_company_financials_sync import (
     ALPHABET_CIK,
@@ -34,6 +35,18 @@ from tests.test_company_financials_sync import (
     _sync,
 )
 from app.config import settings
+
+
+@pytest.fixture(autouse=True)
+def _no_layer_reads(monkeypatch):
+    """This module's passes count every URL; the company's own concepts (which the
+    fixture's missing capex would send the pass to read) are
+    `test_company_extension_concepts`'."""
+    async def no(self, cik, facts):
+        return False
+
+    monkeypatch.setattr(CompanyFinancialsSync, "_reads_extensions", no)
+
 
 OTHER_FUND = "IE00B5BMR087"  # any fund's stored basket
 
