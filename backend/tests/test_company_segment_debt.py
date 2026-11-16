@@ -79,12 +79,16 @@ def test_a_partitioned_debt_is_summed_and_tagged_with_its_axis():
     assert result.segments == {"debt_total": {"segments:StatementBusinessSegmentsAxis": 1}}
 
 
-def test_the_carrying_amount_wins_over_the_maturity_tables_principal():
-    """PCAR: the balance sheet's 15,895.0M, not the maturity table's 15,946.7M."""
+def test_a_carrying_amount_wins_over_a_maturity_tables_borrowings():
     result = normalise(_companyfacts(), PARTITION + [
         _seg("DebtLongtermAndShorttermCombinedAmount", "FinancialServicesMember", 15.9467e9),
-        _seg("CommercialPaperBankLoansAndTermDebtAtCarryingValue", "FinancialServicesMember",
-             15.895e9),
+        _seg("LongTermDebt", "FinancialServicesMember", 15.895e9),
+        _named("CommercialPaper", "TruckMember"),  # refuses LongTermDebt's sum below
+    ])
+    assert _debt(result) == {}  # the truck column shows a borrowing LongTermDebt omits
+    result = normalise(_companyfacts(), PARTITION + [
+        _seg("DebtLongtermAndShorttermCombinedAmount", "FinancialServicesMember", 15.9467e9),
+        _seg("LongTermDebt", "FinancialServicesMember", 15.895e9),
     ])
     assert _debt(result)[(END, "debt_total")][0] == 15.895e9
 

@@ -988,7 +988,7 @@ more request beside the instance) names each concept in words.
   companyfacts now carries. Its older quarters stay withheld by the maturity-table witness
   (*The normaliser*).
 
-The measurement over the 132 companies is in *Known gaps and out of scope* (layers 2 and 3; this layer's is still to be run, below).
+The measurement over the 132 companies is in *Known gaps and out of scope*.
 
 ### Segment columns summed where no total exists
 
@@ -1010,16 +1010,16 @@ unknown and `_no_debt_at_all` rightly withheld a zero.
   of assets at 2024-12-31; PCAR: 21.0B + 22.4B = 43.4B). Then each member of that partition either
   states one total-debt concept (`SEGMENT_DEBT`: `LongTermDebt`, `…CapitalLeaseObligations
   IncludingCurrentMaturities`, `DebtAndCapitalLeaseObligations` — BRK's —,
-  `CommercialPaperBankLoansAndTermDebtAtCarryingValue` — PCAR's Financial Services, the balance
-  sheet's 15,895.0M at 2024-12-31 —, then `DebtLongtermAndShorttermCombinedAmount`, which PCAR
-  tags on its maturity table's principal, 15,946.7M: carrying amounts first), the same for all, or
+  then `DebtLongtermAndShorttermCombinedAmount` — PCAR's Financial Services: its contractual
+  borrowings, 15,946.7M at 2024-12-31, 0.3% above the balance sheet's 15,895.0M, which PCAR tags
+  only under its own `pcar:` concept; carrying amounts first), the same for all, or
   shows no borrowing under any concept (PCAR's truck column: it owes nothing); a member showing a
   borrowing the concept does not state refuses the sum whole, and so does a partial view (a parent
   company's column, one segment of three). Otherwise the debt stays blank. Fills `debt_total` only
   where no debt figure exists; source `segments:<axis>`. `_no_debt_at_all` still treats such a
   company as one whose debt companyfacts cannot see. `tests/test_company_segment_debt.py`.
 
-The measurement over the 132 companies is in *Known gaps and out of scope* (layers 2 and 3; this layer's is still to be run, below).
+The measurement over the 132 companies is in *Known gaps and out of scope*.
 
 ### Alpha Vantage, last
 
@@ -1056,18 +1056,28 @@ Nothing is asked from this session: the key lives only on the VPS. Its reach, es
 
 ## Known gaps and out of scope
 
-**The source waterfall, measured 2026-11-16** over the 132 companies (layers 2 and 3 of *The
-source waterfall*, against the 2026-11-15 normaliser, without production's dividend/EPS reads):
-11 filing lists asked, 8 filings read (AEP's and EXC's Q2 and Q3 2026, ALNY's Q1 2026, NU's and
-TSMC's FY2025 20-F, SPGI's FY2024 10-K); gaps in the last eight quarters revenue 1 → 0, FCF 55 → 52,
-diluted shares 28 → 27, cash 11 → 10, debt 95 → 94, operating income 116 → 115; NU
-and TSMC reach FY2025; **no figure that existed changed.** Layers 4 and 5 (own concepts, segment
-columns) read about 150 10-Ks and BRK's and PCAR's balance sheets once; their run over all 132
-companies was cut short by SEC's archive service answering 503 to most requests that day, and is
-STATUS.md's to finish. Checked against the filings' text: NVDA's FY2018 10-K prints "Purchases of
-property and equipment and intangible assets (593) (176) (86)", the facts read; BRK's balance
-sheet "Notes payable and other borrowings 44,885" and "79,877", the two members summed; PCAR's
-"Commercial paper and bank loans 6,003.8" and "Term notes 9,891.2", the 15,895.0 carrying amount.
+**The source waterfall, measured 2026-11-16** over the 132 companies: the real pass (`_one`, three
+passes in a row, a fresh database, companyfacts as downloaded that day, every filing it asked for
+read from EDGAR), against the 2026-11-15 normaliser, without production's dividend/EPS reads. In
+the last eight quarters, by layer — **the filings companyfacts skipped and IFRS** (11 filing lists
+asked, 8 filings read: AEP's and EXC's Q2 and Q3 2026, ALNY's Q1 2026, NU's and TSMC's FY2025 20-F,
+SPGI's FY2024 10-K): revenue 1 → 0, FCF 55 → 52, diluted shares 28 → 27, cash 11 → 10, debt 95 → 94,
+operating income 116 → 115, and NU and TSMC reach FY2025; **the companies' own concepts**: 42 rows —
+CDNS's debt at 12 year ends (`cdns:CarryingValueOfDebtOutstanding`, 2.476B at 2024-12-31), NVDA's
+capex for FY2013–FY2021 and the Q4s it gives (`nvda:PurchasesOfPropertyAndEquipmentAndIntangible
+Assets`); no other company's 10-Ks among those read label a capex or debt line of their own that the patterns take;
+**segment columns**: 82 rows — BRK's debt in every quarter for ten years (124.8B at 2024-12-31,
+129.1B at 2025-12-31), PCAR's at its year ends (15.9B; its 10-Qs state no segment total in a concept this reads); debt
+95 → 84 over the two. 343 filings read over the three passes, about 1.2 GB once; 29 reads SEC
+refused (its archive answered 503 to most requests for an hour that day) wait for a later pass, as
+they would on production. **No figure that existed changed or went.** No layer writes a zero: a
+segment column with no borrowing counts as owing nothing only inside a sum the partition proves.
+Checked against the filings' text: NVDA's FY2018 10-K prints "Purchases of property and equipment
+and intangible assets (593) (176) (86)", the facts read; BRK's balance sheet "Notes payable and
+other borrowings 44,885" and "79,877", the two members summed; PCAR's contractual "Borrowings …
+$15,946.7", the figure summed (its balance sheet's 15,895.0 is tagged only under `pcar:`).
+Alpha Vantage, last: nothing asked from the measurement (the key is on the VPS only); what it may
+fill is at most 89 interior gaps in recent quarters at 26 companies, mostly debt halves.
 
 Measured over the 132 companies on 2026-11-15 over the last eight quarters, what the tab shows
 first (before → after the chains, bridging and both debt rules): revenue 9 → 1 missing quarters,
