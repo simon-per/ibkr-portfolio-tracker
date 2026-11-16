@@ -105,7 +105,7 @@ code trace; all of them shipped that evening (waves 1–3, the product issues #7
 
 Only what is still unverified.
 
-- **The Company tab's source waterfall (2026-11-16; with the 2026-11-15 gap fills):** migrations
+- **The Company tab's source waterfall (deployed 2026-11-16 as `736f9b9`, `/health` checked; with the 2026-11-15 gap fills):** migrations
   `f1b3d5e7a9c2` and `a2c4e6f8b0d1`. Nothing moves until each company is refetched — the Sunday
   2026-11-22 05:00 pass does all of them (fetched > 6 days ago). Do not `--force` it sooner: that
   re-asks Yahoo for every profile. That first pass reads more filings than any after it (the
@@ -555,7 +555,7 @@ Rough priority. Re-verify each `path:line` in code before fixing; lines move.
 
 One line each, newest first; drop the oldest.
 
-- **2026-11-16 (the Company tab's source waterfall, /goal run)** — measured all 132 companies
+- **2026-11-16 (the Company tab's source waterfall, /goal run; merged to `main` and deployed)** — measured all 132 companies
   before and after; five layers, each its own commit: the filings companyfacts skipped (7a), IFRS
   20-F instances (7b), the companies' own capex/debt concepts by label, BRK's and PCAR's segment
   columns summed where they partition the company, and Alpha Vantage last (one daily budget shared

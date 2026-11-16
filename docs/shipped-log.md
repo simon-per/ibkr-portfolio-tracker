@@ -7,6 +7,22 @@
 > entry records what shipped, why, and what was verified on production — the durable rules it
 > established live in `docs/<subsystem>.md`.
 
+## Shipped 2026-11-16 — the Company tab's source waterfall (SEC first, Alpha Vantage last)
+
+- **What** (branch `ccr-47cc7bbe-8060um`, fast-forwarded to `main` as `736f9b9`, with the
+  2026-11-15 gap fills): the filings companyfacts skipped, read automatically (STATUS 7a); a 20-F's
+  IFRS instance (7b); a company's own capex and debt concepts read from its 10-Ks by their labels
+  and proven against the chain; BRK's and PCAR's debt summed over segment columns that provably
+  partition the company; Alpha Vantage's statements last, fill-only, proven per company and
+  metric, under one daily budget shared with the price fallback (`alpha_vantage.py`, the one door).
+  A filing's `-index.htm` when EDGAR's JSON listing is down. Migrations `f1b3d5e7a9c2`,
+  `a2c4e6f8b0d1`. The rules are in docs/company-financials.md (*The source waterfall*).
+- **Why**: the owner (2026-11-16) — the tab closes its own gaps, every layer fill-only and
+  source-tagged, and a figure the company never reported stays blank.
+- **Verified on production**: `/health` reports `736f9b9` (twice, 15 s apart) and the Company
+  endpoint answers, so both migrations applied. The figures move at the Sunday 2026-11-22 pass;
+  STATUS.md's *Watch after the next deploy* lists what to check.
+
 ## Shipped 2026-11-11 — one CIK lookup per ticker; the EPS-gap filings read; AEP's and EXC's Q2
 
 - **What**: a ticker the index, the look-through and the watchlist each name was two INSERTs into
