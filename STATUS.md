@@ -516,6 +516,13 @@ Rough priority. Re-verify each `path:line` in code before fixing; lines move.
     hidden Analytics tab's `segments` through `decompose` before that tab returns (it still
     classifies basket rows itself, with raw countries). Researched future sources (N-PORT,
     commercial APIs — do not re-shop) are in docs/lookthrough.md.
+7c. **The Company tab's source waterfall (owner, 2026-11-16; a /goal run is planned).** After
+    companyfacts and bridging (on branch `ccr-47cc7bbe-8060um`): the filing's own instance for
+    skipped older quarters (7a) and IFRS (7b); company extension concepts matched by label and
+    proven by agreement (PYPL's current notes, NVDA's capex); segment members summed where no
+    total exists (BRK, PCAR debt); then Alpha Vantage as a fill-only, source-tagged fallback,
+    proven per company against SEC, one daily budget shared with the price fallback. Blanks a
+    company never reported stay blank (no vendor estimates, no zeros).
 7b. **NU's and TSMC's FY2025 (held: NU).** Their 20-F (IFRS) was filed months ago and is not in
     companyfacts; `edgar_filing_facts.parse_instance` reads the us-gaap namespace only, so
     `_filing_behind` cannot fill it. Reading `ifrs-full` facts under their `IFRS_TWINS` would.
