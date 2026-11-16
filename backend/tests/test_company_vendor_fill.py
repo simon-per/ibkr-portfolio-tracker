@@ -238,3 +238,15 @@ async def test_the_weekly_rewrite_applies_the_stored_statements_again(db, monkey
     await db.commit()
     await _sync(db, Edgar()).refresh()
     assert seen == [["CASH_FLOW"]]
+
+
+@pytest.mark.asyncio
+async def test_a_gap_already_filled_is_not_asked_about_again(db, fake_av):
+    """A week on, the quarter Alpha Vantage filled is no gap to spend a call on."""
+    await _company(db, 1, "ABC")
+    await CompanyVendorFill(db, sleep=_no_sleep).run()
+    company = await db.get(SecCompany, 1)
+    company.vendor_checked_at -= timedelta(days=8)
+    await db.commit()
+    again = await CompanyVendorFill(db, sleep=_no_sleep).run()
+    assert again["due"] == 0 and len(fake_av.calls) == 1

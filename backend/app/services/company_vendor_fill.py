@@ -113,11 +113,14 @@ def _quarter_ends(rows: Sequence[Dict[str, Any]]) -> List[date]:
     return sorted({r["period_end"] for r in rows if r["fiscal_period"] != "FY"})
 
 
-def interior_gaps(rows: Sequence[Dict[str, Any]]) -> Dict[str, List[date]]:
+def interior_gaps(
+    rows: Sequence[Dict[str, Any]], filled: Sequence[Dict[str, Any]] = ()
+) -> Dict[str, List[date]]:
     """
     Per metric this fill knows, the recent quarter ends (`RECENT_QUARTERS`) where SEC's
     rows lack it while reporting it in an earlier and a later quarter: a hole, not a line
-    the company stopped (or never started) reporting. Debt counts a half missing.
+    the company stopped (or never started) reporting. Debt counts a half missing. A gap
+    one of `filled` (Alpha Vantage's rows already written) covers is not one to ask about.
     """
     ends = _quarter_ends(rows)
     recent = ends[-RECENT_QUARTERS:]
@@ -127,6 +130,7 @@ def interior_gaps(rows: Sequence[Dict[str, Any]]) -> Dict[str, List[date]]:
             f"{SOURCE}:"
         ):
             have[r["metric"]].add(r["period_end"])
+    covered = {(r["metric"], r["period_end"]) for r in filled}
     out: Dict[str, List[date]] = {}
     for mapping in FIELDS.values():
         for metric in mapping:
@@ -134,7 +138,10 @@ def interior_gaps(rows: Sequence[Dict[str, Any]]) -> Dict[str, List[date]]:
             if not got:
                 continue
             first, last = min(got), max(got)
-            holes = [e for e in recent if e not in got and first < e < last]
+            holes = [
+                e for e in recent
+                if e not in got and first < e < last and (metric, e) not in covered
+            ]
             if holes:
                 out[metric] = holes
     return out
@@ -238,8 +245,10 @@ def fill(
 
 
 def needed(rows: Sequence[Dict[str, Any]]) -> List[str]:
-    """The statements whose fields could fill this company's gaps, in `FIELDS` order."""
-    gaps = interior_gaps(rows)
+    """The statements whose fields could fill this company's gaps, in `FIELDS` order — the
+    gaps its rows still have once Alpha Vantage's rows already written count."""
+    vendor = [r for r in rows if str(r.get("source_concept", "")).startswith(f"{SOURCE}:")]
+    gaps = interior_gaps(rows, vendor)
     return [f for f, mapping in FIELDS.items() if any(m in gaps for m in mapping)]
 
 
@@ -353,8 +362,10 @@ class CompanyVendorFill:
                 for metric, by_source in sorted(filled.items()):
                     for source, n in sorted(by_source.items()):
                         summary["filled"].append(f"{label} {metric} <- {source} ({n})")
-                gaps = interior_gaps(rows)
-                left = sorted(m for m in gaps if m not in filled)
+                gaps = interior_gaps(new_rows, [
+                    r for r in new_rows if r["source_concept"].startswith(f"{SOURCE}:")
+                ])
+                left = sorted(gaps)
                 if left:
                     summary["unproven"].append(f"{label} ({', '.join(left)})")
         except alpha_vantage.AlphaVantageCapped as e:

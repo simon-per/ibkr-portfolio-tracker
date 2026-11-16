@@ -1113,6 +1113,9 @@ class CompanyFinancialsSync:
         then reads its label linkbase beside its instance for the company's own concepts.
         """
         by_accn = filings(companyfacts)
+        # A filing companyfacts does not carry was read whole (`_read_skipped`); read again
+        # for another gap, it is read whole again, or its figures would be lost.
+        carried = companyfacts_accns(companyfacts)
         pending = gaps(rows)
         if extensions:
             pending += extension_gaps(rows)
@@ -1132,8 +1135,8 @@ class CompanyFinancialsSync:
                     break
                 try:
                     found = await self._read_filing(
-                        client, cik, filing, summary, extensions=extensions,
-                        segments=segments,
+                        client, cik, filing, summary, whole=filing.accn not in carried,
+                        extensions=extensions, segments=segments,
                     )
                 except EdgarRefused as refused:
                     return count, refused
