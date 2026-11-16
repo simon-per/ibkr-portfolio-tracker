@@ -187,6 +187,7 @@ class CompanyFinancialsRepository:
         row.sic = profile.get("sic")
         row.sic_description = profile.get("sic_description")
         row.fiscal_year_end = profile.get("fiscal_year_end")
+        row.owner_org = profile.get("owner_org")
         row.submissions_checked_at = checked_at
 
     async def record_vendor_ask(self, cik: int, checked_at: datetime, filled: bool) -> None:
@@ -195,6 +196,12 @@ class CompanyFinancialsRepository:
         row = await self.ensure_company(cik)
         row.vendor_checked_at = checked_at
         row.vendor_miss_count = None if filled else (row.vendor_miss_count or 0) + 1
+
+    async def record_statement_model(self, cik: int, model: Optional[str]) -> None:
+        """What the newest annual report's concepts show (`statement_model`), with the
+        figures it came from."""
+        row = await self.ensure_company(cik)
+        row.statement_model = model
 
     async def record_listing(self, cik: int, checked_at: datetime) -> None:
         """The filing list was asked for a skipped filing (`filings_listed_at`)."""

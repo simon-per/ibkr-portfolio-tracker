@@ -1054,6 +1054,63 @@ The measurement over the 132 companies is in *Known gaps and out of scope*.
 
 Nothing is asked from this session: the key lives only on the VPS. Its reach, estimated on the rows layers 2 and 3 leave: 89 interior gaps in recent quarters at 26 companies, mostly debt halves, 26 calls to ask them all — under two days of its budget.
 
+## Classification
+
+Owner, 2026-11-16: every company is classified by a waterfall, **SEC first and every other source a
+fallback**, never by hand or by a per-company table (`company_classification.py`). Two answers,
+each served with the source that decided it on the overview's `profile` (`business_model`,
+`business_model_source`, `sector`, `sector_source`), computed at request time from what the stores
+hold, so a basket refresh or a profile read shows the next time the page opens.
+
+**The business model** — `industrial`, `bank` (banks and brokers) or `insurer` — decides which
+figures apply (an industrial's FCF, debt and operating margin mean nothing for a balance sheet that
+is lending and borrowing):
+
+1. **the statements** (`statement_model`, stored on `sec_companies.statement_model` by each
+   companyfacts fetch): which of a model's own concepts the newest annual report tags
+   (`STATEMENT_CONCEPTS`) — a bank's deposits, net interest income and non-interest income and
+   expense, a broker's customer payables, three of them; an insurer's premiums, claims reserves
+   and policy liabilities, two. An insurer is tested first. No us-gaap annual report (an IFRS
+   filer, a new filer) decides nothing.
+2. **the SIC code** (`sic_model`): 6000–6299 bank or broker, 6300–6411 insurer, else industrial.
+3. **SEC's reviewing office** (`ownerOrg`, `sec_companies.owner_org`, kept from the submissions
+   document the pass already reads monthly; migration `b3d5f7a9c1e2`): an office that reviews
+   operating companies says industrial; Finance and Crypto Assets review banks, payments companies
+   and brokers alike and say nothing.
+4. industrial. The fund baskets' GICS is never used here: it puts Visa, Mastercard and PayPal in
+   Financials, and they are not banks.
+
+**The sector**, in the app's eleven (`sector_taxonomy`):
+
+1. **the SIC code**, through `SIC_SECTORS` — SEC's published code list translated range by range,
+   never a company; a catch-all code (`SIC_CATCH_ALL`: 7389 "services, not elsewhere classified",
+   blank checks) decides nothing.
+2. **the reviewing office**, where its name is one sector (Finance, Life Sciences, Technology).
+3. **the fund baskets' GICS**: the commonest sector the stored baskets give the company's ISINs
+   (`gics_sector`), the Look-through's own source.
+4. **Yahoo's sector** of a held listing. 5. `Unknown`.
+
+A lower source naming another answer is a **conflict**, recorded and never resolved by hand: the
+weekly pass lists the SEC-level ones in `classification_conflicts` (statements against SIC against
+office), information, not a warning.
+
+**Measured over the 132 companies** on SEC's sources alone (2026-11-16): 5 banks and brokers — BAC,
+JPM, IBKR and SOFI by their statements (BAC and JPM tag six of the bank concepts, IBKR three), NU by
+its SIC (an IFRS filer) — 1 insurer (BRK, by its reserves' changes: it tags premiums and claims per
+segment, which companyfacts leaves out), 126 industrials. Industrials tagging one bank-like line
+(`InterestIncomeExpenseNet` at AMD, ADSK, ROST; a loan-loss provision at PCAR's finance arm, IDXX)
+stay industrials; MSTR's SIC is 6199 (finance) and its statements an industrial's, which win.
+Sectors: 124 from the SIC code; the 8 others are the catch-all 7389 — Visa, Mastercard, PayPal,
+MercadoLibre, DoorDash, PDD, Alibaba, Kaspi — and fall to the baskets' GICS on production.
+
+**SEC first has a known cost**, accepted by the owner: SIC codes are assigned at registration and
+rarely revised. Alphabet and Meta are 7370 (computer programming), so Technology where GICS says
+Communications; PACCAR 3711 (motor vehicles), Cintas 2320 (apparel) and Fastenal 5200 (building
+materials retail) are Consumer Cyclical where GICS says Industrials; Airbnb 7340 Industrials, S&P
+Global 7320 Industrials, ADP 7374 Technology, MicroStrategy 6199 Financials; ASML and Lam 3559
+(special machinery) Industrials, where SEC's own reviewing office (Technology) and GICS disagree —
+both recorded as conflicts. `tests/test_company_classification.py`.
+
 ## Markets beyond the SEC (planned, owner 2026-11-16)
 
 Today a company has a page only if it files with the SEC (US filers, and foreign filers of a 20-F

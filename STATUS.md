@@ -123,6 +123,14 @@ Only what is still unverified.
   ran (its reserve of 10). The measurement, before and after over all 132 documents, is in
   docs/company-financials.md (*Known gaps*).
 
+- **Company classification, SEC first (2026-11-16, branch `ccr-47cc7bbe-8060um`):** migration
+  `b3d5f7a9c1e2` marks every company's submissions profile unread, so the next Sunday pass reads each
+  company's `submissions` once (about 130 small requests) and keeps `ownerOrg`; each companyfacts
+  fetch stores `statement_model`. Then `/api/company-financials/{cik}`'s `profile` should show
+  `business_model` bank for BAC/JPM/IBKR/SOFI/NU and insurer for BRK, and Visa's, Mastercard's and
+  PayPal's sector from `gics`; the pass's record lists `classification_conflicts` (ASML and LRCX's
+  sector, MSTR's model).
+
 - **GBP as a base currency, and every base's FX history from the first purchase (2026-11-14):**
   deployed 13:41 Berlin (`/health` on `54bf2a2`; `/api/settings` lists GBP). Still unseen: the first
   slot's exchange-rate result (15:00 Berlin onward; `sync_runs`, ssh only) should carry

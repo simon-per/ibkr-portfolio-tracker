@@ -201,6 +201,17 @@ class CompanyFinancialsProfile(BaseModel):
     """
 
     industry: Optional[str] = Field(None, description="The SEC's SIC description.")
+    business_model: str = Field(
+        ..., description="`industrial`, `bank` (banks and brokers) or `insurer` "
+        "(`company_classification`): which figures apply."
+    )
+    business_model_source: str = Field(
+        ..., description="What decided it: `statements`, `sic`, `sec_office` or `default`."
+    )
+    sector: str = Field(..., description="One of the app's eleven sectors, or `Unknown`.")
+    sector_source: str = Field(
+        ..., description="What decided it: `sic`, `sec_office`, `gics`, `yahoo` or `default`."
+    )
     fiscal_year_end: Optional[str] = Field(None, description="`MMDD`, as the SEC states it.")
     description: Optional[str] = Field(None, description="Yahoo's business summary.")
     price: Optional[float] = Field(None, description="The newest market close, `currency`.")

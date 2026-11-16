@@ -67,6 +67,7 @@ from app.clock import utc_today, utcnow
 from app.models.company_financials import CompanyFinancial, SecCompany
 from app.models.analyst_rating import rating_of
 from app.models.earnings_event import EarningsEvent
+from app.models.etf_basket import EtfHolding
 from app.models.security import Security
 from app.repositories.analyst_rating_repository import AnalystRatingRepository
 from app.repositories.company_financials_repository import CompanyFinancialsRepository
@@ -74,6 +75,7 @@ from app.repositories.fundamentals_repository import FundamentalsRepository
 from app.repositories.market_price_repository import MarketPriceRepository
 from app.repositories.security_repository import held
 from app.repositories.sync_run_repository import utc_iso
+from app.services.company_classification import Classification, classify, gics_sector
 from app.services.company_financials_normaliser import ANNUAL, SPLIT_RATIOS
 
 PERIODS = ("quarterly", "ttm", "annual")
@@ -1084,8 +1086,13 @@ class CompanyFinancialsService:
         )
         next_date = yahoo["next_earnings_date"]
         counts = yahoo["counts"]
+        kind = await self._classification(company, listing)
         return {
             "industry": company.sic_description,
+            "business_model": kind.business_model,
+            "business_model_source": kind.business_model_source,
+            "sector": kind.sector,
+            "sector_source": kind.sector_source,
             "fiscal_year_end": company.fiscal_year_end,
             "description": figure("business_summary"),
             **line,
@@ -1105,6 +1112,28 @@ class CompanyFinancialsService:
             "next_eps_estimate": yahoo["next_eps_estimate"],
             "yahoo_as_of": utc_iso(yahoo["as_of"]) if yahoo["as_of"] is not None else None,
         }
+
+    async def _classification(
+        self, company: SecCompany, listing: Optional[Security]
+    ) -> Classification:
+        """The company's business model and sector (`company_classification.classify`): SEC's
+        three sources from `sec_companies`, then the fund baskets' GICS vote for its ISINs and
+        Yahoo's sector of the held listing. Read at request time, so a basket refresh or a
+        profile read shows the next time the page opens."""
+        isins = {i for i in (company.isin, listing.isin if listing is not None else None) if i}
+        gics = None
+        if isins:
+            rows = await self.db.execute(
+                select(EtfHolding.sector).where(EtfHolding.constituent_isin.in_(isins))
+            )
+            gics = gics_sector(rows.scalars())
+        return classify(
+            company.statement_model,
+            company.sic,
+            company.owner_org,
+            gics=gics,
+            yahoo=listing.sector if listing is not None else None,
+        )
 
     async def dividend_track(self) -> Dict[int, Dict[str, Any]]:
         """

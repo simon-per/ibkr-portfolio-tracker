@@ -367,15 +367,19 @@ def latest_periodic_report(body: Dict[str, Any]) -> Optional[date]:
 
 def submissions_profile(body: Dict[str, Any]) -> Dict[str, Any]:
     """
-    `{sic, sic_description, fiscal_year_end}` from a submissions document, each None when
-    the SEC states none or states it in a shape this does not recognise — never a guess.
-    The SEC sends the SIC code as a string ("3674") and the year end as `MMDD` ("0126").
+    `{sic, sic_description, fiscal_year_end, owner_org}` from a submissions document, each
+    None when the SEC states none or states it in a shape this does not recognise — never a
+    guess. The SEC sends the SIC code as a string ("3674") and the year end as `MMDD`
+    ("0126"); `owner_org` is the office reviewing the company's filings ("04 Manufacturing",
+    `company_classification`).
     """
     sic_raw = body.get("sic")
     sic = int(sic_raw) if isinstance(sic_raw, str) and sic_raw.isdigit() else None
     description = body.get("sicDescription")
     year_end = body.get("fiscalYearEnd")
+    owner_org = body.get("ownerOrg")
     return {
+        "owner_org": owner_org.strip()[:100] or None if isinstance(owner_org, str) else None,
         "sic": sic or None,
         "sic_description": description.strip()[:200] or None
         if isinstance(description, str)

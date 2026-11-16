@@ -83,6 +83,7 @@ from app.repositories.company_financials_repository import (
 from app.repositories.etf_basket_repository import EtfBasketRepository
 from app.repositories.security_repository import held
 from app.repositories.sync_run_repository import SyncRunRepository
+from app.services.company_classification import classify, statement_model
 from app.services.company_financials_normaliser import normalise
 from app.services.company_vendor_fill import fill as vendor_fill
 from app.services.edgar_client import (
@@ -965,6 +966,19 @@ class CompanyFinancialsSync:
         await self.repo.replace_rows(
             cik, rows, utcnow(), result.entity_name, result.splits
         )
+        # The classification's first SEC source: what the newest annual report's own concepts
+        # show (`company_classification`). A disagreement with the SIC code or SEC's reviewing
+        # office is recorded, never resolved by hand — information, not a warning.
+        model = statement_model(facts)
+        await self.repo.record_statement_model(cik, model)
+        company = (await self.repo.companies([cik])).get(cik)
+        if company is not None:
+            verdict = classify(model, company.sic, company.owner_org)
+            for field_name, source, answer in verdict.conflicts:
+                summary.setdefault("classification_conflicts", []).append(
+                    f"{label} {field_name} {getattr(verdict, field_name)} "
+                    f"({getattr(verdict, field_name + '_source')}); {source} says {answer}"
+                )
         if result.unchained_investments:
             summary.setdefault("unchained_investments", []).append(
                 f"{label} ({', '.join(result.unchained_investments)})"

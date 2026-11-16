@@ -91,6 +91,13 @@ class SecCompany(Base):
     submissions_checked_at: Mapped[Optional[datetime]] = mapped_column(
         DateTime, nullable=True
     )
+    # SEC's office reviewing the company's filings (`ownerOrg`: "04 Manufacturing"), from the
+    # same submissions document; and the business model the newest annual report's own
+    # concepts show (`company_classification.statement_model`), from each companyfacts fetch.
+    # The classification's two SEC inputs beside `sic` (docs/company-financials.md,
+    # *Classification*).
+    owner_org: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
+    statement_model: Mapped[Optional[str]] = mapped_column(String(16), nullable=True)
     # When the filing list (`submissions`) was last asked for a filing companyfacts
     # skipped (`company_financials_sync._read_skipped`, STATUS 7a): at most once in
     # `LISTING_RECHECK_AFTER`, so a hole no filing fills costs one request a month.
