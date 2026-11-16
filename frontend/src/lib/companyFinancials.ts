@@ -45,8 +45,6 @@ export interface CompanyChartDef {
   kind: 'bar' | 'line'
   /** `growth`: CAGRs and YoY of the lead series. `latest`: no growth (margins, balances). */
   header: 'growth' | 'latest'
-  /** Drawn only when some point has a value — a company that pays no dividend has no card. */
-  optional?: boolean
   /** Fewer is the shareholder's gain (the share count): growth reads the other way. */
   inverse?: boolean
   /**
@@ -63,7 +61,7 @@ export interface CompanyChartDef {
 export const COMPANY_CHARTS: readonly CompanyChartDef[] = [
   // The market closes (`series.price`): the range applies, the period and basis do not — a
   // close has no fiscal period and is per share already. Optional: no closes, no card.
-  { id: 'price', kind: 'line', header: 'growth', optional: true,
+  { id: 'price', kind: 'line', header: 'growth',
     total: { title: 'Price', format: 'perShare', series: [{ key: 'price', name: 'Price' }] } },
   { id: 'revenue', kind: 'bar', header: 'growth',
     total: { title: 'Revenue', format: 'money', series: [{ key: 'revenue', name: 'Revenue' }] },
@@ -87,22 +85,22 @@ export const COMPANY_CHARTS: readonly CompanyChartDef[] = [
       { key: 'net_margin', name: 'Net' },
       { key: 'fcf_margin', name: 'FCF' },
     ] } },
-  { id: 'valuation', kind: 'line', header: 'latest', optional: true, current: true,
+  { id: 'valuation', kind: 'line', header: 'latest', current: true,
     total: { title: 'Valuation', format: 'multiple', series: [
       { key: 'pe_ratio', name: 'P/E' },
       { key: 'pfcf_ratio', name: 'P/FCF' },
       { key: 'ps_ratio', name: 'P/S' },
     ] } },
-  { id: 'roe', kind: 'line', header: 'latest', optional: true,
+  { id: 'roe', kind: 'line', header: 'latest',
     total: { title: 'Return on equity', format: 'percent', series: [{ key: 'roe', name: 'ROE' }] } },
   { id: 'shares', kind: 'bar', header: 'growth', inverse: true,
     total: { title: 'Diluted shares', format: 'count', series: [{ key: 'diluted_shares', name: 'Shares' }] } },
-  { id: 'capital-returns', kind: 'bar', header: 'growth', optional: true,
+  { id: 'capital-returns', kind: 'bar', header: 'growth',
     total: { title: 'Buybacks & dividends', format: 'money', series: [
       { key: 'buybacks', name: 'Buybacks' },
       { key: 'dividends_paid', name: 'Dividends' },
     ] } },
-  { id: 'cash-debt', kind: 'bar', header: 'latest', optional: true,
+  { id: 'cash-debt', kind: 'bar', header: 'latest',
     total: { title: 'Cash & debt', format: 'money', series: [
       { key: 'cash', name: 'Cash & equivalents' },
       // Net cash counts them too, so the card's figures add up (review item VI1).
@@ -110,7 +108,7 @@ export const COMPANY_CHARTS: readonly CompanyChartDef[] = [
       { key: 'debt', name: 'Debt' },
       { key: 'net_cash', name: 'Net cash' },
     ] } },
-  { id: 'dps', kind: 'bar', header: 'growth', optional: true,
+  { id: 'dps', kind: 'bar', header: 'growth',
     total: { title: 'Dividends per share', format: 'perShare',
       series: [{ key: 'dividends_per_share', name: 'DPS' }] } },
 ]
@@ -228,14 +226,17 @@ export function hasAnyData(response: CompanyFinancialsResponse): boolean {
   return Object.values(response.series ?? {}).some(hasAnyValue)
 }
 
-/** The cards to draw: every chart, less an optional one whose series are all empty. */
+/**
+ * The cards to draw: every chart with a value somewhere in the range. A figure the company does
+ * not report is no card, never an empty one (owner, 2026-11-16): LLY files no operating income,
+ * a bank no FCF, a company without closes no price, one paying no dividend no DPS.
+ */
 export function visibleCharts(
   response: CompanyFinancialsResponse,
   basis: CompanyBasis = 'total',
 ): CompanyChartDef[] {
   return COMPANY_CHARTS.filter(
-    (chart) => !chart.optional
-      || chartView(chart, basis).series.some((s) => hasAnyValue(seriesOf(response, s.key))),
+    (chart) => chartView(chart, basis).series.some((s) => hasAnyValue(seriesOf(response, s.key))),
   )
 }
 

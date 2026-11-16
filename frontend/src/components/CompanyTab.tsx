@@ -550,7 +550,8 @@ function StreetRow({ profile }: { profile: CompanyFinancialsProfile }) {
 function CompanyOverview({ data }: { data: CompanyFinancialsResponse }) {
   const profile = data.profile
   const fyMonth = fiscalYearEndMonth(profile.fiscal_year_end)
-  const tags = [profile.industry, fyMonth && `FY ends ${fyMonth}`].filter(Boolean)
+  const sector = profile.sector && profile.sector !== 'Unknown' ? profile.sector : null
+  const tags = [sector, profile.industry, fyMonth && `FY ends ${fyMonth}`].filter(Boolean)
   const price = (v: number) => formatCurrency(v, data.currency)
   const groups = visibleOverviewGroups(data.key_stats, profile)
   const returns = RETURNS.flatMap((r) => {

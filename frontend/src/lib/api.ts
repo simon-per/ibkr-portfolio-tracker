@@ -1813,6 +1813,12 @@ export interface CompanyFinancialsLatestQuarter {
 export interface CompanyFinancialsProfile {
   /** The SEC's SIC description. */
   industry: string | null;
+  /** `industrial`, `bank` (banks and brokers) or `insurer`: which figures apply. */
+  business_model: 'industrial' | 'bank' | 'insurer';
+  business_model_source: string;
+  /** One of the app's eleven sectors, or `Unknown`; SEC first (docs/company-financials.md). */
+  sector: string;
+  sector_source: string;
   /** `MMDD`, as the SEC states it. */
   fiscal_year_end: string | null;
   /** Yahoo's business summary. */

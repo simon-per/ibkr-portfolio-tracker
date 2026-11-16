@@ -1200,8 +1200,11 @@ after Fundamentals, `Building2`), its wiring in `lib/companyFinancials.ts`, the 
   dated by `profile.price_date`, so it agrees with the overview's P/E; it fell back to the last
   quarter end's (AMD read P/E 115.4 above and 134.1 in the card). With no current multiple known
   it heads with the last period as before.
-- **Absences.** A null point is a gap: no bar, a broken line, never a zero. The dividends, buybacks
-  & dividends and cash & debt cards are drawn only when some point has a value. A response with no
+- **Absences.** A null point is a gap: no bar, a broken line, never a zero. **Every card is drawn
+  only when one of its series has a value somewhere in the range** (`visibleCharts`, owner
+  2026-11-16): a figure the company does not report is no card, never an empty one — LLY files no
+  operating income, a bank no FCF, a company paying no dividend no DPS. A gap (a quarter missing
+  between figures) keeps the card. A response with no
   value anywhere is one warning and no charts; `warnings[]` render as warnings above the grid.
   Toggling keeps the last response dimmed (`useKeepPreviousData`).
 - **Formats**: compact money in the response's `currency` (`formatCompactMoney`, "$130.5B"),
@@ -1233,8 +1236,9 @@ after Fundamentals, `Building2`), its wiring in `lib/companyFinancials.ts`, the 
 income — those are the other tabs'. `CompanyOverview` in `CompanyTab.tsx`, the body of the picker
 card, from the response's `key_stats` and `profile` (docs/company-financials.md *The overview*):
 
-- **Identity**: the picker stays the name; under it `industry · FY ends <month>` (the SEC's SIC
-  description, `fiscalYearEndMonth` of the `MMDD` year end).
+- **Identity**: the picker stays the name; under it `sector · industry · FY ends <month>` (the
+  classification's sector, SEC first, left out when `Unknown` — docs/company-financials.md,
+  *Classification*; the SEC's SIC description; `fiscalYearEndMonth` of the `MMDD` year end).
 - **Price line**: the newest market close and its date, the 1M · 1Y · 5Y p.a. · 10Y p.a. changes
   (signed tone; a span the server has none for is left out), and the 52-week range of the closes
   with the close marked (`RangeBar`).

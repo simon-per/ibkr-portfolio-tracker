@@ -185,7 +185,7 @@ describe('CompanyTab', () => {
     vi.spyOn(api, 'getCompanyFinancials').mockResolvedValue(fixtureFinancials())
     renderTab()
     const overview = await screen.findByTestId('company-overview')
-    expect(within(overview).getByTestId('company-tags').textContent).toBe('Semiconductors & Related Devices · FY ends Jan')
+    expect(within(overview).getByTestId('company-tags').textContent).toBe('Technology · Semiconductors & Related Devices · FY ends Jan')
     const price = within(overview).getByTestId('price-line').textContent
     expect(price).toContain('$186.60')
     expect(price).toContain('Nov 6, 2026')
@@ -215,6 +215,7 @@ describe('CompanyTab', () => {
       profile: {
         ...FIXTURE_PROFILE,
         industry: null, fiscal_year_end: null, description: null, rating: null, analysts: null,
+        sector: 'Unknown', sector_source: 'default',
         target_low: null, target_mean: null, target_high: null, target_upside: null,
         next_earnings_date: null, next_eps_estimate: null, forward_pe: null, peg_ratio: null,
         fwd_revenue_growth: null, fwd_eps_growth: null,

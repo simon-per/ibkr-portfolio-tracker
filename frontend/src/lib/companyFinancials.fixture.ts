@@ -65,6 +65,10 @@ export function fixturePriceSeries(): CompanyFinancialsSeries {
 /** An NVDA-like overview profile: every field known. */
 export const FIXTURE_PROFILE: CompanyFinancialsProfile = {
   industry: 'Semiconductors & Related Devices',
+  business_model: 'industrial',
+  business_model_source: 'statements',
+  sector: 'Technology',
+  sector_source: 'sic',
   fiscal_year_end: '0126',
   description:
     'NVIDIA designs graphics processors and accelerated computing platforms for data centres, '

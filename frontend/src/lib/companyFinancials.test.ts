@@ -101,6 +101,21 @@ describe('visibleCharts', () => {
     expect(visibleCharts(nonPayer)).toHaveLength(COMPANY_CHARTS.length - 1)
     expect(visibleCharts(nonPayer, 'perShare')).toHaveLength(COMPANY_CHARTS.length - 1)
   })
+
+  it('draws no card for a figure the company does not report, whichever card it is', () => {
+    // LLY files no operating income; a bank has no FCF. No card, never an empty one.
+    const none = fixtureSeries([null, null, null, null])
+    const lilly = fixtureFinancials({ series: { operating_income: none } })
+    expect(visibleCharts(lilly).map((c) => c.id)).not.toContain('operating-income')
+    const bank = fixtureFinancials({
+      series: { fcf: none, fcf_after_sbc: none, fcf_per_share: none, fcf_after_sbc_per_share: none },
+    })
+    expect(visibleCharts(bank).map((c) => c.id)).not.toContain('fcf')
+    expect(visibleCharts(bank, 'perShare').map((c) => c.id)).not.toContain('fcf')
+    // A gap is not an absence: one quarter with a figure keeps the card.
+    const gappy = fixtureFinancials({ series: { operating_income: fixtureSeries([null, 5, null, null]) } })
+    expect(visibleCharts(gappy).map((c) => c.id)).toContain('operating-income')
+  })
 })
 
 describe('seriesWithData', () => {
