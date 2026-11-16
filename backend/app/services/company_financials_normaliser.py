@@ -629,11 +629,23 @@ def _unit_for(kind: str, fitting: Dict[str, Any], reporting: Optional[str]) -> O
     return wanted if wanted in fitting else None
 
 
-def _facts(companyfacts: Dict[str, Any]) -> List[Fact]:
-    """Every usable fact of every concept a chain names, in the concept's main unit."""
+def _wanted() -> Dict[str, str]:
+    """Every concept read from companyfacts, with its kind."""
     wanted = {c: spec.kind for spec in METRICS.values() for c in spec.concepts}
     wanted[SPLIT_WITNESS] = SHARES
     wanted.update({c: MONETARY for c in DIVIDEND_TOTALS})
+    return wanted
+
+
+def reporting_currency(companyfacts: Dict[str, Any]) -> Optional[str]:
+    """The currency the company reports in now (`_reporting_currency`)."""
+    wanted = _wanted()
+    return _reporting_currency(_taxonomy(companyfacts, wanted), wanted)
+
+
+def _facts(companyfacts: Dict[str, Any]) -> List[Fact]:
+    """Every usable fact of every concept a chain names, in the concept's main unit."""
+    wanted = _wanted()
     never_negative = {
         c for spec in METRICS.values() if spec.non_negative for c in spec.concepts
     }
@@ -698,14 +710,18 @@ def _facts(companyfacts: Dict[str, Any]) -> List[Fact]:
 
 
 def _filing_facts(
-    base: Sequence[Fact], filing_facts: Iterable[Dict[str, Any]]
+    base: Sequence[Fact],
+    filing_facts: Iterable[Dict[str, Any]],
+    reporting: Optional[str] = None,
 ) -> List[Fact]:
     """
     Facts read from the filings themselves (`edgar_filing_facts`: a dividend per share a
     company tagged only on a dimension member, which companyfacts leaves out), as `Fact`s
     under their own filing's accession number, so the split vote and the latest-filing rule
     treat them as that filing's. They only fill: a period companyfacts has any fact of that
-    concept for keeps companyfacts' answer.
+    concept for keeps companyfacts' answer. A figure in another currency than the company
+    reports in (`reporting`) is not read, as `_unit_for` reads companyfacts: TSMC's 20-F
+    translates its latest year into USD beside the TWD every year is stated in.
     """
     wanted = {c: spec.kind for spec in METRICS.values() for c in spec.concepts}
     instant = {
@@ -720,6 +736,8 @@ def _filing_facts(
         concept, unit = row.get("concept"), row.get("unit")
         kind = wanted.get(concept)
         if kind is None or not isinstance(unit, str) or not _unit_fits(kind, unit):
+            continue
+        if reporting is not None and kind != SHARES and unit.split("/")[0] != reporting:
             continue
         start, end, filed = (_date(row.get(k)) for k in ("start", "end", "filed"))
         val, accn, form = row.get("val"), row.get("accn"), row.get("form")
@@ -1925,7 +1943,9 @@ def normalise(
     """
     result = Normalised(entity_name=(companyfacts or {}).get("entityName"))
     base = _facts(companyfacts)
-    facts = _drop_lone_slips(base + _filing_facts(base, filing_facts))
+    facts = _drop_lone_slips(
+        base + _filing_facts(base, filing_facts, reporting_currency(companyfacts))
+    )
     if not facts:
         return result
     events: List[Dict[str, Any]] = []

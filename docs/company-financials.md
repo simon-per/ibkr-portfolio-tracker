@@ -898,7 +898,13 @@ All three were misses: the normaliser read 10-K/10-Q facts in us-gaap only.
 - **IFRS concepts are read under their US-GAAP twins** (`IFRS_TWINS`), so every chain, ladder and
   vote applies unchanged; only exact equivalents (revenue, profit attributable to owners, diluted EPS,
   operating profit, operating cash flow, capex, diluted shares, dividends, buybacks, cash, equity).
-  A filer with any us-gaap chain concept is read in us-gaap alone, never both.
+  A filer with any us-gaap chain concept is read in us-gaap alone, never both. **A 20-F's own
+  instance is read the same way** (STATUS 7b, 2026-11-16): `parse_instance(whole=True)` takes
+  the undimensioned `ifrs-full` lines under their twins when the filing has no us-gaap chain
+  fact, so a 20-F companyfacts has not taken in fills its year (NU's and TSMC's FY2025, months
+  late in companyfacts; `tests/test_company_ifrs_instance.py`). A filing's figure in another
+  currency than the company reports in is not read (`_filing_facts`, as `_unit_for` reads
+  companyfacts): TSMC's 20-F states its latest year in USD too.
   The company reports in **the currency its newest periodic filing states most of its figures
   in** (`_reporting_currency`), and a concept stated only in another currency is not read
   (`_unit_for`), so two currencies never meet in one series. Until 2026-11-15 each concept kept

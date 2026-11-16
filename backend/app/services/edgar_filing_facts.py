@@ -34,7 +34,7 @@ from dataclasses import dataclass
 from datetime import date, timedelta
 from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
 
-from app.services.company_financials_normaliser import FORMS, METRICS
+from app.services.company_financials_normaliser import FORMS, IFRS_TWINS, METRICS
 from app.services.edgar_client import ANNUAL_FORM_PREFIXES
 
 #: The concepts read from a filing on a dimension member: the dividend-per-share chain on
@@ -83,6 +83,9 @@ READ_SINCE = {"dividends_per_share": 1, "eps_diluted": 2}
 SAME_PERIOD_DAYS = 7
 
 US_GAAP = "http://fasb.org/us-gaap/"
+#: The IFRS Foundation's taxonomy, `https://xbrl.ifrs.org/taxonomy/<date>/ifrs-full` (or
+#: `http:`): a 20-F filer's (NU, TSMC) statements, read under their US-GAAP twins.
+_IFRS_FULL = re.compile(r"https?://xbrl\.ifrs\.org/taxonomy/[^/]+/ifrs-full$")
 XBRLI = "{http://www.xbrl.org/2003/instance}"
 XBRLDI = "{http://xbrl.org/2006/xbrldi}"
 XSI_NIL = "{http://www.w3.org/2001/XMLSchema-instance}nil"
@@ -360,13 +363,15 @@ def parse_instance(body: bytes, whole: bool = False) -> List[Dict[str, Any]]:
     filing it has not taken in yet (review item CO5, 2026-11-08: six companies sat on
     their Q1 for 221 days while their Q2 10-Qs were filed). Then every chain concept's
     undimensioned facts come too, and win over a member's value for the same period —
-    they are what companyfacts would carry.
+    they are what companyfacts would carry. An IFRS filing's (`ifrs-full`) lines come
+    under their US-GAAP twins (`IFRS_TWINS`), only when it has no us-gaap chain fact.
     """
     contexts: Dict[
         str, Tuple[Optional[str], Optional[str], List[Tuple[str, str]], bool]
     ] = {}
     units: Dict[str, str] = {}
     candidates: List[Tuple[str, str, Optional[str], str]] = []
+    ifrs: List[Tuple[str, str, Optional[str], str]] = []
     prefixes: Dict[str, str] = {}
     depth = 0
     events = ("start-ns", "start", "end")
@@ -417,7 +422,30 @@ def parse_instance(body: bytes, whole: bool = False) -> List[Dict[str, Any]]:
                         elem.text.strip(),
                     )
                 )
+        elif whole and tag.startswith("{"):
+            # An IFRS filer's statement line, under its US-GAAP twin (STATUS 7b: NU's and
+            # TSMC's FY2025 20-F sat outside companyfacts for months, and this read us-gaap
+            # only). Undimensioned only, like every whole read.
+            uri, _, name = tag[1:].partition("}")
+            if (
+                name in IFRS_TWINS
+                and _IFRS_FULL.match(uri)
+                and elem.get(XSI_NIL) != "true"
+                and elem.text is not None
+            ):
+                ifrs.append(
+                    (
+                        IFRS_TWINS[name],
+                        elem.get("contextRef") or "",
+                        elem.get("unitRef"),
+                        elem.text.strip(),
+                    )
+                )
         elem.clear()
+    # One taxonomy, as the normaliser reads companyfacts (`_taxonomy`): a filing with any
+    # us-gaap chain fact is read in us-gaap alone, never both.
+    if not any(c in CHAIN_CONCEPTS for c, _, _, _ in candidates):
+        candidates.extend(ifrs)
 
     by_period: Dict[Tuple[str, str, Optional[str], str], set] = defaultdict(set)
     plain: Dict[Tuple[str, str, Optional[str], str], set] = defaultdict(set)
