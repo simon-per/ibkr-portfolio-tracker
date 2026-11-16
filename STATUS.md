@@ -530,7 +530,12 @@ Rough priority. Re-verify each `path:line` in code before fixing; lines move.
     hidden Analytics tab's `segments` through `decompose` before that tab returns (it still
     classifies basket rows itself, with raw countries). Researched future sources (N-PORT,
     commercial APIs — do not re-shop) are in docs/lookthrough.md.
-7a. **The Company tab after the waterfall** (2026-11-16): read a quarter's own 10-Q for the
+7a. **Finish the waterfall's measurement (layers 4 and 5).** The 2026-11-16 run over all 132
+    companies was cut short by SEC's archive service answering 503 to most requests; layers 2–3
+    are measured (docs/company-financials.md, *Known gaps*). After the Sunday 2026-11-22 pass, the
+    production rows answer it directly: `/api/company-financials/{cik}` against the 2026-11-15
+    gap counts, and the pass's `extended` and `segments`.
+7b. **The Company tab after the waterfall** (2026-11-16): read a quarter's own 10-Q for the
     company's own debt concepts (years only today, so CDNS's quarters stay without debt); the
     same for BRK's and PCAR's segment columns where a 10-Q tags them; and whatever the first
     `company_vendor_fill` runs leave in `unproven` (docs/company-financials.md, *Known gaps*).

@@ -988,7 +988,7 @@ more request beside the instance) names each concept in words.
   companyfacts now carries. Its older quarters stay withheld by the maturity-table witness
   (*The normaliser*).
 
-The measurement over the 132 companies is in *Known gaps and out of scope*.
+The measurement over the 132 companies is in *Known gaps and out of scope* (layers 2 and 3; this layer's is still to be run, below).
 
 ### Segment columns summed where no total exists
 
@@ -1019,7 +1019,7 @@ unknown and `_no_debt_at_all` rightly withheld a zero.
   where no debt figure exists; source `segments:<axis>`. `_no_debt_at_all` still treats such a
   company as one whose debt companyfacts cannot see. `tests/test_company_segment_debt.py`.
 
-The measurement over the 132 companies is in *Known gaps and out of scope*.
+The measurement over the 132 companies is in *Known gaps and out of scope* (layers 2 and 3; this layer's is still to be run, below).
 
 ### Alpha Vantage, last
 
@@ -1052,9 +1052,22 @@ The measurement over the 132 companies is in *Known gaps and out of scope*.
   `company_vendor_result`): `asked`, `filled`, `unproven`, `spent`, `capped`, `budget`. Without a
   key the job records nothing. `tests/test_company_vendor_fill.py`.
 
-Nothing is asked from this session: the key lives only on the VPS (*Known gaps and out of scope* has what it may fill).
+Nothing is asked from this session: the key lives only on the VPS. Its reach, estimated on the rows layers 2 and 3 leave: 89 interior gaps in recent quarters at 26 companies, mostly debt halves, 26 calls to ask them all — under two days of its budget.
 
 ## Known gaps and out of scope
+
+**The source waterfall, measured 2026-11-16** over the 132 companies (layers 2 and 3 of *The
+source waterfall*, against the 2026-11-15 normaliser, without production's dividend/EPS reads):
+11 filing lists asked, 8 filings read (AEP's and EXC's Q2 and Q3 2026, ALNY's Q1 2026, NU's and
+TSMC's FY2025 20-F, SPGI's FY2024 10-K); gaps in the last eight quarters revenue 1 → 0, FCF 55 → 52,
+diluted shares 28 → 27, cash 11 → 10, debt 95 → 94, operating income 116 → 115; NU
+and TSMC reach FY2025; **no figure that existed changed.** Layers 4 and 5 (own concepts, segment
+columns) read about 150 10-Ks and BRK's and PCAR's balance sheets once; their run over all 132
+companies was cut short by SEC's archive service answering 503 to most requests that day, and is
+STATUS.md's to finish. Checked against the filings' text: NVDA's FY2018 10-K prints "Purchases of
+property and equipment and intangible assets (593) (176) (86)", the facts read; BRK's balance
+sheet "Notes payable and other borrowings 44,885" and "79,877", the two members summed; PCAR's
+"Commercial paper and bank loans 6,003.8" and "Term notes 9,891.2", the 15,895.0 carrying amount.
 
 Measured over the 132 companies on 2026-11-15 over the last eight quarters, what the tab shows
 first (before → after the chains, bridging and both debt rules): revenue 9 → 1 missing quarters,
