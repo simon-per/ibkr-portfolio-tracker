@@ -172,6 +172,14 @@ class CompanyFinancialsSeriesSet(BaseModel):
     pfcf_ratio: CompanyFinancialsSeries
     dividend_yield: CompanyFinancialsSeries
     roe: CompanyFinancialsSeries
+    # A bank's figures (docs/company-financials.md, *A bank's figures*).
+    net_interest_income: CompanyFinancialsSeries
+    noninterest_income: CompanyFinancialsSeries
+    credit_loss_provision: CompanyFinancialsSeries
+    efficiency_ratio: CompanyFinancialsSeries
+    deposits: CompanyFinancialsSeries
+    loans: CompanyFinancialsSeries
+    book_value_per_share: CompanyFinancialsSeries
     price: CompanyFinancialsSeries = Field(
         ...,
         description="The market closes (weekly, and a held listing's newest daily one); each "

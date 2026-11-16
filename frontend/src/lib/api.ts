@@ -1703,6 +1703,15 @@ export interface CompanyFinancialsSeriesSet {
   dividend_yield: CompanyFinancialsSeries;
   /** TTM net income over the year's mean equity, a fraction. */
   roe: CompanyFinancialsSeries;
+  /** A bank's figures (docs/company-financials.md, *A bank's figures*); empty elsewhere. */
+  net_interest_income: CompanyFinancialsSeries;
+  noninterest_income: CompanyFinancialsSeries;
+  credit_loss_provision: CompanyFinancialsSeries;
+  /** Non-interest expense over net interest plus non-interest income, a fraction. */
+  efficiency_ratio: CompanyFinancialsSeries;
+  deposits: CompanyFinancialsSeries;
+  loans: CompanyFinancialsSeries;
+  book_value_per_share: CompanyFinancialsSeries;
   /** The market closes; each point's `label` is its date. The range applies, the period not. */
   price: CompanyFinancialsSeries;
 }

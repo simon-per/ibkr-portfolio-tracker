@@ -185,7 +185,8 @@ def test_growth_is_computed_for_every_series_but_the_margins_and_the_pe():
             assert series[name]["cagr"] is None and series[name]["yoy"] is None
             assert set(series[name]["cagrs"].values()) == {None}
     assert NO_GROWTH == MARGINS | {
-        "pe_ratio", "ps_ratio", "pfcf_ratio", "dividend_yield", "roe", "net_cash"}
+        "pe_ratio", "ps_ratio", "pfcf_ratio", "dividend_yield", "roe", "net_cash",
+        "efficiency_ratio"}
     first, last = series["revenue"]["points"][0], series["revenue"]["points"][-1]
     years = (
         date.fromisoformat(last["period_end"]) - date.fromisoformat(first["period_end"])

@@ -1111,6 +1111,33 @@ Global 7320 Industrials, ADP 7374 Technology, MicroStrategy 6199 Financials; ASM
 (special machinery) Industrials, where SEC's own reviewing office (Technology) and GICS disagree —
 both recorded as conflicts. `tests/test_company_classification.py`.
 
+### A bank's figures
+
+The `bank` model's own KPI set (2026-11-16), the cards the Company tab draws for it instead of the
+industrial's cash & debt (a bank's deposits and borrowing are its business, not leverage):
+
+- **Chains** (`METRICS`): `net_interest_income` (`InterestIncomeExpenseNet`), `noninterest_income`,
+  `noninterest_expense`, `credit_loss_provision` (`ProvisionForLoanLeaseAndOtherLosses` →
+  `ProvisionForLoanAndLeaseLosses` → `ProvisionForLoanLossesExpensed`), `deposits` (`Deposits`),
+  `loans` (`LoansAndLeasesReceivableNetReportedAmount` →
+  `FinancingReceivableExcludingAccruedInterestAfterAllowanceForCreditLoss`: BAC and JPM moved from
+  the first to the second with CECL). Flows sum into a TTM, deposits and loans are balances.
+- **Derived** (`company_financials_service._derive`): the **efficiency ratio**, non-interest
+  expense over net interest plus non-interest income (lower is better; no growth rate), and
+  **book value per share**, equity over the shares outstanding at the period end (a count tagged
+  per class, IBKR's or BRK's, gives none). Served as series like any other.
+- **Measured** over the 132 companies: adding the chains added rows only — 886 net interest income,
+  310 non-interest expense, 612 provisions, 258 non-interest income, 232 loans, 201 deposits — and
+  no figure that existed moved. BAC, JPM, SOFI and IBKR carry net interest income, non-interest
+  income and expense in all of their last eight quarters, the three banks deposits and loans; a
+  provision only JPM lately (BAC stopped tagging one undimensioned after 2022, SOFI never did);
+  IBKR, a broker, has no deposits or loans. An industrial tagging one of these lines (AMD's net
+  interest income) has the rows and no card. `tests/test_company_bank_figures.py`.
+- **No insurer set yet**: BRK, the only insurer in scope, tags its premiums and claims per segment
+  only, so companyfacts holds none; it keeps the industrial cards and gains book value per share
+  where a single count exists. An insurer set (premiums earned, losses and expenses over premiums)
+  waits for an insurer that tags them.
+
 ## Markets beyond the SEC (planned, owner 2026-11-16)
 
 Today a company has a page only if it files with the SEC (US filers, and foreign filers of a 20-F

@@ -1179,8 +1179,11 @@ after Fundamentals, `Building2`), its wiring in `lib/companyFinancials.ts`, the 
   pick and becomes it; a pick in the picker replaces the hash without a history entry; a CIK the
   list no longer has falls through like a stale pick. **The picker card's body is the overview**
   (2026-11-07, replacing the flat Key figures strip; *The overview* below), then
-  a grid of up to eleven cards (revenue, operating income, net income, FCF, margins, valuation
-  — P/E, P/FCF, P/S —, return on equity, shares, buybacks & dividends, cash & debt, DPS), 2 per row from `lg`, 1 below, each with a 320px plot
+  a grid of the cards with a value (revenue, operating income, net income, FCF, margins, valuation
+  — P/E, P/FCF, P/S —, return on equity, shares, buybacks & dividends, cash & debt, DPS; and for
+  a bank — `profile.business_model`, a card's `only` — net interest & fee income, the efficiency
+  ratio, the credit loss provision, deposits & loans and book value per share, with no cash & debt
+  card), 2 per row from `lg`, 1 below, each with a 320px plot
   (260px on a phone); the expand button (desktop) makes one card span the row with a 460px plot,
   one card at a time.
 - **Card header**: a large headline — the lead series (the first drawn with a value there) at the hovered period,

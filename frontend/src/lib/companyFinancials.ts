@@ -48,6 +48,13 @@ export interface CompanyChartDef {
   /** Fewer is the shareholder's gain (the share count): growth reads the other way. */
   inverse?: boolean
   /**
+   * The business models the card is for (`profile.business_model`, SEC first —
+   * docs/company-financials.md, *Classification*); any when absent. A bank's deposits and
+   * loans are its business, so its debt and net cash are no card; an industrial's net interest
+   * income (AMD tags one) is no bank card.
+   */
+  only?: readonly CompanyBusinessModel[]
+  /**
    * Until a period is hovered, the headline and legend read today's figures from `key_stats`
    * (the newest close over the newest TTM), dated by that close — the figures the overview
    * shows above, not the last quarter end's. A series key must name a key figure too.
@@ -57,6 +64,8 @@ export interface CompanyChartDef {
   /** The card in the Per share basis; a card without one (shares, margins, DPS) is the same in both. */
   perShare?: CompanyChartView
 }
+
+export type CompanyBusinessModel = CompanyFinancialsResponse['profile']['business_model']
 
 export const COMPANY_CHARTS: readonly CompanyChartDef[] = [
   // The market closes (`series.price`): the range applies, the period and basis do not — a
@@ -73,6 +82,26 @@ export const COMPANY_CHARTS: readonly CompanyChartDef[] = [
   { id: 'net-income', kind: 'bar', header: 'growth',
     total: { title: 'Net income', format: 'money', series: [{ key: 'net_income', name: 'Net income' }] },
     perShare: { title: 'EPS (diluted)', format: 'perShare', series: [{ key: 'eps_diluted', name: 'EPS' }] } },
+  // A bank's own figures (docs/company-financials.md, *A bank's figures*).
+  { id: 'bank-revenue', kind: 'bar', header: 'growth', only: ['bank'],
+    total: { title: 'Net interest & fee income', format: 'money', series: [
+      { key: 'net_interest_income', name: 'Net interest income' },
+      { key: 'noninterest_income', name: 'Non-interest income' },
+    ] } },
+  { id: 'efficiency', kind: 'line', header: 'latest', only: ['bank'],
+    total: { title: 'Efficiency ratio', format: 'percent',
+      series: [{ key: 'efficiency_ratio', name: 'Efficiency' }] } },
+  { id: 'credit-provision', kind: 'bar', header: 'growth', only: ['bank'],
+    total: { title: 'Credit loss provision', format: 'money',
+      series: [{ key: 'credit_loss_provision', name: 'Provision' }] } },
+  { id: 'deposits-loans', kind: 'bar', header: 'latest', only: ['bank'],
+    total: { title: 'Deposits & loans', format: 'money', series: [
+      { key: 'deposits', name: 'Deposits' },
+      { key: 'loans', name: 'Loans' },
+    ] } },
+  { id: 'book-value', kind: 'bar', header: 'growth', only: ['bank', 'insurer'],
+    total: { title: 'Book value per share', format: 'perShare',
+      series: [{ key: 'book_value_per_share', name: 'Book value' }] } },
   { id: 'fcf', kind: 'bar', header: 'growth',
     total: { title: 'Free cash flow', format: 'money',
       series: [{ key: 'fcf', name: 'FCF' }, { key: 'fcf_after_sbc', name: 'FCF after SBC' }] },
@@ -100,7 +129,7 @@ export const COMPANY_CHARTS: readonly CompanyChartDef[] = [
       { key: 'buybacks', name: 'Buybacks' },
       { key: 'dividends_paid', name: 'Dividends' },
     ] } },
-  { id: 'cash-debt', kind: 'bar', header: 'latest',
+  { id: 'cash-debt', kind: 'bar', header: 'latest', only: ['industrial', 'insurer'],
     total: { title: 'Cash & debt', format: 'money', series: [
       { key: 'cash', name: 'Cash & equivalents' },
       // Net cash counts them too, so the card's figures add up (review item VI1).
@@ -235,8 +264,10 @@ export function visibleCharts(
   response: CompanyFinancialsResponse,
   basis: CompanyBasis = 'total',
 ): CompanyChartDef[] {
+  const model = response.profile?.business_model ?? 'industrial'
   return COMPANY_CHARTS.filter(
-    (chart) => chartView(chart, basis).series.some((s) => hasAnyValue(seriesOf(response, s.key))),
+    (chart) => (!chart.only || chart.only.includes(model))
+      && chartView(chart, basis).series.some((s) => hasAnyValue(seriesOf(response, s.key))),
   )
 }
 

@@ -98,8 +98,9 @@ describe('visibleCharts', () => {
     expect(visibleCharts(fixtureFinancials()).map((c) => c.id)).toContain('dps')
     const nonPayer = fixtureFinancials({ series: { dividends_per_share: fixtureSeries([null, null, null, null]) } })
     expect(visibleCharts(nonPayer).map((c) => c.id)).not.toContain('dps')
-    expect(visibleCharts(nonPayer)).toHaveLength(COMPANY_CHARTS.length - 1)
-    expect(visibleCharts(nonPayer, 'perShare')).toHaveLength(COMPANY_CHARTS.length - 1)
+    const all = visibleCharts(fixtureFinancials()).length
+    expect(visibleCharts(nonPayer)).toHaveLength(all - 1)
+    expect(visibleCharts(nonPayer, 'perShare')).toHaveLength(all - 1)
   })
 
   it('draws no card for a figure the company does not report, whichever card it is', () => {
@@ -115,6 +116,34 @@ describe('visibleCharts', () => {
     // A gap is not an absence: one quarter with a figure keeps the card.
     const gappy = fixtureFinancials({ series: { operating_income: fixtureSeries([null, 5, null, null]) } })
     expect(visibleCharts(gappy).map((c) => c.id)).toContain('operating-income')
+  })
+})
+
+describe('visibleCharts by business model', () => {
+  const some = fixtureSeries([1e9, 2e9, 3e9, 4e9])
+  const bankSeries = {
+    net_interest_income: some, noninterest_income: some, efficiency_ratio: fixtureSeries([0.6, 0.6, 0.6, 0.6]),
+    deposits: some, loans: some, book_value_per_share: fixtureSeries([30, 32, 34, 36]),
+    credit_loss_provision: fixtureSeries([null, null, null, null]),
+  }
+
+  it("draws a bank's own cards for a bank, and no cash & debt card", () => {
+    const bank = fixtureFinancials({
+      profile: { ...FIXTURE_PROFILE, business_model: 'bank' }, series: bankSeries,
+    })
+    const ids = visibleCharts(bank).map((c) => c.id)
+    expect(ids).toEqual(expect.arrayContaining(['bank-revenue', 'efficiency', 'deposits-loans', 'book-value']))
+    expect(ids).not.toContain('credit-provision') // none tagged: no card
+    expect(ids).not.toContain('cash-debt') // a bank's borrowing is its business
+  })
+
+  it("draws no bank card for an industrial that tags a bank's line", () => {
+    // AMD tags net interest income; it is no bank.
+    const amd = fixtureFinancials({ series: bankSeries })
+    const ids = visibleCharts(amd).map((c) => c.id)
+    expect(ids).not.toContain('bank-revenue')
+    expect(ids).not.toContain('book-value')
+    expect(ids).toContain('cash-debt')
   })
 })
 

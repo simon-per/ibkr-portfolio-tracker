@@ -331,6 +331,32 @@ METRICS: Dict[str, MetricSpec] = {
             "StockholdersEquityIncludingPortionAttributableToNoncontrollingInterest",
         ),
     ),
+    # A bank's and a broker's own figures (the classification's `bank`, docs/company-
+    # financials.md *A bank's figures*; measured 2026-11-16 at BAC, JPM, SOFI, IBKR: the
+    # first three tagged over their whole history, a provision only at JPM lately). An
+    # industrial tagging one (AMD's net interest income) has the rows and no card.
+    "net_interest_income": MetricSpec(MONETARY, FLOW, ("InterestIncomeExpenseNet",)),
+    "noninterest_income": MetricSpec(MONETARY, FLOW, ("NoninterestIncome",)),
+    "noninterest_expense": MetricSpec(MONETARY, FLOW, ("NoninterestExpense",)),
+    "credit_loss_provision": MetricSpec(
+        MONETARY,
+        FLOW,
+        (
+            "ProvisionForLoanLeaseAndOtherLosses",
+            "ProvisionForLoanAndLeaseLosses",
+            "ProvisionForLoanLossesExpensed",
+        ),
+    ),
+    "deposits": MetricSpec(MONETARY, INSTANT, ("Deposits",)),
+    # Loans net of the allowance: BAC and JPM moved from the first to the second with CECL.
+    "loans": MetricSpec(
+        MONETARY,
+        INSTANT,
+        (
+            "LoansAndLeasesReceivableNetReportedAmount",
+            "FinancingReceivableExcludingAccruedInterestAfterAllowanceForCreditLoss",
+        ),
+    ),
 }
 
 #: The source recorded for a share count derived as net income / diluted EPS — for the

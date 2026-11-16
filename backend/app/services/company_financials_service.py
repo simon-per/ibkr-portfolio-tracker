@@ -111,6 +111,14 @@ SERIES = (
     "pfcf_ratio",
     "dividend_yield",
     "roe",
+    # A bank's figures (`company_classification.BANK`; docs/company-financials.md).
+    "net_interest_income",
+    "noninterest_income",
+    "credit_loss_provision",
+    "efficiency_ratio",
+    "deposits",
+    "loans",
+    "book_value_per_share",
 )
 MARGINS = frozenset({"gross_margin", "operating_margin", "net_margin", "fcf_margin"})
 # The stored metrics a TTM sums; the share count is averaged, a balance is the newest.
@@ -127,6 +135,10 @@ SUMMED = (
     "dividends_per_share",
     "buybacks",
     "dividends_paid",
+    "net_interest_income",
+    "noninterest_income",
+    "noninterest_expense",
+    "credit_loss_provision",
 )
 AVERAGED = ("diluted_shares",)
 BALANCES = (
@@ -138,10 +150,12 @@ BALANCES = (
     "shares_outstanding",
     "cash_and_short_term",
     "short_term_investments",
+    "deposits",
+    "loans",
 )
 # Ratios: a growth rate of a multiple, a yield or a return reads as a figure nobody means.
 VALUATIONS = ("pe_ratio", "ps_ratio", "pfcf_ratio", "dividend_yield")
-NO_GROWTH = MARGINS | set(VALUATIONS) | {"roe", "net_cash"}
+NO_GROWTH = MARGINS | set(VALUATIONS) | {"roe", "net_cash", "efficiency_ratio"}
 # A company that tagged short-term investments this recently and not at a period end has an
 # unknown net cash there, not its cash alone.
 INVESTMENTS_LOOKBACK_DAYS = 730
@@ -282,7 +296,24 @@ def _derive(point: Point) -> None:
         "dividends_paid": b.get("dividends_paid"),
         "cash": cash,
         "debt": debt,
+        "net_interest_income": b.get("net_interest_income"),
+        "noninterest_income": b.get("noninterest_income"),
+        "credit_loss_provision": b.get("credit_loss_provision"),
+        # Non-interest expense over the revenue it earns (net interest plus non-interest
+        # income), a bank's cost ratio: lower is better.
+        "efficiency_ratio": _ratio(b.get("noninterest_expense"), _sum(
+            b.get("net_interest_income"), b.get("noninterest_income"))),
+        "deposits": b.get("deposits"),
+        "loans": b.get("loans"),
+        # Equity per share outstanding at the period end; a count tagged per class (BRK) is
+        # none, so no figure.
+        "book_value_per_share": _ratio(b.get("equity"), b.get("shares_outstanding")),
     }
+
+
+def _sum(*values: Optional[float]) -> Optional[float]:
+    """The sum, or None when any part is unknown."""
+    return None if any(v is None for v in values) else sum(values)
 
 
 def _years_before(d: date, years: int) -> date:

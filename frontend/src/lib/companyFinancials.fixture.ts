@@ -150,6 +150,14 @@ export function fixtureFinancials(
       pfcf_ratio: fixtureSeries([75.3, 98.6, null, 57.6]),
       dividend_yield: fixtureSeries([0.0007, 0.0012, 0.0005, 0.00024]),
       roe: fixtureSeries([0.448, -0.165, 0.919, 1.192]),
+      // An industrial: no bank figures.
+      net_interest_income: fixtureSeries([null, null, null, null]),
+      noninterest_income: fixtureSeries([null, null, null, null]),
+      credit_loss_provision: fixtureSeries([null, null, null, null]),
+      efficiency_ratio: fixtureSeries([null, null, null, null]),
+      deposits: fixtureSeries([null, null, null, null]),
+      loans: fixtureSeries([null, null, null, null]),
+      book_value_per_share: fixtureSeries([null, null, null, null]),
       price: fixturePriceSeries(),
       ...series,
     },
@@ -171,5 +179,7 @@ export function emptySeriesSet(): CompanyFinancialsSeriesSet {
     dividends_per_share: empty(), buybacks: empty(), dividends_paid: empty(),
     cash: empty(), investments: empty(), debt: empty(), net_cash: empty(), pe_ratio: empty(), ps_ratio: empty(), pfcf_ratio: empty(),
     dividend_yield: empty(), roe: empty(), price: empty(),
+    net_interest_income: empty(), noninterest_income: empty(), credit_loss_provision: empty(),
+    efficiency_ratio: empty(), deposits: empty(), loans: empty(), book_value_per_share: empty(),
   }
 }

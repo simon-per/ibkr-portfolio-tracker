@@ -545,8 +545,9 @@ Rough priority. Re-verify each `path:line` in code before fixing; lines move.
    set) — the statements' own concepts, then the segment note, then the SIC code, then SEC's
    reviewing office (`ownerOrg`), the fund baskets' GICS never alone — and the **sector** — SIC,
    then `ownerOrg` where the SIC is a catch-all, then the baskets' GICS, then Yahoo's (held only).
-   Order of work: **(1) US**: the classification, the Company tab hiding a KPI a company does not
-   report, bank and insurer KPI sets; **(2) Europe**: ESEF annual reports from filings.xbrl.org,
+   Order of work: **(1) US** — done 2026-11-16 on the branch (classification, no card for a figure
+   a company does not report, a bank's KPI set); the insurer set waits for an insurer that tags its
+   premiums undimensioned (BRK does not); **(2) Europe**: ESEF annual reports from filings.xbrl.org,
    found by LEI (GLEIF, already cached), read through the existing IFRS twins; **(3) South Korea
    (OpenDART) and Taiwan (MOPS)**, before Japan — the owner holds more there; **(4) Japan
    (EDINET)**; **(5) the rest** (China A/H, India, the Middle East) later — no usable free
