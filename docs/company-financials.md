@@ -47,9 +47,11 @@ last, fill-only and proven against SEC — **Alpha Vantage** for an interior gap
 - `https://www.sec.gov/Archives/edgar/data/<cik>/<accession>/index.json` and the filing's
   XBRL instance beside it — *Filing instances* below — and, for a company whose own concepts are
   read, its label linkbase (`_lab.xml`, *The source waterfall*). Once per filing, ever. The
-  `index.json` endpoint answers 503 now and then (seen often on 2026-11-16, a retry a second later
-  answering 200): the client's bounded retries, then that company's reads stop for the pass and
-  resume next week.
+  `index.json` listing is EDGAR's directory service, which answered 503 to most asks for an hour
+  on 2026-11-16 while every document and every filing's `<accession>-index.htm` page answered:
+  after its bounded retries `EdgarClient.filing_index` reads that page and takes the files it
+  links in the filing's folder (`_listing`, `tests/test_edgar_filing_index.py`). Both failing,
+  that company's reads stop for the pass and resume next week.
 - `https://www.alphavantage.co/query` — `INCOME_STATEMENT`, `BALANCE_SHEET`, `CASH_FLOW`, last
   and fill-only (*The source waterfall*, *Alpha Vantage, last*), through `alpha_vantage.py` only.
 

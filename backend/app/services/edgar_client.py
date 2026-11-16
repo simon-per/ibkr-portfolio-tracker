@@ -226,8 +226,27 @@ class EdgarClient(PacedGet):
         return periodic_filings(body)
 
     async def filing_index(self, cik: int, accn: str) -> Optional[Dict[str, Any]]:
-        """One filing's list of files (`index.json`), or None when the SEC has none (404)."""
-        body = await self._get_json(filing_url(cik, accn, "index.json"))
+        """
+        One filing's list of files (`index.json`), or None when the SEC has none (404).
+
+        The JSON listing is EDGAR's directory service, which answers 503 for long spells
+        while the filings themselves are served (2026-11-16: most `index.json` asks failed
+        for an hour, every document and `-index.htm` answered). After its retries, the
+        filing's own index page (`<accession>-index.htm`) names the same files: its links,
+        in the same shape (`_listing`). Its failure raises the first error.
+        """
+        try:
+            body = await self._get_json(filing_url(cik, accn, "index.json"))
+        except EdgarError as first:
+            try:
+                page = await self._get(
+                    filing_url(cik, accn, f"{accn}-index.htm"), accept="text/html"
+                )
+            except EdgarError:
+                raise first
+            if page is None:
+                raise first
+            return _listing(page.text, cik, accn)
         if body is not None and not isinstance(body, dict):
             raise EdgarError(f"the index of filing {accn} is not an object")
         return body
@@ -243,6 +262,20 @@ class EdgarClient(PacedGet):
 #: Company tab shows (BAC, JPM, IBKR, SOFI, BRK), so neither their filings' own concepts
 #: (`company_financials_sync`) nor Alpha Vantage (`company_vendor_fill`) fill them.
 FINANCIAL_SIC = range(6000, 6412)
+
+_LINK = re.compile(r'href="/Archives/edgar/data/(\d+)/(\d+)/([^"/?#]+)"')
+
+
+def _listing(page: str, cik: int, accn: str) -> Dict[str, Any]:
+    """A filing's index page as `index.json` lists it: `{"directory": {"item": [{"name"}]}}`,
+    the files it links inside the filing's own folder."""
+    folder = accn.replace("-", "")
+    names = []
+    for link_cik, link_folder, name in _LINK.findall(page):
+        if int(link_cik) == int(cik) and link_folder == folder and name not in names:
+            names.append(name)
+    return {"directory": {"item": [{"name": n} for n in names]}}
+
 
 _FISCAL_YEAR_END = re.compile(r"(0[1-9]|1[0-2])(0[1-9]|[12]\d|3[01])")
 
