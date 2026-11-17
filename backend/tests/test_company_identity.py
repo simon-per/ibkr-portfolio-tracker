@@ -375,3 +375,20 @@ def test_display_name_is_callable_on_a_group_directly():
     """It is part of the module's surface, and `company_groups` must not be the only caller."""
     group = company_groups([IdentityMember(ref="z", isin="XX0000000003")])[0]
     assert display_name(group) == "z"
+
+
+def test_a_legal_name_stating_its_short_form_is_shown_by_it():
+    """#89: GLEIF's Italian legal names may carry their abbreviated form."""
+    from app.services.company_identity import short_legal_name
+
+    terna = (
+        "\"TERNA - RETE ELETTRICA NAZIONALE SOCIETA' PER AZIONI\" "
+        '(IN FORMA ABBREVIATA "TERNA S.P.A.")'
+    )
+    group = company_groups(
+        [IdentityMember(ref="t", isin="IT0003242622", lei="8156009E94ED54DE7C31",
+                        legal_name=terna)]
+    )[0]
+    assert display_name(group) == "TERNA S.P.A."
+    assert short_legal_name("ASML Holding N.V.") == "ASML Holding N.V."
+    assert short_legal_name("Foo S.p.A. (in forma abbreviata: FOO)") == "FOO"

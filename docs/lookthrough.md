@@ -79,7 +79,9 @@ other row is Latin — while OpenFIGI's is clean ASCII truncated to ~30 chars an
 those. So: Latin-script legal name, else FIGI name, else non-Latin legal name, else the
 highest-weight contributing row's name, else the ref. Deterministic, because a label that
 changes with sort order is this codebase's signature bug. The Latin test is codepoint-based and
-deliberately permissive about accents, so "Société Générale" keeps its own name.
+deliberately permissive about accents, so "Société Générale" keeps its own name. A legal name
+that states its own short form — Italian `(IN FORMA ABBREVIATA "TERNA S.P.A.")` — is shown by it
+(`short_legal_name`, #89).
 
 ### The partition, and why it is the only assertion that matters
 

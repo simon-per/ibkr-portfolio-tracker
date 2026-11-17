@@ -46,6 +46,7 @@ Pure: no DB, no network, no clock. Everything here is a function of its argument
 `tests/test_company_identity.py` can shuffle the input and assert the output is
 byte-identical.
 """
+import re
 from dataclasses import dataclass, field
 from decimal import Decimal
 from typing import Dict, Iterable, List, Mapping, Optional, Tuple
@@ -63,6 +64,18 @@ _NON_LATIN_START = 0x0370
 def _is_latin(text: str) -> bool:
     """True when every letter in `text` sits in a Latin block."""
     return all(ord(ch) < _NON_LATIN_START for ch in text if ch.isalpha())
+
+
+# An Italian legal name may state its own short form, which is the name the company goes by:
+# GLEIF's `"TERNA - RETE ELETTRICA NAZIONALE SOCIETA' PER AZIONI" (IN FORMA ABBREVIATA "TERNA
+# S.P.A.")` is Terna S.p.A. (#89, 2026-11-18).
+_SHORT_FORM = re.compile(r'\(\s*in\s+forma\s+abbreviata\s*:?\s*"?([^")]+?)"?\s*\)', re.IGNORECASE)
+
+
+def short_legal_name(name: str) -> str:
+    """A legal name, or the short form it states for itself."""
+    found = _SHORT_FORM.search(name)
+    return found.group(1).strip() if found and found.group(1).strip() else name
 
 
 @dataclass(frozen=True)
@@ -297,7 +310,7 @@ def display_name(group: CompanyGroup) -> str:
 
     latin_legal = next(
         (
-            (m.legal_name or "").strip()
+            short_legal_name((m.legal_name or "").strip())
             for m in ordered
             if (m.legal_name or "").strip() and _is_latin(m.legal_name)
         ),

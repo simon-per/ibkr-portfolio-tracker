@@ -172,8 +172,9 @@ class EuropeFinancialsSync:
         company = await self.repo.ensure_other_company(
             LEI_SCHEME, named.lei, ticker=named.ticker, isin=isin, country=isin[:2]
         )
-        if company.name is None:
-            company.name = named.name
+        # The look-through's name, as the tab shows it everywhere else: it follows a better
+        # name there (a GLEIF short form, #89).
+        company.name = named.name or company.name
         await self.db.commit()
         return company
 
