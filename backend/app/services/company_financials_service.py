@@ -626,10 +626,20 @@ def _with_roe(points: List[Point], rows: Sequence[CompanyFinancial], period: str
         p.series["roe"] = _ratio(income.get(p.period_end), mean)
 
 
+#: What makes a filer a quarterly reporter: a quarter's own statement figure. A dividend per
+#: share declared each quarter does not — TSMC's 20-F tags its quarterly dividends, and TSMC
+#: files no quarterly statements this reads (2026-11-17: its key figures were blank).
+QUARTER_WITNESSES = ("revenue", "net_income", "operating_cash_flow")
+
+
+def _reports_quarters(quarterly: Sequence[Point]) -> bool:
+    return any(p.base.get(m) is not None for p in quarterly for m in QUARTER_WITNESSES)
+
+
 def _series_points(rows: Sequence[CompanyFinancial], period: str) -> List[Point]:
     """Every period of `period`, oldest first, with its derived series."""
     quarterly = _points(rows, annual=False) if period != "annual" else []
-    if period == "annual" or (period == "ttm" and not quarterly):
+    if period == "annual" or (period == "ttm" and not _reports_quarters(quarterly)):
         # A filer of annual reports only (a 20-F, review item R6): each fiscal year is its
         # own trailing twelve months, so TTM — and the key figures — read the years.
         points = _points(rows, annual=True)

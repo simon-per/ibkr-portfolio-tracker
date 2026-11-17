@@ -174,3 +174,26 @@ def test_an_annual_filers_ttm_and_key_figures_are_its_years():
     assert stats["period_end"] == date(2024, 12, 31).isoformat()
     # A quarterly view has no quarters to show, and says nothing rather than repeating years.
     assert build_series(rows, "quarterly", "max")["revenue"]["points"] == []
+
+
+def test_quarterly_dividends_alone_do_not_make_an_annual_filer_quarterly():
+    # TSMC's 20-F tags each quarter's dividend per share and no quarterly statement.
+    rows = _stored(NU) + [
+        CompanyFinancial(
+            cik=1,
+            fetched_at=utcnow(),
+            period_end=date(2024, m, 30 if m in (6, 9) else 31),
+            fiscal_year=2024,
+            fiscal_period=f"Q{m // 3}",
+            metric="dividends_per_share",
+            value=4.5,
+            unit="USD/shares",
+            source_concept="DividendsRecognisedAsDistributionsToOwnersPerShare",
+            filed=date(2025, 4, 1),
+        )
+        for m in (3, 6, 9, 12)
+    ]
+    stats = key_stats(rows)
+    assert (stats["label"], stats["revenue"]) == ("FY2024", 11.5e9)
+    ttm = build_series(rows, "ttm", "max")["revenue"]["points"]
+    assert [p["label"] for p in ttm] == ["FY2023", "FY2024"]
