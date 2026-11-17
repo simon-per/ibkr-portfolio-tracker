@@ -330,12 +330,19 @@ COMPANY_FILINGS_CHECK_DAYS = 'mon-sat'
 # job; nothing else Yahoo runs on a Sunday, and the hour is already guarded.
 COMPANY_PRICES_REFRESH_HOUR = COMPANY_FINANCIALS_REFRESH_HOUR
 COMPANY_PRICES_REFRESH_DAYS = COMPANY_FINANCIALS_REFRESH_DAYS
+# The other regulators' figures (docs/company-financials.md, *Markets beyond the SEC*):
+# OpenDART's Korean reports, weekly, at the EDGAR pass's hour — already in ALL_SYNC_HOURS, so
+# the deploy guard covers it — each market under its own gate (`dart_sync.DART_GATE`), since
+# none shares an upstream with EDGAR, Yahoo or IBKR.
+COMPANY_MARKETS_REFRESH_HOUR = COMPANY_FINANCIALS_REFRESH_HOUR
+COMPANY_MARKETS_REFRESH_DAYS = COMPANY_FINANCIALS_REFRESH_DAYS
 
 # Every hour at which anything is registered, and so what the deploy guard is checked
 # against. Not the same thing as PORTFOLIO_SYNC_HOURS since the upkeep slots exist.
 ALL_SYNC_HOURS = tuple(sorted({
     *PORTFOLIO_SYNC_HOURS, WATCHLIST_REFRESH_HOUR, FUNDAMENTALS_REFRESH_HOUR,
     COMPANY_FINANCIALS_REFRESH_HOUR, COMPANY_FILINGS_CHECK_HOUR, COMPANY_PRICES_REFRESH_HOUR,
+    COMPANY_MARKETS_REFRESH_HOUR,
 }))
 
 # The crypto sync (docs/crypto.md) rides the portfolio's eight slots **by derivation,
@@ -1985,17 +1992,45 @@ class SchedulerService:
         )
 
     async def _edgar_job(self, sync_type: str, result_key: str, label: str, run) -> dict:
-        """One EDGAR job under `EDGAR_GATE`: `run(CompanyFinancialsSync)`'s summary as a
-        `sync_runs` row under `sync_type`, its body under `result_key`, its warnings
-        lifted. Busy is `skipped`; a crash is `error`, never raised to the scheduler."""
+        """One EDGAR job under `EDGAR_GATE`: `run(CompanyFinancialsSync)` through
+        `_company_job`."""
         from app.services.company_financials_sync import EDGAR_GATE, CompanyFinancialsSync
 
+        return await self._company_job(
+            EDGAR_GATE, sync_type, result_key, label,
+            lambda db: run(CompanyFinancialsSync(db)),
+        )
+
+    async def company_markets_refresh_job(self) -> dict:
+        """
+        The other regulators' passes (docs/company-financials.md, *Markets beyond the SEC*),
+        at COMPANY_MARKETS_REFRESH_HOUR on COMPANY_MARKETS_REFRESH_DAYS: OpenDART's Korean
+        reports (`dart_sync.KoreaFinancialsSync`), under `DART_GATE`, with their own
+        `sync_runs` row (`company_dart_refresh`). Without a key the pass records nothing.
+        """
+        from app.services import dart_sync
+
+        return await self._company_job(
+            dart_sync.DART_GATE, dart_sync.SCHEDULED_SYNC_TYPE, dart_sync.RESULT_KEY,
+            "Korean company financials refresh",
+            lambda db: dart_sync.KoreaFinancialsSync(db).refresh(),
+        )
+
+    async def _company_job(
+        self, gate: str, sync_type: str, result_key: str, label: str, run
+    ) -> dict:
+        """One company-figures job under `gate`: `run(db)`'s summary as a `sync_runs` row
+        under `sync_type`, its body under `result_key`, its warnings lifted. A summary of
+        None (a source without its key) records nothing. Busy is `skipped`; a crash is
+        `error`, never raised to the scheduler."""
         started_at = utcnow()
         result = {"type": sync_type, "timestamp": utc_iso(started_at)}
         try:
-            with single_flight(EDGAR_GATE):
+            with single_flight(gate):
                 async with AsyncSessionLocal() as db:
-                    summary = await run(CompanyFinancialsSync(db))
+                    summary = await run(db)
+            if summary is None:
+                return {**result, "status": "skipped", "message": "not configured"}
         except SyncBusy as e:
             result.update(status="skipped", reason="busy", message=str(e))
         except Exception as e:
@@ -2439,6 +2474,17 @@ class SchedulerService:
             f'Europe/Berlin)',
             group=UPKEEP_JOB_GROUP,
         )
+        # The other regulators' figures — see COMPANY_MARKETS_REFRESH_HOUR.
+        self._add_or_keep(
+            'company_markets_refresh', company_markets_refresh_job_entry,
+            CronTrigger(
+                day_of_week=COMPANY_MARKETS_REFRESH_DAYS,
+                hour=COMPANY_MARKETS_REFRESH_HOUR, minute=0, timezone='Europe/Berlin',
+            ),
+            f'Company Markets Refresh (Sun {COMPANY_MARKETS_REFRESH_HOUR:02d}:00 '
+            f'Europe/Berlin)',
+            group=UPKEEP_JOB_GROUP,
+        )
         # Their weekly closes from Yahoo — see COMPANY_PRICES_REFRESH_HOUR.
         self._add_or_keep(
             'company_prices_refresh', company_prices_refresh_job_entry,
@@ -2586,6 +2632,10 @@ async def company_financials_refresh_job_entry() -> dict:
 
 async def company_filings_check_job_entry() -> dict:
     return await get_scheduler().company_filings_check_job()
+
+
+async def company_markets_refresh_job_entry() -> dict:
+    return await get_scheduler().company_markets_refresh_job()
 
 
 async def company_prices_refresh_job_entry() -> Optional[dict]:

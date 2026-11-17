@@ -1201,26 +1201,106 @@ industrial's cash & debt (a bank's deposits and borrowing are its business, not 
   where a single count exists. An insurer set (premiums earned, losses and expenses over premiums)
   waits for an insurer that tags them.
 
-## Markets beyond the SEC (planned, owner 2026-11-16)
+## Markets beyond the SEC
 
-Today a company has a page only if it files with the SEC (US filers, and foreign filers of a 20-F
-through their US listing: ASML, TSMC, NU, BABA, PDD, ARM). Xetra, Euronext and SIX listings, and the
-look-through's non-US companies, have none. The plan keeps this page's rule — **the company's own
-regulator first**, every other source a fill-only fallback — market by market, in the owner's order:
+Owner, 2026-11-16: **the company's own regulator first**, every other source fill-only, market by
+market in the order SEC widening (*Scope*), South Korea, Europe; Japan, Taiwan and the rest later.
+South Korea built 2026-11-17; Europe (ESEF annual reports by LEI, filings.xbrl.org) next.
+A company of another regulator is a `companies` row keyed `dart:<corp_code>` or
+`lei:<LEI>` (*One key for every regulator's company*) and gets **no Yahoo request** (owner): no
+closes, so its P/E, market cap and every multiple stay blank, and the page shows its figures in its
+reporting currency.
 
-| order | market | the regulator's source | what it gives | notes |
-|---|---|---|---|---|
-| 1 | EU, UK | ESEF annual reports, collected at filings.xbrl.org, found by **LEI** | every EU-listed annual report since 2021 in iXBRL, `ifrs-full`; half-years only where filed voluntarily | read through `IFRS_TWINS` as a 20-F is; ISIN → LEI from GLEIF, which the identity pass already caches; annual figures, so TTM is the fiscal year |
-| 2 | South Korea | OpenDART (the FSS), free key | structured statements, quarterly, K-IFRS; a Korean industry code | |
-| 2 | Taiwan | MOPS (the TWSE's filing system) | XBRL, no official API | fragile; TSMC is already a 20-F filer |
-| 3 | Japan | EDINET (the FSA), free key | XBRL for every listed company, J-GAAP or IFRS; the TSE's 33 sectors | needs a J-GAAP concept map |
-| later | China A/H, India, Middle East | CNINFO/HKEX, NSE/BSE/MCA21, Tadawul | no usable free structured source today | their US ADR filers only |
+**One path for every market** (`company_markets`, `regulator_facts`):
 
-Switzerland's SIX issuers are outside ESEF; only those that file voluntarily would have figures.
-Every figure stays in the company's reporting currency (*Why the reporting currency*), each source is
-a new upstream with its own bounded budget, and Alpha Vantage's free statements are effectively
-US-only. Classification works for the non-US companies before their figures do: with no SEC data
-they fall through to the fund baskets' GICS sector (STATUS.md, *Worth doing next* 7).
+- **Scope** — `company_markets.named_companies`: the companies the app names, the look-through's
+  heaviest `NAMED_LOOKTHROUGH` (200) and every held listing, each with every ISIN it is known by
+  and its LEI (the look-through's key, else the identity store's GLEIF answer). A company with an
+  SEC page keeps it (`sec_isins`: a 20-F is its own annual report).
+- **No second parser of figures.** Each source's converter only moves values into companyfacts'
+  shape — an `ifrs-full` concept, a unit, a real start and end, the report's id as the accession,
+  its filing date and a form (`REGULATOR_ANNUAL`, `REGULATOR_INTERIM`, read by the normaliser as a
+  10-K and a 10-Q) — and the one normaliser reads them under `IFRS_TWINS`, every chain, ladder and
+  vote unchanged (`regulator_facts.normalise_reports`). Within a report two different values for
+  one concept and period leave the period out whole, never one picked (`one_value_each`: a second
+  share class's EPS, as Berkshire's). Every row's `source_concept` names the source and the
+  report's own tag (`dart:ifrs-full_Revenue`, `dart:dart_OperatingIncomeLoss`).
+- **Once per report** — `company_reports` (company, report id): `read` keeps the converted facts
+  and is never asked again; every rewrite of the company's figures normalises all its stored
+  reports at once (`replace_company_rows`, the one figure write). A rewrite that yields no figure
+  writes nothing.
+- **Schedule** — job `company_markets_refresh`, Sunday 05:00 Berlin (`COMPANY_MARKETS_REFRESH_HOUR`
+  = the EDGAR pass's hour, already in `ALL_SYNC_HOURS`): the Korean pass under its own gate
+  (`DART_GATE` "opendart") with its own `sync_runs` row (`company_dart_refresh`). By hand:
+  `app/cli/fetch_company_markets.py --source dart [--dry-run] [--force]` (row
+  `manual_company_dart_fetch`); `--force` re-asks what held nothing,
+  never a report already read.
+- **Listing** — the tab lists a scheme's companies stamped by its newest pass
+  (`universe_seen_at`); a held listing links to its company through its ISIN (`isins` on the list
+  response), a Korean preferred share through `dart_corp_codes`.
+
+### South Korea (OpenDART)
+
+`opendart_client`, `dart_reports`, `dart_sync.KoreaFinancialsSync`. **Without
+`OPENDART_API_KEY`** the pass makes no request and records nothing, as the Alpha Vantage fill does
+without its key.
+
+- **Scope**: a named company with a Korean ISIN and no SEC page. The KRX ISIN carries the issuer's
+  five digits and a share-class digit (`KR7` + `00593` + `0` common, `1` preferred + …), so every
+  class leads to its common share's stock code (`005930`), which `corpCode.xml` (a 3.6 MB zip of
+  every filer) maps to OpenDART's `corp_code`. The zip is asked only for a listing with no answer on
+  record (`dart_corp_codes`, by ISIN; a miss re-asked after 30 days). Samsung's preferred share
+  (KR7005931001, traded as 005935) is therefore the same company, 00126380, and both held listings
+  open one page.
+- **Reports**: `fnlttSinglAcntAll`, consolidated (`fs_div=CFS`), every report since 2015 —
+  `11013` Q1, `11012` half year, `11014` Q3, `11011` the annual business report — asked once its
+  period ended 14 days ago. The lines carry no dates; they are the report's, by statement
+  (`dart_reports._spans`): the balance sheet at the period end and the prior year end; the income
+  statement's quarter, year to date and the same a year before; the cash flow statement's year to
+  date. So the normaliser's year-to-date ladder derives Q4 (annual less nine months) as for a 10-K.
+  A report that answered "no data" (`013`) is asked again at most weekly while its period is
+  younger than 400 days, then never. The statement of changes in equity is not read.
+- **Lines**: `ifrs-full_*` under its IFRS concept; OpenDART's `dart_OperatingIncomeLoss` (the
+  operating profit K-IFRS requires every Korean filer to present) as `ProfitLossFromOperating
+  Activities` only where the report tags no IFRS operating profit; any other `dart_*` line not read;
+  a line marked non-standard (`-표준계정코드 미사용-`) skipped and counted (`non_standard`).
+- **Samsung's two classes**: OpenDART's statements carry one EPS line, per share of either class
+  (the preferred share earns the same), so diluted shares derived from it (profit / EPS, about 6.79
+  billion for 2024) count both classes. A report stating two EPS values for one period would leave
+  the period out (`one_value_each`).
+- **Refused whole**: a fiscal year not ending in December (OpenDART names a non-calendar year by a
+  business year this cannot date without a guess) — a warning naming the company, nothing read.
+  OpenDART refusing the key, the IP or the day's budget (`010`–`012`, `020`, `021`, `901`) stops the
+  pass; maintenance (`800`) and transport failures are retried twice, then that company keeps its
+  figures until the next pass.
+- **Classification**: the profile (`company.json`, at most monthly) gives the KSIC `induty_code`,
+  translated division by division (`KSIC_SECTORS`, `ksic_model`), first in both chains; then the
+  baskets' GICS. Samsung 264 and SK Hynix 2612 are Technology, industrial.
+- **The key** travels in the query string (`crtfc_key`): `_scrub` keeps it out of every message
+  and exception, `app/redact.py` masks it besides, and the CLI quiets httpx's URL logging.
+- **Budget**: OpenDART allows 20,000 requests a day. **First fill**, measured 2026-11-17 on a
+  production snapshot (Samsung, SK Hynix): 47 reports a company (2015–Q3 2026; 2015's three interim
+  reports answer "no data"), one `corpCode.xml`, two profiles — about 97 requests over two runs,
+  88 reports read (2,067 and 1,463 non-standard lines skipped), 515 and 499 rows. About 13 s a
+  request from a European machine (OpenDART is slow abroad), so the first fill runs ~20 minutes;
+  bounded by `REPORTS_PER_COMPANY` (60) and `PASS_REQUEST_CAP` (2,000). **Steady state**: four
+  reports a company a year, each asked once it is due and then weekly until filed (Korean filers have
+  45 days for a quarter, 90 for the year: a handful of asks a report), plus a profile a month — tens
+  of requests a company a year.
+- **Checked against the filings** (2026-11-17, FY2024 annual reports): Samsung revenue
+  300,870,903 million KRW, operating profit 32,725,961 million, profit to owners 33,621,363
+  million, diluted EPS 4,950 KRW; SK Hynix revenue 66,192,960 million, operating profit 23,467,319
+  million — all as stored. Q4 2024 revenue (Samsung) 75,788,269 million = the year less nine months.
+
+
+### Not yet
+
+| order | market | the regulator's source | notes |
+|---|---|---|---|
+| next | EU, UK | ESEF annual reports at filings.xbrl.org, by LEI | annual, `ifrs-full`; TTM = the fiscal year |
+| then | Japan | EDINET (the FSA), free key | XBRL for every listed company, J-GAAP or IFRS; needs a J-GAAP concept map |
+| next | Taiwan | MOPS (the TWSE's filing system) | XBRL, no official API; TSMC already has a page through its 20-F |
+| later | China A/H, India, Middle East | CNINFO/HKEX, NSE/BSE/MCA21, Tadawul | no usable free structured source today; their US ADR filers only |
 
 ## Known gaps and out of scope
 

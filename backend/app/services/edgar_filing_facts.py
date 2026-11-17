@@ -35,13 +35,15 @@ from datetime import date, timedelta
 from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
 
 from app.services.company_financials_normaliser import (
-    FORMS,
     IFRS_TWINS,
     METRICS,
     SEGMENT_DEBT,
     SEGMENT_WITNESSES,
 )
 from app.services.edgar_client import ANNUAL_FORM_PREFIXES
+# A filing on EDGAR: the SEC's periodic forms only (the normaliser's `FORMS` also takes the
+# other regulators' reports).
+from app.services.edgar_client import PERIODIC_FORMS as FORMS
 
 #: The concepts read from a filing on a dimension member: the dividend-per-share chain on
 #: `MEMBERS`, the diluted EPS chain on `EPS_MEMBERS`, nothing else.

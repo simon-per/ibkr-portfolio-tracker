@@ -300,7 +300,12 @@ def test_one_set_of_periodic_forms():
 
     from app.services import company_financials_normaliser, edgar_client, edgar_filing_facts
 
-    assert company_financials_normaliser.FORMS is edgar_client.PERIODIC_FORMS
+    # The normaliser reads the SEC's one set and, since 2026-11-17, the other regulators'
+    # annual and interim reports (OpenDART, ESEF) — named once, beside it.
+    assert company_financials_normaliser.FORMS == edgar_client.PERIODIC_FORMS | {
+        company_financials_normaliser.REGULATOR_ANNUAL,
+        company_financials_normaliser.REGULATOR_INTERIM,
+    }
     assert edgar_filing_facts.FORMS is edgar_client.PERIODIC_FORMS
     assert "10-QT" in edgar_client.PERIODIC_FORMS
 

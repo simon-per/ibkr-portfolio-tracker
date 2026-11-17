@@ -35,6 +35,8 @@ from app.models.security_logo import SecurityLogo
 from app.models.company_financials import (
     Company,
     CompanyFinancial,
+    CompanyReport,
+    DartCorpCode,
     CompanyPrice,
     CompanySplit,
     CompanyYahooProfile,
@@ -52,6 +54,8 @@ from app.models.crypto import (
 
 __all__ = [
     "Company",
+    "CompanyReport",
+    "DartCorpCode",
     "VendorStatement",
     "Security",
     "TaxLot",

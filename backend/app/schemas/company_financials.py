@@ -34,6 +34,10 @@ class CompanyFinancialsCompany(BaseModel):
     symbol: str
     name: str
     isin: Optional[str] = Field(None, description="For the logo.")
+    isins: List[str] = Field(
+        default_factory=list,
+        description="Every ISIN the company is known by (a preferred share's too).",
+    )
     held: bool = Field(
         ..., description="Whether the account holds any listing of the company."
     )

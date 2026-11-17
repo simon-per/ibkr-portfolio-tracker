@@ -534,6 +534,7 @@ def _declared_job_ids() -> set:
         'company_financials_refresh',
         'company_filings_check',
         'company_prices_refresh',
+        'company_markets_refresh',
     }
 
 
@@ -1503,7 +1504,7 @@ async def test_the_watchlist_refresh_has_a_slot_of_its_own(jobstore_url):
         upkeep = {j.id: j for j in svc.jobs_in_group(UPKEEP_JOB_GROUP)}
         assert set(upkeep) == {
             'watchlist_refresh', 'fundamentals_refresh', 'company_financials_refresh',
-            'company_filings_check', 'company_prices_refresh',
+            'company_filings_check', 'company_prices_refresh', 'company_markets_refresh',
         }
         # The weekday check covers the days the weekly pass does not, at its hour.
         check = str(upkeep['company_filings_check'].trigger)

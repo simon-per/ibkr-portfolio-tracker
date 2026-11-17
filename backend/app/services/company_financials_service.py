@@ -987,8 +987,32 @@ class CompanyFinancialsService:
             )
         return listed, members
 
-    async def _linked_listings(
+    async def _company_isins(
         self, listed: Sequence[Any], members: Dict[int, List[Security]]
+    ) -> Dict[str, List[str]]:
+        """
+        Company key -> every ISIN it is known by: its own, its CIK-mapped held listings', and
+        for a Korean company every stock code OpenDART answered for it (`dart_corp_codes`: a
+        preferred share takes its common share's company, Samsung's 005935).
+        """
+        dart = {}
+        if any(getattr(c, "scheme", None) == "dart" for c in listed):
+            for row in (await self.repo.dart_codes()).values():
+                if row.corp_code and row.isin:
+                    dart.setdefault(row.corp_code, set()).add(row.isin.strip().upper())
+        out: Dict[str, List[str]] = {}
+        for company in listed:
+            isins = {company.isin} | {s.isin for s in members.get(company.cik, [])}
+            if getattr(company, "scheme", None) == "dart":
+                isins |= dart.get(company.native_id, set())
+            out[company.key] = sorted({i.strip().upper() for i in isins if i})
+        return out
+
+    async def _linked_listings(
+        self,
+        listed: Sequence[Any],
+        members: Dict[int, List[Security]],
+        isins_of: Dict[str, List[str]],
     ) -> Dict[str, List[int]]:
         """
         Company key -> every held listing of it: an SEC filer's listings mapped to its CIK,
@@ -1012,8 +1036,7 @@ class CompanyFinancialsService:
             if s.isin
         ]
         for company in listed:
-            isins = {company.isin} | {s.isin for s in members.get(company.cik, [])}
-            for isin in sorted(i for i in isins if i):
+            for isin in isins_of.get(company.key, []):
                 idents.append(
                     IdentityMember(
                         ref=f"company:{company.key}|{isin}", isin=isin, fallback_name=isin
@@ -1054,7 +1077,8 @@ class CompanyFinancialsService:
         listed, members = await self._listed()
         listings = {cik: held_listings[0] for cik, held_listings in members.items()}
         coverage = await self.repo.coverage_of(listed)
-        linked = await self._linked_listings(listed, members)
+        isins_of = await self._company_isins(listed, members)
+        linked = await self._linked_listings(listed, members, isins_of)
         out = []
         for company in listed:
             cov = coverage.get(company.key)
@@ -1068,6 +1092,9 @@ class CompanyFinancialsService:
                     # both Alphabet, 2330 is TSMC) can link to the company.
                     "security_ids": ids,
                     "held": bool(ids),
+                    # Every ISIN it is known by, so a row of any links (Samsung's
+                    # preferred share).
+                    "isins": isins_of.get(company.key, []),
                     "currency": cov["currency"],
                     "first_period_end": cov["first"].isoformat()
                     if cov["first"]
@@ -1290,6 +1317,9 @@ class CompanyFinancialsService:
             company.owner_org,
             gics=gics,
             yahoo=listing.sector if listing is not None else None,
+            ksic=getattr(company, "industry_code", None)
+            if getattr(company, "scheme", None) == "dart"
+            else None,
         )
 
     async def dividend_track(self) -> Dict[int, Dict[str, Any]]:

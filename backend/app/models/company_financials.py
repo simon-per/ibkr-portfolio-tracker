@@ -248,6 +248,58 @@ class SecurityCik(Base):
         return f"<SecurityCik security_id={self.security_id} cik={self.cik}>"
 
 
+class CompanyReport(Base):
+    """
+    One report of another regulator than the SEC, read once ever (docs/company-financials.md,
+    *Markets beyond the SEC*): an OpenDART periodic report (`report_id` `2024-11011`, its
+    business year and report code) or an ESEF filing (its filings.xbrl.org id). `status`
+    `read` keeps what it held — `facts` (companyfacts-shaped, `regulator_facts`) and `tagged`
+    (each IFRS concept's own name in the report) — and is never asked again; `none` is an
+    answer with nothing in it, asked again only while the period is recent. Every rewrite of
+    the company's figures normalises all its stored reports at once.
+    """
+
+    __tablename__ = "company_reports"
+
+    company_id: Mapped[int] = mapped_column(
+        ForeignKey("companies.id", ondelete="CASCADE"), primary_key=True
+    )
+    report_id: Mapped[str] = mapped_column(String(80), primary_key=True)
+    period_end: Mapped[Optional[date]] = mapped_column(Date, nullable=True)
+    # The regulator's own id of the filing (OpenDART's receipt number, ESEF's package id).
+    accn: Mapped[Optional[str]] = mapped_column(String(80), nullable=True)
+    filed: Mapped[Optional[date]] = mapped_column(Date, nullable=True)
+    status: Mapped[str] = mapped_column(String(8), nullable=False)
+    facts: Mapped[list] = mapped_column(JSON, nullable=False)
+    tagged: Mapped[dict] = mapped_column(JSON, nullable=False)
+    # Lines the report marks non-standard (no standard concept), skipped and counted.
+    non_standard: Mapped[int] = mapped_column(Integer, nullable=False, server_default="0")
+    read_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+
+    def __repr__(self) -> str:
+        return f"<CompanyReport {self.company_id} {self.report_id} {self.status}>"
+
+
+class DartCorpCode(Base):
+    """
+    A Korean listing (by ISIN) and OpenDART's company for it (`corpCode.xml`, by the common
+    share's stock code), so the zip is asked only for a listing with no answer on record: the
+    `sec_tickers` pattern. A NULL `corp_code` means OpenDART lists no such code; asked again
+    after `dart_sync.CORP_CODES_RECHECK_AFTER`. A preferred share's row carries its common
+    share's code, so its ISIN links to the company's page (Samsung's KR7005931001).
+    """
+
+    __tablename__ = "dart_corp_codes"
+
+    isin: Mapped[str] = mapped_column(String(12), primary_key=True)
+    stock_code: Mapped[str] = mapped_column(String(6), nullable=False)
+    corp_code: Mapped[Optional[str]] = mapped_column(String(8), nullable=True, index=True)
+    checked_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+
+    def __repr__(self) -> str:
+        return f"<DartCorpCode {self.isin} {self.stock_code} -> {self.corp_code}>"
+
+
 class CompanyFinancial(Base):
     """
     One normalised figure: a discrete fiscal quarter (Q1-Q4) or a fiscal year (FY) of one

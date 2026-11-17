@@ -386,8 +386,14 @@ SHARE_COUNT_SLIPS: Tuple[Fraction, ...] = (
 ANNUAL = "FY"
 QUARTERS = ("Q1", "Q2", "Q3", "Q4")
 
-#: Forms whose facts count: `edgar_client.PERIODIC_FORMS`, the one set.
-FORMS = PERIODIC_FORMS
+#: Another regulator's reports, as `regulator_facts` names them: an annual report (OpenDART's
+#: business report, an ESEF annual financial report) and an interim one (a quarter or a half).
+#: They count like a 10-K and a 10-Q.
+REGULATOR_ANNUAL = "annual report"
+REGULATOR_INTERIM = "interim report"
+#: Forms whose facts count: `edgar_client.PERIODIC_FORMS`, the one set, and the other
+#: regulators' two.
+FORMS = PERIODIC_FORMS | {REGULATOR_ANNUAL, REGULATOR_INTERIM}
 # A concept named like a current investment (`_unchained_investments`): marketable or
 # held-to-maturity securities, available-for-sale or debt securities, or investments,
 # classified current. Restricted balances are not liquid.
@@ -1653,7 +1659,7 @@ def _latest(
     every: Dict[Tuple[str, Optional[date], date], Dict[date, Fact]] = defaultdict(dict)
     for f in facts:
         key = (f.concept, f.start, f.end)
-        if f.form.startswith(ANNUAL_FORM_PREFIXES):
+        if f.form.startswith(ANNUAL_FORM_PREFIXES) or f.form == REGULATOR_ANNUAL:
             annual_form[key] = True
         held = chosen.get(key)
         if held is None or (f.filed, f.accn) > (held.filed, held.accn):

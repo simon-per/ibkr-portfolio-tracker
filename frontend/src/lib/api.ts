@@ -1630,6 +1630,8 @@ export interface CompanyFinancialsCompany {
   name: string;
   /** For the logo of a company not held. */
   isin: string | null;
+  /** Every ISIN the company is known by (a preferred share's too); a row of any links. */
+  isins?: string[];
   held: boolean;
   /** The filings' reporting currency; every money figure for the company is in it. */
   currency: string;

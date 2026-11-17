@@ -34,8 +34,10 @@ export function companyLinks(companies: readonly CompanyFinancialsCompany[]): Co
     if (company.security_id != null && !bySecurity.has(company.security_id)) {
       bySecurity.set(company.security_id, company.key)
     }
-    const isin = company.isin?.trim().toUpperCase()
-    if (isin && !byIsin.has(isin)) byIsin.set(isin, company.key)
+    for (const code of [company.isin, ...(company.isins ?? [])]) {
+      const isin = code?.trim().toUpperCase()
+      if (isin && !byIsin.has(isin)) byIsin.set(isin, company.key)
+    }
     const ticker = company.symbol.trim().toUpperCase()
     if (ticker && !byTicker.has(ticker)) byTicker.set(ticker, company.key)
   }

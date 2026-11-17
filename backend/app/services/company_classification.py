@@ -31,6 +31,11 @@ and operating margin mean nothing for a bank, whose balance sheet is lending and
 4. **Yahoo's sector** of a held listing (`securities.sector`).
 5. `Unknown`.
 
+**Beyond the SEC** (2026-11-17) the company's own regulator's code comes first in both chains:
+a Korean company's KSIC code from OpenDART (`induty_code`), translated division by division by
+`KSIC_SECTORS` and `ksic_model` (banking and brokerage a bank, insurance an insurer). An ESEF
+report states no industry, so a European company falls to the baskets' GICS.
+
 SEC first is the owner's choice and has a known cost: Alphabet and Meta are SIC 7370 (computer
 programming), so Technology here where the Look-through, voting the baskets' GICS, says
 Communications. A higher source disagreeing with a lower one is recorded (`conflicts`), never
@@ -50,6 +55,7 @@ MODELS = (INDUSTRIAL, BANK, INSURER)
 DEFAULT = INDUSTRIAL
 
 STATEMENTS = "statements"
+KSIC = "ksic"
 SIC = "sic"
 OFFICE = "sec_office"
 GICS = "gics"
@@ -270,6 +276,139 @@ def office_sector(owner_org: Optional[str]) -> Optional[str]:
     return OFFICE_SECTORS.get(_office(owner_org))
 
 
+# ── Korea's standard industrial classification (KSIC, 10th revision) ─────────
+
+#: KSIC's divisions and the groups carved out of them, translated into the app's sectors as
+#: `SIC_SECTORS` translates SEC's list: (code prefix, sector, the standard's name). The longest
+#: prefix wins. A translation of the published standard (kssc.kostat.go.kr), never of a company.
+KSIC_SECTORS: Tuple[Tuple[str, str, str], ...] = (
+    ("01", "Consumer Defensive", "Agriculture"),
+    ("02", "Basic Materials", "Forestry"),
+    ("03", "Consumer Defensive", "Fishing"),
+    ("05", "Energy", "Mining of coal"),
+    ("06", "Energy", "Extraction of crude petroleum and natural gas"),
+    ("07", "Basic Materials", "Mining of metal ores"),
+    ("08", "Basic Materials", "Mining of non-metallic minerals"),
+    ("10", "Consumer Defensive", "Manufacture of food products"),
+    ("11", "Consumer Defensive", "Manufacture of beverages"),
+    ("12", "Consumer Defensive", "Manufacture of tobacco products"),
+    ("13", "Consumer Cyclical", "Manufacture of textiles"),
+    ("14", "Consumer Cyclical", "Manufacture of wearing apparel"),
+    ("15", "Consumer Cyclical", "Manufacture of leather and footwear"),
+    ("16", "Basic Materials", "Manufacture of wood products"),
+    ("17", "Basic Materials", "Manufacture of pulp and paper"),
+    ("18", "Industrials", "Printing and reproduction of recorded media"),
+    ("19", "Energy", "Manufacture of coke and refined petroleum products"),
+    ("20", "Basic Materials", "Manufacture of chemicals"),
+    ("21", "Healthcare", "Manufacture of pharmaceuticals"),
+    ("22", "Basic Materials", "Manufacture of rubber and plastic products"),
+    ("23", "Basic Materials", "Manufacture of non-metallic mineral products"),
+    ("24", "Basic Materials", "Manufacture of basic metals"),
+    ("25", "Industrials", "Manufacture of fabricated metal products"),
+    ("26", "Technology", "Manufacture of electronic components, computers and communication equipment"),
+    ("261", "Technology", "Manufacture of semiconductors"),
+    ("262", "Technology", "Manufacture of electronic components"),
+    ("263", "Technology", "Manufacture of computers and peripheral equipment"),
+    ("264", "Technology", "Manufacture of telecommunication and broadcasting apparatuses"),
+    ("265", "Consumer Cyclical", "Manufacture of video and audio equipment"),
+    ("27", "Technology", "Manufacture of medical, precision and optical instruments"),
+    ("271", "Healthcare", "Manufacture of medical and dental equipment"),
+    ("274", "Consumer Cyclical", "Manufacture of watches and clocks"),
+    ("28", "Industrials", "Manufacture of electrical equipment"),
+    ("29", "Industrials", "Manufacture of other machinery and equipment"),
+    ("30", "Consumer Cyclical", "Manufacture of motor vehicles and trailers"),
+    ("31", "Industrials", "Manufacture of other transport equipment"),
+    ("32", "Consumer Cyclical", "Manufacture of furniture"),
+    ("33", "Consumer Cyclical", "Other manufacturing"),
+    ("34", "Industrials", "Repair of industrial machinery"),
+    ("35", "Utilities", "Electricity, gas, steam and air conditioning supply"),
+    ("36", "Utilities", "Water supply"),
+    ("37", "Industrials", "Sewage and waste treatment"),
+    ("38", "Industrials", "Waste collection and materials recovery"),
+    ("39", "Industrials", "Remediation activities"),
+    ("41", "Industrials", "General construction"),
+    ("42", "Industrials", "Specialized construction"),
+    ("45", "Consumer Cyclical", "Sale of motor vehicles and parts"),
+    ("46", "Industrials", "Wholesale trade"),
+    ("47", "Consumer Cyclical", "Retail trade"),
+    ("49", "Industrials", "Land transport"),
+    ("50", "Industrials", "Water transport"),
+    ("51", "Industrials", "Air transport"),
+    ("52", "Industrials", "Warehousing and transport support"),
+    ("55", "Consumer Cyclical", "Accommodation"),
+    ("56", "Consumer Cyclical", "Food and beverage service"),
+    ("58", "Communications", "Publishing"),
+    ("582", "Technology", "Software publishing"),
+    ("59", "Communications", "Motion picture, video and audio production"),
+    ("60", "Communications", "Broadcasting"),
+    ("61", "Communications", "Telecommunications"),
+    ("62", "Technology", "Computer programming, consultancy and related activities"),
+    ("63", "Technology", "Information service activities"),
+    ("64", "Financials", "Financial service activities"),
+    ("65", "Financials", "Insurance and pension funding"),
+    ("66", "Financials", "Activities auxiliary to financial services"),
+    ("68", "Real Estate", "Real estate activities"),
+    ("70", "Industrials", "Research and development"),
+    ("71", "Industrials", "Professional services"),
+    ("72", "Industrials", "Architectural and engineering services"),
+    ("73", "Industrials", "Other scientific and technical services"),
+    ("74", "Industrials", "Business facilities management and landscape services"),
+    ("75", "Industrials", "Business support services"),
+    ("76", "Industrials", "Rental and leasing"),
+    ("85", "Consumer Cyclical", "Education"),
+    ("86", "Healthcare", "Human health activities"),
+    ("87", "Healthcare", "Social work activities"),
+    ("90", "Consumer Cyclical", "Creative, arts and recreation related services"),
+    ("91", "Consumer Cyclical", "Sports and amusement activities"),
+    ("94", "Industrials", "Membership organizations"),
+    ("95", "Consumer Cyclical", "Maintenance and repair services"),
+    ("96", "Consumer Cyclical", "Other personal services"),
+)
+
+
+def _ksic(code: Optional[str]) -> Optional[Tuple[str, str]]:
+    """The longest `KSIC_SECTORS` prefix of a code: (sector, the standard's name), or None."""
+    code = (code or "").strip()
+    if not code.isdigit():
+        return None
+    best = None
+    for prefix, sector, name in KSIC_SECTORS:
+        if code.startswith(prefix) and (best is None or len(prefix) > len(best[0])):
+            best = (prefix, sector, name)
+    return (best[1], best[2]) if best else None
+
+
+def ksic_sector(code: Optional[str]) -> Optional[str]:
+    found = _ksic(code)
+    return found[0] if found else None
+
+
+def ksic_name(code: Optional[str]) -> Optional[str]:
+    """The standard's English name for the code's division or group (`KSIC_SECTORS`)."""
+    found = _ksic(code)
+    return found[1] if found else None
+
+
+def ksic_model(code: Optional[str]) -> Optional[str]:
+    """
+    The business model a KSIC code says: banking (641) and securities brokerage (6612) a bank
+    or broker, insurance and pension funding (65) an insurer, any other code an industrial;
+    None without a code — and for the other financial groups (642 trusts and collective
+    investment, 649 other financial services, which holds every holding company, financial
+    or not), which no model can be read off.
+    """
+    code = (code or "").strip()
+    if not code.isdigit():
+        return None
+    if code.startswith("641") or code.startswith("6612"):
+        return BANK
+    if code.startswith("65"):
+        return INSURER
+    if code.startswith(("642", "649")) or code == "64":
+        return None
+    return INDUSTRIAL
+
+
 # ── The waterfall ────────────────────────────────────────────────────────────
 
 
@@ -298,14 +437,17 @@ def classify(
     owner_org: Optional[str],
     gics: Optional[str] = None,
     yahoo: Optional[str] = None,
+    ksic: Optional[str] = None,
 ) -> Classification:
     """The two waterfalls over what the stores hold (see the module docstring)."""
     models: List[Tuple[str, Optional[str]]] = [
+        (KSIC, ksic_model(ksic)),
         (STATEMENTS, statements if statements in MODELS else None),
         (SIC, sic_model(sic)),
         (OFFICE, office_model(owner_org)),
     ]
     sectors: List[Tuple[str, Optional[str]]] = [
+        (KSIC, ksic_sector(ksic)),
         (SIC, sic_sector(sic)),
         (OFFICE, office_sector(owner_org)),
         (GICS, normalise_sector(gics) if gics else None),

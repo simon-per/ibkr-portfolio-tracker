@@ -22,6 +22,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.models.company_financials import (
     Company,
     CompanyFinancial,
+    CompanyReport,
+    DartCorpCode,
     CompanyPrice,
     CompanySplit,
     CompanyYahooProfile,
@@ -222,6 +224,68 @@ class CompanyFinancialsRepository:
                 select(func.max(Company.universe_seen_at)).where(Company.scheme == scheme)
             )
         ).scalar()
+
+    # ── company_reports, dart_corp_codes ─────────────────────────────────────
+
+    async def company_reports(self, company_id: int) -> Dict[str, CompanyReport]:
+        """Every report of the company asked about, by its report id."""
+        result = await self.session.execute(
+            select(CompanyReport).where(CompanyReport.company_id == company_id)
+        )
+        return {row.report_id: row for row in result.scalars()}
+
+    async def record_report(
+        self,
+        company_id: int,
+        report_id: str,
+        *,
+        status: str,
+        read_at: datetime,
+        period_end: Optional[date] = None,
+        accn: Optional[str] = None,
+        filed: Optional[date] = None,
+        facts: Sequence[dict] = (),
+        tagged: Optional[Dict[str, str]] = None,
+        non_standard: int = 0,
+    ) -> None:
+        """What one report held (`read`), or that it held nothing (`none`)."""
+        await self.session.merge(
+            CompanyReport(
+                company_id=company_id,
+                report_id=report_id,
+                period_end=period_end,
+                accn=accn,
+                filed=filed,
+                status=status,
+                facts=list(facts),
+                tagged=dict(tagged or {}),
+                non_standard=non_standard,
+                read_at=read_at,
+            )
+        )
+
+    async def dart_codes(self) -> Dict[str, DartCorpCode]:
+        """ISIN -> OpenDART's answer for the listing."""
+        result = await self.session.execute(select(DartCorpCode))
+        return {row.isin: row for row in result.scalars()}
+
+    async def record_dart_code(
+        self,
+        isin: str,
+        stock_code: str,
+        corp_code: Optional[str],
+        checked_at: datetime,
+    ) -> None:
+        row = await self.session.get(DartCorpCode, isin)
+        if row is None:
+            row = DartCorpCode(isin=isin, stock_code=stock_code, checked_at=checked_at)
+            self.session.add(row)
+        row.stock_code, row.corp_code, row.checked_at = stock_code, corp_code, checked_at
+
+    async def record_other_miss(self, company: Company, checked_at: datetime) -> None:
+        """Another regulator had nothing this reads for the company: the shared back-off."""
+        company.facts_checked_at = checked_at
+        company.facts_miss_count = (company.facts_miss_count or 0) + 1
 
     async def replace_company_rows(
         self, company: Company, rows: Sequence[dict], fetched_at: datetime
