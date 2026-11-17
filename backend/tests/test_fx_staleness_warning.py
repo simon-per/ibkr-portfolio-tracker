@@ -205,3 +205,20 @@ async def test_a_non_ecb_held_currency_is_judged_on_its_fallback_rows(offline):
 
     async with AsyncSession(offline) as db:
         assert await sched_mod.SchedulerService().find_stale_exchange_rates(db) == []
+
+
+@pytest.mark.asyncio
+async def test_a_market_data_run_records_the_price_pass_message(offline, monkeypatch):
+    """#88: every market-data run's `sync_runs` row had a null message."""
+    await seed(offline, ("USD", "EUR", publication_day(0), "frankfurter"))
+    svc = sched_mod.SchedulerService()
+    recorded = []
+    stub_steps(monkeypatch, svc, recorded)
+
+    async def _prices(*_a, **_k):
+        return {"status": "success", "message": "Synced market data for 3 of 3 securities"}
+
+    monkeypatch.setattr(svc, "sync_market_data", _prices)
+    result = await svc._market_data_only_locked()
+    assert recorded[0]["message"] == "Synced market data for 3 of 3 securities"
+    assert result["message"] == recorded[0]["message"]

@@ -1762,6 +1762,9 @@ class SchedulerService:
             "benchmark_result": bench_result,
             "dividend_forecast_result": forecast_result,
             "status": market_result.get("status", "error"),
+            # The run's one line in `sync_runs`, as every other job writes one: the price
+            # pass's own (it was null on every market-data run until 2026-11-18, #88).
+            "message": market_result.get("message"),
         }
         _collect_warnings(
             self.last_sync_result, fx_result, market_result, bench_result,
