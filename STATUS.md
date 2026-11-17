@@ -116,6 +116,11 @@ Only what is still unverified.
   Irish 10-K filers). Then `company_prices_refresh` asks Yahoo for about 33 more companies' weekly
   closes and the 05:00 profile chunk's rotation is that much longer — the budget the owner
   approved; record the real counts (`companies_due`, `fetched` on the price pass) here.
+- **Company tab fixes #82, #83, #85 (branch `loop-improvements`, not deployed yet):** after the
+  deploy TSMC's key figures and screener row are filled (FY2025, TWD); HSBC's and Santander's rows
+  carry a currency. Terna's and Santander's slipped dividends per share go only when their figures
+  are rewritten: run `fetch_company_markets --source esef --force` once after the deploy, then
+  Terna shows no dividend per share and no 2,279% payout.
 - **Korea and Europe, steps 2+3 (2026-11-17):** migration `e6a8c0d2f4b7` (`company_reports`,
   `dart_corp_codes`). Job `company_markets_refresh`, **Sunday 05:00**, first run 2026-11-22: a
   `company_dart_refresh` row (needs `OPENDART_API_KEY` in the VPS `.env`; without it the job
