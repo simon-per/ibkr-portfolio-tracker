@@ -13,7 +13,11 @@ from datetime import date
 from app.clock import utcnow
 from app.models.company_financials import CompanyFinancial
 from app.services.company_financials_normaliser import IFRS_TWINS, METRICS, normalise
-from app.services.company_financials_service import build_series, key_stats
+from app.services.company_financials_service import (
+    build_series,
+    key_stats,
+    reports_quarters,
+)
 
 
 def _f(end, val, accn, filed, start=None):
@@ -197,3 +201,21 @@ def test_quarterly_dividends_alone_do_not_make_an_annual_filer_quarterly():
     assert (stats["label"], stats["revenue"]) == ("FY2024", 11.5e9)
     ttm = build_series(rows, "ttm", "max")["revenue"]["points"]
     assert [p["label"] for p in ttm] == ["FY2023", "FY2024"]
+
+
+def test_an_annual_filer_reports_no_quarters_a_quarterly_one_does():
+    rows = _stored(NU)
+    assert reports_quarters(rows) is False
+    quarter = CompanyFinancial(
+        cik=1,
+        fetched_at=utcnow(),
+        period_end=date(2025, 3, 31),
+        fiscal_year=2025,
+        fiscal_period="Q1",
+        metric="revenue",
+        value=3.0e9,
+        unit="USD",
+        source_concept="Revenues",
+        filed=date(2025, 5, 1),
+    )
+    assert reports_quarters(rows + [quarter]) is True

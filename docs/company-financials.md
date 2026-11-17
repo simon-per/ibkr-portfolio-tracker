@@ -994,7 +994,9 @@ All three were misses: the normaliser read 10-K/10-Q facts in us-gaap only.
   trailing twelve months, so the default view and the key figures show the latest year; the
   quarterly view stays empty. A filer counts as quarterly only by a quarter's own statement
   figure (`QUARTER_WITNESSES`: revenue, net income, diluted EPS, operating cash flow): TSMC's 20-F tags each
-  quarter's dividend per share, which until 2026-11-17 (#82) blanked its key figures.
+  quarter's dividend per share, which until 2026-11-17 (#82) blanked its key figures. The
+  response says so (`reports_quarters`), and the tab offers such a company no Quarterly view; one
+  picked on another company steps back to TTM (#87: it read "No financial data").
 - They are asked again when their miss back-off runs out (at most 30 days); TSMC is in scope only
   while something names its US listing (held as 2330 on the TWSE, it is not a US listing).
 - The weekday check treats a 20-F like any periodic report: from 105 to 180 days after a fiscal

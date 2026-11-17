@@ -637,6 +637,12 @@ def _reports_quarters(quarterly: Sequence[Point]) -> bool:
     return any(p.base.get(m) is not None for p in quarterly for m in QUARTER_WITNESSES)
 
 
+def reports_quarters(rows: Sequence[CompanyFinancial]) -> bool:
+    """Whether the company states quarters at all (`QUARTER_WITNESSES`): an annual-only filer
+    — a 20-F, an ESEF report — has no quarterly view to show, and the tab offers none."""
+    return _reports_quarters(_points(rows, annual=False))
+
+
 def _series_points(rows: Sequence[CompanyFinancial], period: str) -> List[Point]:
     """Every period of `period`, oldest first, with its derived series."""
     quarterly = _points(rows, annual=False) if period != "annual" else []
@@ -1639,6 +1645,7 @@ class CompanyFinancialsService:
             "warnings": warnings,
             "key_stats": key_stats(rows, current),
             "latest_quarter": latest_quarter(rows),
+            "reports_quarters": reports_quarters(rows),
             "profile": await self._profile(company, listing, closes, currency),
             "series": {
                 **build_series(rows, period, range_key, prices),

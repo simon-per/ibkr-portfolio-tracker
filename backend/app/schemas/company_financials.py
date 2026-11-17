@@ -385,5 +385,10 @@ class CompanyFinancialsResponse(BaseModel):
     warnings: List[str]
     key_stats: CompanyFinancialsKeyStats
     latest_quarter: Optional[CompanyFinancialsLatestQuarter] = None
+    reports_quarters: bool = Field(
+        True,
+        description="False for an annual-only filer (a 20-F, an ESEF report): no quarterly "
+        "view, and its TTM is the fiscal year.",
+    )
     profile: CompanyFinancialsProfile
     series: CompanyFinancialsSeriesSet

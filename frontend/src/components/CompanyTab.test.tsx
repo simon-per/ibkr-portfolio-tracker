@@ -138,6 +138,23 @@ describe('CompanyTab', () => {
     await waitFor(() => expect(get).toHaveBeenCalledWith(NVDA_KEY, 'annual', '3y'))
   })
 
+  it('offers no Quarterly view for an annual-only filer, and steps back to TTM', async () => {
+    const get = vi.spyOn(api, 'getCompanyFinancials').mockImplementation(async (key) =>
+      key === AMZN_KEY ? { ...fixtureFinancials(), reports_quarters: false } : fixtureFinancials(),
+    )
+    renderTab()
+    await waitFor(() => expect(get).toHaveBeenCalledWith(NVDA_KEY, 'ttm', '10y'))
+    fireEvent.click(within(screen.getByRole('group', { name: 'Period' })).getByRole('button', { name: 'Quarterly' }))
+    await waitFor(() => expect(get).toHaveBeenCalledWith(NVDA_KEY, 'quarterly', '10y'))
+
+    fireEvent.change(screen.getByRole('combobox', { name: 'Company' }), { target: { value: AMZN_KEY } })
+    await waitFor(() => expect(get).toHaveBeenCalledWith(AMZN_KEY, 'ttm', '10y'))
+    await waitFor(() =>
+      expect(within(screen.getByRole('group', { name: 'Period' })).queryByRole('button', { name: 'Quarterly' })).toBeNull(),
+    )
+    expect(screen.queryByText(/No financial data/)).toBeNull()
+  })
+
   it("prints the server's CAGRs and YoY, and leaves out a CAGR it has none for", async () => {
     vi.spyOn(api, 'getCompanyFinancials').mockResolvedValue(fixtureFinancials({
       series: { revenue: { ...fixtureSeries([1, 2, 3, 4], 0.693, 1.142), cagrs: { y3: 0.81, y5: 0.642, y10: 0.693 } } },

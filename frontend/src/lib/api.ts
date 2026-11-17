@@ -1940,6 +1940,8 @@ export interface CompanyFinancialsResponse {
   key_stats: CompanyFinancialsKeyStats;
   /** The newest quarter on its own: the overview's "Latest quarter" row. */
   latest_quarter?: CompanyFinancialsLatestQuarter | null;
+  /** False for an annual-only filer (a 20-F, an ESEF report): no quarterly view. */
+  reports_quarters?: boolean;
   profile: CompanyFinancialsProfile;
   series: CompanyFinancialsSeriesSet;
 }

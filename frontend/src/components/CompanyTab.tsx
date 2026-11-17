@@ -727,6 +727,15 @@ export function CompanyTab() {
     placeholderData: keepPrevious,
   })
   const data = financials.data
+  // An annual-only filer (a 20-F, an ESEF report) has no quarters: no Quarterly option, and a
+  // Quarterly view picked on another company steps back to TTM — the fiscal years.
+  const reportsQuarters = financials.isPlaceholderData ? true : (data?.reports_quarters ?? true)
+  // Adjusted while rendering (React's pattern for state that follows a prop), not in an effect.
+  if (!reportsQuarters && period === 'quarterly') setPeriod('ttm')
+  const periodOptions = useMemo(
+    () => (reportsQuarters ? PERIOD_OPTIONS : PERIOD_OPTIONS.filter((o) => o.value !== 'quarterly')),
+    [reportsQuarters],
+  )
 
   const pick = (key: string) => {
     setPicked(key)
@@ -797,7 +806,7 @@ export function CompanyTab() {
           aside={
             <>
               <SegmentedControl label="Basis" value={basis} onChange={setBasis} options={BASIS_OPTIONS} />
-              <SegmentedControl label="Period" value={period} onChange={setPeriod} options={PERIOD_OPTIONS} />
+              <SegmentedControl label="Period" value={period} onChange={setPeriod} options={periodOptions} />
               <SegmentedControl label="Range" value={range} onChange={setRange} options={RANGE_OPTIONS} />
             </>
           }
@@ -827,7 +836,7 @@ export function CompanyTab() {
           className={cn('space-y-4', placeholderDim(financials.isPlaceholderData))}
         >
           {data?.warnings.map((w, i) => <Notice key={i}>{w}</Notice>)}
-          {data && !hasAnyData(data) ? (
+          {data && !hasAnyData(data) && !(period === 'quarterly' && !reportsQuarters) ? (
             <Notice>No financial data for {data.symbol}.</Notice>
           ) : (
             <>
