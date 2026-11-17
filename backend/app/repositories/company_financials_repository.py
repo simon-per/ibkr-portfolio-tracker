@@ -59,6 +59,10 @@ def yahoo_profile_backoff_until(
     return miss_backoff_until(row.checked_at, row.miss_count)
 
 
+#: The metrics whose unit names a company's reporting currency, in order of preference.
+CURRENCY_METRICS = ("revenue", "net_income")
+
+
 #: Every figure column of `company_yahoo_profiles`, replaced as one set on each answer.
 YAHOO_PROFILE_COLUMNS = tuple(
     c.name
@@ -523,18 +527,21 @@ class CompanyFinancialsRepository:
             owner: {"first": first, "last": last, "fetched_at": fetched, "rows": n}
             for owner, first, last, fetched, n in result.all()
         }
+        # The currency of its revenue, or of its profit for a company that tags no revenue
+        # line (a bank's ESEF report: HSBC, Santander; #85).
         units = await self.session.execute(
-            select(column, CompanyFinancial.unit, func.count())
+            select(column, CompanyFinancial.metric, CompanyFinancial.unit, func.count())
             .where(
                 column.in_(list(out)),
-                CompanyFinancial.metric == "revenue",
+                CompanyFinancial.metric.in_(CURRENCY_METRICS),
             )
-            .group_by(column, CompanyFinancial.unit)
+            .group_by(column, CompanyFinancial.metric, CompanyFinancial.unit)
         )
         best: Dict[int, tuple] = {}
-        for owner, unit, n in units.all():
-            if owner not in best or n > best[owner][1]:
-                best[owner] = (unit, n)
+        for owner, metric, unit, n in units.all():
+            rank = (-CURRENCY_METRICS.index(metric), n)
+            if owner not in best or rank > best[owner][1]:
+                best[owner] = (unit, rank)
         for owner, entry in out.items():
             entry["currency"] = best.get(owner, (None,))[0]
         return out

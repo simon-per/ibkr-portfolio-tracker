@@ -478,3 +478,33 @@ def test_a_dividend_per_share_the_year_cannot_have_paid_is_absent(dps, kept):
     got = [r["value"] for r in rows if r["metric"] == "dividends_per_share"]
     assert got == ([dps] if kept else [])
     assert any(r["metric"] == "revenue" for r in rows)
+
+
+@pytest.mark.asyncio
+async def test_a_bank_without_a_revenue_line_has_its_profits_currency(db):
+    # HSBC's and Santander's ESEF reports tag no revenue (#85).
+    from app.repositories.company_financials_repository import (
+        CompanyFinancialsRepository,
+    )
+
+    repo = CompanyFinancialsRepository(db)
+    bank = await repo.ensure_other_company("lei", "MLU0ZO3ML4LN2LL2TL39", ticker="HSBA")
+    await repo.replace_company_rows(
+        bank,
+        [
+            {
+                "period_end": date(2024, 12, 31),
+                "fiscal_year": 2024,
+                "fiscal_period": "FY",
+                "metric": "net_income",
+                "value": 22.9e9,
+                "unit": "USD",
+                "source_concept": "esef:ifrs-full:ProfitLossAttributableToOwnersOfParent",
+                "filed": date(2025, 2, 19),
+            }
+        ],
+        datetime(2025, 3, 1),
+    )
+    await db.commit()
+    coverage = await repo.coverage_of([bank])
+    assert coverage[bank.key]["currency"] == "USD"
