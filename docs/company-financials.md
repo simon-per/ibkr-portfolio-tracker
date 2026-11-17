@@ -1205,8 +1205,7 @@ industrial's cash & debt (a bank's deposits and borrowing are its business, not 
 
 Owner, 2026-11-16: **the company's own regulator first**, every other source fill-only, market by
 market in the order SEC widening (*Scope*), South Korea, Europe; Japan, Taiwan and the rest later.
-South Korea built 2026-11-17; Europe (ESEF annual reports by LEI, filings.xbrl.org) next.
-A company of another regulator is a `companies` row keyed `dart:<corp_code>` or
+Built 2026-11-17. A company of another regulator is a `companies` row keyed `dart:<corp_code>` or
 `lei:<LEI>` (*One key for every regulator's company*) and gets **no Yahoo request** (owner): no
 closes, so its P/E, market cap and every multiple stay blank, and the page shows its figures in its
 reporting currency.
@@ -1224,16 +1223,18 @@ reporting currency.
   vote unchanged (`regulator_facts.normalise_reports`). Within a report two different values for
   one concept and period leave the period out whole, never one picked (`one_value_each`: a second
   share class's EPS, as Berkshire's). Every row's `source_concept` names the source and the
-  report's own tag (`dart:ifrs-full_Revenue`, `dart:dart_OperatingIncomeLoss`).
+  report's own tag (`dart:ifrs-full_Revenue`, `esef:ifrs-full:Revenue`, `dart:dart_OperatingIncome
+  Loss`).
 - **Once per report** — `company_reports` (company, report id): `read` keeps the converted facts
   and is never asked again; every rewrite of the company's figures normalises all its stored
   reports at once (`replace_company_rows`, the one figure write). A rewrite that yields no figure
   writes nothing.
 - **Schedule** — job `company_markets_refresh`, Sunday 05:00 Berlin (`COMPANY_MARKETS_REFRESH_HOUR`
-  = the EDGAR pass's hour, already in `ALL_SYNC_HOURS`): the Korean pass under its own gate
-  (`DART_GATE` "opendart") with its own `sync_runs` row (`company_dart_refresh`). By hand:
-  `app/cli/fetch_company_markets.py --source dart [--dry-run] [--force]` (row
-  `manual_company_dart_fetch`); `--force` re-asks what held nothing,
+  = the EDGAR pass's hour, already in `ALL_SYNC_HOURS`): the Korean pass, then the European one,
+  each under its own gate (`DART_GATE` "opendart", `ESEF_GATE` "esef") with its own `sync_runs` row
+  (`company_dart_refresh`, `company_esef_refresh`); one failing never stops the other. By hand:
+  `app/cli/fetch_company_markets.py --source dart|esef [--dry-run] [--force]` (rows
+  `manual_company_dart_fetch`, `manual_company_esef_fetch`); `--force` re-asks what held nothing,
   never a report already read.
 - **Listing** — the tab lists a scheme's companies stamped by its newest pass
   (`universe_seen_at`); a held listing links to its company through its ISIN (`isins` on the list
@@ -1292,13 +1293,64 @@ without its key.
   million, diluted EPS 4,950 KRW; SK Hynix revenue 66,192,960 million, operating profit 23,467,319
   million — all as stored. Q4 2024 revenue (Samsung) 75,788,269 million = the year less nine months.
 
+### Europe (ESEF)
+
+`esef_client`, `esef_reports`, `esef_sync.EuropeFinancialsSync`. Source: **filings.xbrl.org**,
+XBRL International's index of the European Single Electronic Format's annual reports (JSON:API, no
+key, no published limit; paced at one request a second). The official stores are the national
+OAMs; the index collects from them on a best-effort basis until ESMA's single access point (ESAP)
+opens in 2027.
+
+- **Scope**: a named company with a European ISIN (`region_taxonomy.region_of_isin`, plus the Crown
+  Dependencies JE/GG/IM, whose London-listed companies file with the FCA), an LEI and no SEC page.
+  A company with no LEI is counted (`no_lei`), not asked.
+- **Filings**: `/api/entities/<LEI>/filings` (paged, at most five pages), one filing per period end
+  (the newest added: a correction over the first), each one's xBRL-JSON read **once** (by its
+  `fxo_id`). An LEI the index never received a filing for answers HTTP 404, read as no filings; such
+  a company backs off by the shared miss back-off and is not listed until it has one. The list is
+  asked until one pass has handled every filing in it, then again once the newest year's successor
+  is due (`NEXT_DUE_AFTER`, a year and 90 days past its end), at most weekly. A filing the index
+  failed to process (no xBRL-JSON) is counted and asked with the list; one larger than
+  `MAX_REPORT_BYTES` (60 MB — Santander's 2022 and 2024 reports are larger) is stamped `skipped`, never asked
+  again, and named in a warning.
+- **Facts** (`esef_reports.convert`): **undimensioned only**, as companyfacts — any dimension beyond
+  concept, entity, period and unit (a segment, an equity component) is not read; the company's own
+  LEI's facts only; `ifrs-full` concepts the normaliser reads, in a unit their kind agrees with
+  (`iso4217:EUR` monetary, `iso4217:EUR/xbrli:shares` per share, `xbrli:shares` a count); a number
+  under the company's extension concept skipped and counted (`non_standard_facts`). xBRL-JSON
+  writes a period's end as the instant after it (`2025-01-01T00:00:00` ends 31 December 2024), so a
+  midnight end moves back a day. **Annual only**: a duration is read only when it spans a fiscal
+  year (350–380 days), every fact is `REGULATOR_ANNUAL`, and the service takes the fiscal year as the
+  trailing twelve months (`_series_points`, as for a 20-F filer). Values are xBRL-JSON's canonical,
+  already scaled.
+- **Classification**: ESEF states no industry, so the sector is the baskets' GICS vote; the business
+  model comes from the statements as for any filer.
+- **Measured 2026-11-17** on a production snapshot: 25 European companies in scope, 21 with an LEI
+  (the four without are Irish 10-K filers — Eaton, Johnson Controls, Accenture, nVent — which the
+  SEC widening gives pages). **11 filled**, 51 annual reports, 699 rows, 74 requests in under three
+  minutes: Schneider, Iberdrola, Prysmian, Terna, TotalEnergies, Airbus, Santander (EU); National
+  Grid, HSBC, Shell, AstraZeneca (UK). The index's depth varies: most have FY2020/21–FY2025,
+  Prysmian only FY2022 and FY2024, Terna none for FY2025 yet; Santander's FY2022 and FY2024 are
+  over the size cap and stay blank. **Blank**: every
+  German issuer (SAP, Siemens, Infineon, E.ON, Allianz) — Germany's OAM, the Unternehmensregister,
+  does not pass its filings to the index and has no API; every **Swiss** one (ABB, Roche, Novartis,
+  Nestlé) — SIX issuers are outside ESEF and the index holds none; Serabi (AIM, no ESEF obligation).
+  **UK**: the four FTSE companies in scope all filled.
+- **Checked against the filings** (FY2024 annual reports, in each one's reporting currency):
+  Schneider revenue 38,153 million EUR, profit to owners 4,269 million, diluted EPS 7.53;
+  AstraZeneca revenue 54,073 million USD, profit to owners 7,035 million, diluted EPS 4.50; Shell
+  revenue 284,312 million USD, profit to owners 16,094 million; Airbus revenue 69,230 million EUR,
+  diluted EPS 5.35 — all as stored.
+- **Other sources considered** (2026-11-17), none adopted: Narwhal's ESEF API reads the same index
+  (same gaps) behind a paid key and its own standardised items; ESMA's `esef_toolkit` is a client
+  of the same index; borsapi.se covers Sweden and the US only. A vendor with German and Swiss
+  fundamentals (EODHD) would be a fill-only source and a cost decision for the owner.
 
 ### Not yet
 
 | order | market | the regulator's source | notes |
 |---|---|---|---|
-| next | EU, UK | ESEF annual reports at filings.xbrl.org, by LEI | annual, `ifrs-full`; TTM = the fiscal year |
-| then | Japan | EDINET (the FSA), free key | XBRL for every listed company, J-GAAP or IFRS; needs a J-GAAP concept map |
+| next | Japan | EDINET (the FSA), free key | XBRL for every listed company, J-GAAP or IFRS; needs a J-GAAP concept map |
 | next | Taiwan | MOPS (the TWSE's filing system) | XBRL, no official API; TSMC already has a page through its 20-F |
 | later | China A/H, India, Middle East | CNINFO/HKEX, NSE/BSE/MCA21, Tadawul | no usable free structured source today; their US ADR filers only |
 

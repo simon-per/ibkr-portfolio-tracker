@@ -1,15 +1,18 @@
 """
 Fetch the other regulators' company figures now, instead of waiting for Sunday's pass
 (docs/company-financials.md, *Markets beyond the SEC*): `--source dart` reads OpenDART's
-Korean reports. The same pass the weekly job runs (`dart_sync.KoreaFinancialsSync.refresh`):
-its scope, its pacing, its once-per-report stamps. `--force` asks again the reports that
-held nothing and the profiles — never a report already read. `--dry-run` lists the scope and
-asks nothing. Touches no Yahoo, no IBKR and no EDGAR. Needs `OPENDART_API_KEY` for `dart`.
+Korean reports, `--source esef` the ESEF annual reports on filings.xbrl.org. The same pass the
+weekly job runs (`dart_sync.KoreaFinancialsSync.refresh`, `esef_sync.EuropeFinancialsSync
+.refresh`): its scope, its pacing, its once-per-report stamps. `--force` asks again what held
+nothing (OpenDART's empty reports and profiles, an LEI's filings list) — never a report
+already read. `--dry-run` lists the scope and asks nothing. Touches no Yahoo, no IBKR and no
+EDGAR. Needs `OPENDART_API_KEY` for `dart`; `esef` needs no key.
 
 Usage, inside the container:
 
     docker exec backend-portfolio-backend-1 python -m app.cli.fetch_company_markets --source dart --dry-run
     docker exec backend-portfolio-backend-1 python -m app.cli.fetch_company_markets --source dart
+    docker exec backend-portfolio-backend-1 python -m app.cli.fetch_company_markets --source esef
 """
 
 import argparse
@@ -36,6 +39,15 @@ def _source(name: str):
             dart_sync.MANUAL_SYNC_TYPE,
             dart_sync.KoreaFinancialsSync,
             dart_sync.NOT_CONFIGURED,
+        )
+    if name == "esef":
+        from app.services import esef_sync
+
+        return (
+            esef_sync.ESEF_GATE,
+            esef_sync.MANUAL_SYNC_TYPE,
+            esef_sync.EuropeFinancialsSync,
+            None,
         )
     raise ValueError(name)
 
@@ -87,7 +99,7 @@ def main() -> int:
     parser = argparse.ArgumentParser(
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
     )
-    parser.add_argument("--source", choices=("dart",), required=True)
+    parser.add_argument("--source", choices=("dart", "esef"), required=True)
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--force", action="store_true")
     args = parser.parse_args()

@@ -6,6 +6,7 @@ Each market's pass takes the ones its regulator holds (Korean ISINs for OpenDART
 ESEF) and skips any company that already has an SEC page. Pure DB.
 """
 
+from collections import Counter, defaultdict
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional
 
@@ -14,6 +15,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.etf_mappings import is_known_etf_isin
 from app.models.company_financials import SecCompany, SecurityCik
+from app.models.etf_basket import EtfHolding
 from app.models.isin_identity import IsinIdentity
 from app.models.security import Security
 from app.repositories.security_repository import held
@@ -25,6 +27,8 @@ class NamedCompany:
     isins: List[str] = field(default_factory=list)
     lei: Optional[str] = None
     held: bool = False
+    #: The held listing's symbol, else the ticker most of the stored baskets give its ISINs.
+    ticker: Optional[str] = None
 
 
 async def named_companies(db: AsyncSession) -> List[NamedCompany]:
@@ -67,6 +71,7 @@ async def named_companies(db: AsyncSession) -> List[NamedCompany]:
             out.append(company)
             by_isin[isin] = company
         company.held = True
+        company.ticker = company.ticker or security.symbol
     missing = [c for c in out if c.lei is None]
     if missing:
         leis = dict(
@@ -81,6 +86,22 @@ async def named_companies(db: AsyncSession) -> List[NamedCompany]:
         )
         for company in missing:
             company.lei = next((leis[i] for i in company.isins if i in leis), None)
+    unnamed = [c for c in out if c.ticker is None]
+    if unnamed:
+        votes: Dict[str, Counter] = defaultdict(Counter)
+        for isin, ticker in await db.execute(
+            select(EtfHolding.constituent_isin, EtfHolding.constituent_ticker).where(
+                EtfHolding.constituent_isin.in_([i for c in unnamed for i in c.isins]),
+                EtfHolding.constituent_ticker.is_not(None),
+            )
+        ):
+            votes[isin.upper()][ticker.strip()] += 1
+        for company in unnamed:
+            tally: Counter = Counter()
+            for isin in company.isins:
+                tally.update(votes[isin])
+            if tally:
+                company.ticker = max(tally.items(), key=lambda kv: (kv[1], kv[0]))[0]
     return out
 
 

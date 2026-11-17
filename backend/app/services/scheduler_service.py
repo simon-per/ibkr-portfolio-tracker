@@ -331,9 +331,10 @@ COMPANY_FILINGS_CHECK_DAYS = 'mon-sat'
 COMPANY_PRICES_REFRESH_HOUR = COMPANY_FINANCIALS_REFRESH_HOUR
 COMPANY_PRICES_REFRESH_DAYS = COMPANY_FINANCIALS_REFRESH_DAYS
 # The other regulators' figures (docs/company-financials.md, *Markets beyond the SEC*):
-# OpenDART's Korean reports, weekly, at the EDGAR pass's hour — already in ALL_SYNC_HOURS, so
-# the deploy guard covers it — each market under its own gate (`dart_sync.DART_GATE`), since
-# none shares an upstream with EDGAR, Yahoo or IBKR.
+# OpenDART's Korean reports and the ESEF annual reports, weekly, at the EDGAR pass's hour —
+# already in ALL_SYNC_HOURS, so the deploy guard covers it — each market under its own gate
+# (`dart_sync.DART_GATE`, `esef_sync.ESEF_GATE`), since none shares an upstream with EDGAR,
+# Yahoo or IBKR.
 COMPANY_MARKETS_REFRESH_HOUR = COMPANY_FINANCIALS_REFRESH_HOUR
 COMPANY_MARKETS_REFRESH_DAYS = COMPANY_FINANCIALS_REFRESH_DAYS
 
@@ -2004,17 +2005,25 @@ class SchedulerService:
     async def company_markets_refresh_job(self) -> dict:
         """
         The other regulators' passes (docs/company-financials.md, *Markets beyond the SEC*),
-        at COMPANY_MARKETS_REFRESH_HOUR on COMPANY_MARKETS_REFRESH_DAYS: OpenDART's Korean
-        reports (`dart_sync.KoreaFinancialsSync`), under `DART_GATE`, with their own
-        `sync_runs` row (`company_dart_refresh`). Without a key the pass records nothing.
+        at COMPANY_MARKETS_REFRESH_HOUR on COMPANY_MARKETS_REFRESH_DAYS, one after the other,
+        each under its own gate and with its own `sync_runs` row: OpenDART's Korean reports
+        (`dart_sync.KoreaFinancialsSync`, `company_dart_refresh`; without a key it records
+        nothing), then the ESEF annual reports (`esef_sync.EuropeFinancialsSync`,
+        `company_esef_refresh`). One failing never stops the other.
         """
-        from app.services import dart_sync
+        from app.services import dart_sync, esef_sync
 
-        return await self._company_job(
+        dart = await self._company_job(
             dart_sync.DART_GATE, dart_sync.SCHEDULED_SYNC_TYPE, dart_sync.RESULT_KEY,
             "Korean company financials refresh",
             lambda db: dart_sync.KoreaFinancialsSync(db).refresh(),
         )
+        esef = await self._company_job(
+            esef_sync.ESEF_GATE, esef_sync.SCHEDULED_SYNC_TYPE, esef_sync.RESULT_KEY,
+            "European company financials refresh",
+            lambda db: esef_sync.EuropeFinancialsSync(db).refresh(),
+        )
+        return {"type": "company_markets_refresh", "dart": dart, "esef": esef}
 
     async def _company_job(
         self, gate: str, sync_type: str, result_key: str, label: str, run
