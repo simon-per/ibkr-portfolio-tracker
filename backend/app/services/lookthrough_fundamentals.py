@@ -17,7 +17,9 @@ company's reporting currency never meet. Then:
   figure: the rest (non-US companies, funds without a basket, the look-through's tail past
   `COMPANY_LIMIT_MAX`) is reported as missing, never renormalised onto.
 
-Each company's figures are the overview's (`CompanyFinancialsService.key_figures`). Pure DB.
+Each company's figures are the overview's (`CompanyFinancialsService.key_figures`): for a
+company the tab lists, as the screener computed and keeps them (`listed_key_figures`, #86),
+else computed here. Pure DB.
 """
 
 from dataclasses import dataclass
@@ -26,7 +28,7 @@ from typing import Any, Dict, List, Optional, Sequence
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models.company_financials import SecCompany, SecurityCik
+from app.models.company_financials import SEC_SCHEME, SecCompany, SecurityCik, company_key
 from app.models.security import Security
 from app.services.company_financials_service import CompanyFinancialsService
 from app.services.lookthrough_service import COMPANY_LIMIT_MAX, LookthroughService
@@ -135,8 +137,13 @@ async def lookthrough_fundamentals(db: AsyncSession) -> Dict[str, Any]:
         if cik is not None:
             value_of[cik] = value_of.get(cik, 0.0) + float(row["value_eur"])
     service = CompanyFinancialsService(db)
+    kept = await service.listed_key_figures()
     owned = []
     for cik, value in value_of.items():
+        listed = kept.get(company_key(SEC_SCHEME, cik))
+        if listed is not None:
+            owned.append(Owned(value, listed[1]))
+            continue
         company = await db.get(SecCompany, cik)
         if company is not None:
             _, stats = await service.key_figures(company)

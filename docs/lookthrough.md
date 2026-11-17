@@ -365,7 +365,9 @@ treemap while the fund holding it was 30% Financials on the pie.
 review item R2, 2026-11-08): P/E, revenue and EPS growth, operating and FCF margin of what the
 account owns, through its funds as well as directly, over the look-through's companies with SEC
 figures on the Company tab. A row reaches a company by ISIN (`sec_companies.isin`, then each held
-listing's `security_ciks` row); its figures are the overview's own (`key_figures`). **Weighted by
+listing's `security_ciks` row); its figures are the overview's own (`key_figures`) — for a company
+the tab lists, the ones the screener computed and keeps under `_screener_key`
+(`listed_key_figures`, #86, 2026-11-17: the route took ~10 s computing each again). **Weighted by
 share-equivalents**: the account's value in a company times the company's TTM figure over its market
 cap is the owned earnings or revenue, a ratio, so the base currency and the reporting currency never
 meet. P/E = covered value over owned earnings — a loss lowers the earnings rather than vanishing as

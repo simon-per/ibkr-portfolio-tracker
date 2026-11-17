@@ -119,7 +119,9 @@ Only what is still unverified.
 - **Company tab fixes #82–#85 (branch `loop-improvements`, not deployed yet):** after the
   deploy TSMC's key figures and screener row are filled (FY2025, TWD); HSBC's and Santander's rows
   carry a currency; a Korean or European company's Peers card lists its sector's companies
-  (Samsung beside the SEC's Technology filers, HSBC beside the banks). Terna's and Santander's slipped dividends per share go only when their figures
+  (Samsung beside the SEC's Technology filers, HSBC beside the banks); #86:
+  `/api/portfolio/lookthrough/fundamentals` answers in about the look-through's own time (~2 s,
+  was ~10 s) once the screener's figures are kept — time it twice after the deploy. Terna's and Santander's slipped dividends per share go only when their figures
   are rewritten: run `fetch_company_markets --source esef --force` once after the deploy, then
   Terna shows no dividend per share and no 2,279% payout.
 - **Korea and Europe, steps 2+3 (2026-11-17):** migration `e6a8c0d2f4b7` (`company_reports`,
@@ -586,8 +588,8 @@ Rough priority. Re-verify each `path:line` in code before fixing; lines move.
     company's own debt concepts (years only today, so CDNS's quarters stay without debt), and
     PCAR's quarters (its 10-Qs state no segment total in a concept `SEGMENT_DEBT` reads); and whatever the first
     `company_vendor_fill` runs leave in `unproven` (docs/company-financials.md, *Known gaps*).
-8. **The look-through fundamentals card takes ~8 s** (uncached), the shape the screener had;
-    the screener's key (`_screener_key`, docs/company-financials.md *Screener*) is the pattern.
+8. *(built 2026-11-17 on `loop-improvements`, #86: the look-through fundamentals card reads the
+    screener's kept key figures; drop this item once deployed and timed.)*
 9. **Dividends: a forecast check** (owner asked 2026-11-08 what is best; proposal given, not
     built): log each projected payment as it stood ~30 days before its pay date and score it
     against what IBKR paid, in the payment's own currency so FX is not an error.

@@ -106,3 +106,55 @@ def test_the_figures_come_from_the_overviews_path():
     """No copy of `key_stats` here: the module asks the service for a company's figures."""
     source = open(module.__file__, encoding="utf-8").read()
     assert "key_figures(" in source and "def key_stats" not in source
+
+
+@pytest.mark.asyncio
+async def test_a_listed_companys_figures_are_the_screeners_kept_ones(db, monkeypatch):
+    """#86: a company the tab lists is not computed again; its kept figures are exactly what
+    `key_figures` gives (the family check), and a company it does not list still is."""
+    from datetime import date
+
+    from app.models.company_financials import CompanyFinancial
+
+    stamp = utcnow()
+    db.add(SecCompany(cik=1, ticker="AAA", isin="US0000000001", fetched_at=stamp,
+                      universe_seen_at=stamp))
+    db.add(SecCompany(cik=2, ticker="BBB", isin="US0000000002", fetched_at=stamp))
+    for cik in (1, 2):
+        for q, end in enumerate((date(2025, 3, 31), date(2025, 6, 30), date(2025, 9, 30),
+                                 date(2025, 12, 31)), start=1):
+            for metric, value in (("revenue", 100.0 * cik), ("net_income", 20.0 * cik)):
+                db.add(CompanyFinancial(cik=cik, period_end=end, fiscal_year=2025,
+                                        fiscal_period=f"Q{q}", metric=metric, value=value,
+                                        unit="USD", source_concept="X", filed=end,
+                                        fetched_at=stamp))
+    await db.commit()
+
+    service = CompanyFinancialsService(db)
+    kept = await service.listed_key_figures()
+    assert set(kept) == {"sec:1"}
+    assert kept["sec:1"] == await service.key_figures(await db.get(SecCompany, 1))
+
+    async def view(self, limit=50):
+        return {
+            "as_of": "2026-11-17",
+            "companies": [
+                {"isins": ["US0000000001"], "value_eur": 100.0},
+                {"isins": ["US0000000002"], "value_eur": 100.0},
+            ],
+            "shown_value_eur": 200.0,
+            "other_companies_eur": 0.0,
+            "company_count_total": 2,
+        }
+
+    computed = []
+    real = CompanyFinancialsService.key_figures
+
+    async def counting(self, company):
+        computed.append(company.cik)
+        return await real(self, company)
+
+    monkeypatch.setattr(LookthroughService, "get_lookthrough", view)
+    monkeypatch.setattr(CompanyFinancialsService, "key_figures", counting)
+    await lookthrough_fundamentals(db)
+    assert computed == [2]

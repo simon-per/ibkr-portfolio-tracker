@@ -1500,11 +1500,25 @@ class CompanyFinancialsService:
         Kept while `_screener_key` holds: the key is read before the figures, so an answer
         is never older than the key it is kept under.
         """
+        return copy.deepcopy((await self._screened())["rows"])
+
+    async def listed_key_figures(self) -> Dict[str, Tuple[Optional[str], Dict[str, Any]]]:
+        """
+        Company key -> its reporting currency and the overview's key figures (what
+        `key_figures` gives), for every company the tab lists: computed with the screener's
+        rows and kept with them under `_screener_key`, so the look-through's fundamentals
+        card reads them instead of computing each company again (#86: ~10 s a request).
+        """
+        return copy.deepcopy((await self._screened())["figures"])
+
+    async def _screened(self) -> Dict[str, Any]:
+        """The screener's kept answer, computed again when `_screener_key` changed."""
         listed = await self.list_companies()
         key = await self._screener_key(listed)
         if _screener_cache.get("key") != key:
-            _screener_cache.update(key=key, rows=await self._screen(listed))
-        return copy.deepcopy(_screener_cache["rows"])
+            rows, figures = await self._screen(listed)
+            _screener_cache.update(key=key, rows=rows, figures=figures)
+        return _screener_cache
 
     async def _screener_key(self, listed: List[Dict[str, Any]]) -> tuple:
         """
@@ -1546,10 +1560,14 @@ class CompanyFinancialsService:
             tuple(actions),
         )
 
-    async def _screen(self, listed: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-        """The screener's rows, computed: one company's page in one line each."""
+    async def _screen(
+        self, listed: List[Dict[str, Any]]
+    ) -> Tuple[List[Dict[str, Any]], Dict[str, Tuple[Optional[str], Dict[str, Any]]]]:
+        """The screener's rows, computed — one company's page in one line each — and each
+        company's (currency, key figures) as `key_figures` gives them."""
         companies = await self.companies_by_key(c["key"] for c in listed)
         out: List[Dict[str, Any]] = []
+        figures: Dict[str, Tuple[Optional[str], Dict[str, Any]]] = {}
         for entry in listed:
             company = companies.get(entry["key"])
             if company is None:
@@ -1557,6 +1575,7 @@ class CompanyFinancialsService:
             priced = await self._priced(company)
             rows = priced["rows"]
             stats = key_stats(rows, priced["current"])
+            figures[company.key] = (priced["currency"], copy.deepcopy(stats))
             track = dividend_track(rows, stats)
             own = multiple_medians(rows, priced["prices"])
             row: Dict[str, Any] = {
@@ -1592,7 +1611,7 @@ class CompanyFinancialsService:
                     window: premium(stats[name], value) for window, value in own[name].items()
                 }
             out.append(row)
-        return out
+        return out, figures
 
     async def get_financials(
         self,
