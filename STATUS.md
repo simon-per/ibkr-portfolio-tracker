@@ -7,7 +7,7 @@
 > [docs/troubleshooting.md](docs/troubleshooting.md); local-dev traps in
 > [docs/local-development.md](docs/local-development.md).
 
-**Last updated: 2026-11-16.** The **Company tab** (one company's SEC EDGAR fundamentals history,
+**Last updated: 2026-11-17.** The **Company tab** (one company's SEC EDGAR fundamentals history,
 docs/company-financials.md) is deployed and filled for the held filers **and the Nasdaq-100**
 (102 companies with figures, keyed by CIK), with key figures, valuation multiples (weekly Yahoo closes), ROE and net cash, gross margin, operating income,
 buybacks & dividends, cash & debt and 3/5/10Y CAGRs (docs/shipped-log.md 2026-10-25). PR #80 (Swiss residency)
@@ -105,16 +105,23 @@ code trace; all of them shipped that evening (waves 1–3, the product issues #7
 
 Only what is still unverified.
 
+- **The Company tab beyond today's SEC scope, steps 0+1 (branch `company-markets`, 2026-11-17):**
+  migrations `c4e6a8b0d2f4` (`companies`, `company_financials.company_id`; tested up/down/up on a
+  production snapshot) and `d5f7b9c1e3a6` (`sec_tickers.title`, `annual_form`). Right after the
+  deploy: `/api/company-financials/companies` carries `key` (`sec:<cik>`) on every row and TSMC's
+  `security_ids` holds the 2330 listing (a Positions row of 2330 opens TSMC); `#company/<cik>`
+  links still open. The **Sunday 2026-11-22 05:00 pass** (or a narrowed manual run, not
+  `--force`): one ticker-list request, `name_checks` about 20 (once), `name_matched` including
+  ACN, ETN, JCI, NVT, and `universe` up by about 33 (the look-through's rows 101–200 and the four
+  Irish 10-K filers). Then `company_prices_refresh` asks Yahoo for about 33 more companies' weekly
+  closes and the 05:00 profile chunk's rotation is that much longer — the budget the owner
+  approved; record the real counts (`companies_due`, `fetched` on the price pass) here.
+
 - **The Company tab's source waterfall (deployed 2026-11-16 as `736f9b9`, `/health` checked; with the 2026-11-15 gap fills):** migrations
-  `f1b3d5e7a9c2` and `a2c4e6f8b0d1`. Nothing moves until each company is refetched — the Sunday
-  2026-11-22 05:00 pass does all of them (fetched > 6 days ago), or sooner by hand:
-  `docker exec backend-portfolio-backend-1 python -m app.cli.fetch_company_financials --force`,
-  which is EDGAR only (no Yahoo, no IBKR: an earlier note here said otherwise and was wrong) and
-  also reads every company's SEC profile for the classification. Not within 10 minutes of a
-  05:00 run (the weekday check writes the same rows). That first pass reads more filings than any after it (the
-  companies' own capex and debt concepts, ten years of BRK's and PCAR's segment columns, the
-  filings companyfacts skipped) within 24 a company, and SEC's `index.json` answers 503 now and
-  then: a company whose read fails resumes the Sunday after. Then, on the public API: AEP's and
+  `f1b3d5e7a9c2` and `a2c4e6f8b0d1`. **Refetched by hand 2026-11-17** on `284608b`
+  (`fetch_company_financials --force`, EDGAR only): 131 of 132 companies, 0 failed, 268 filings
+  read, 0 filing errors, 132 profiles read; TRI has no 10-Q/10-K (a 40-F filer); `bridged`,
+  `extended` (NVDA capex, CDNS debt) and `segments` (PCAR, BRK-A debt) all present. Still to read on the public API: AEP's and
   EXC's Q2 2026 EPS and TTM P/E; ALNY's Q1 2026; NU's and TSMC's FY2025; NVDA's capex FY2013–FY2021
   and its TTM FCF before Q3 FY2024; CDNS's debt at its year ends; BRK's and PCAR's debt (from
   segment columns, never a zero); XEL's quarterly revenue reaching 2026; LLY's, VZ's and ROP's FCF
@@ -126,13 +133,13 @@ Only what is still unverified.
   ran (its reserve of 10). The measurement, before and after over all 132 documents, is in
   docs/company-financials.md (*Known gaps*).
 
-- **Company classification, SEC first (2026-11-16, branch `ccr-47cc7bbe-8060um`):** migration
-  `b3d5f7a9c1e2` marks every company's submissions profile unread, so the next Sunday pass reads each
-  company's `submissions` once (about 130 small requests) and keeps `ownerOrg`; each companyfacts
-  fetch stores `statement_model`. Then `/api/company-financials/{cik}`'s `profile` should show
-  `business_model` bank for BAC/JPM/IBKR/SOFI/NU and insurer for BRK, and Visa's, Mastercard's and
-  PayPal's sector from `gics`; the pass's record lists `classification_conflicts` (ASML and LRCX's
-  sector, MSTR's model).
+- **Company classification, SEC first:** verified on production 2026-11-17 after the forced
+  fetch — `profile` shows bank for BAC, JPM, IBKR, SOFI (statements) and NU (SIC), insurer for BRK,
+  and Visa's, Mastercard's and PayPal's sector from `gics`. Unseen: ASML's and LRCX's sector
+  conflict in `classification_conflicts` (only MSTR's model was listed): a pass reads profiles
+  after the companyfacts loop (`company_financials_sync.refresh`), so the first pass classified
+  with no `owner_org` stored; the next pass that refetches them should list them (not the Sunday
+  2026-11-22 one, where nothing is 6 days old).
 
 - **GBP as a base currency, and every base's FX history from the first purchase (2026-11-14):**
   deployed 13:41 Berlin (`/health` on `54bf2a2`; `/api/settings` lists GBP). Still unseen: the first
@@ -541,20 +548,17 @@ Rough priority. Re-verify each `path:line` in code before fixing; lines move.
     hidden Analytics tab's `segments` through `decompose` before that tab returns (it still
     classifies basket rows itself, with raw countries). Researched future sources (N-PORT,
     commercial APIs — do not re-shop) are in docs/lookthrough.md.
-7. **Company classification and markets beyond the SEC (owner, 2026-11-16).** Every company is
-   classified by a waterfall, **the company's own regulator first**, then the other sources as
-   fallback; never by hand or a per-company table. Two answers per company, each with the source
-   that decided it: the **business model** (industrial, bank/broker, insurer: it decides the KPI
-   set) — the statements' own concepts, then the segment note, then the SIC code, then SEC's
-   reviewing office (`ownerOrg`), the fund baskets' GICS never alone — and the **sector** — SIC,
-   then `ownerOrg` where the SIC is a catch-all, then the baskets' GICS, then Yahoo's (held only).
-   Order of work: **(1) US** — done 2026-11-16 on the branch (classification, no card for a figure
-   a company does not report, a bank's KPI set); the insurer set waits for an insurer that tags its
-   premiums undimensioned (BRK does not); **(2) Europe**: ESEF annual reports from filings.xbrl.org,
-   found by LEI (GLEIF, already cached), read through the existing IFRS twins; **(3) South Korea
-   (OpenDART) and Taiwan (MOPS)**, before Japan — the owner holds more there; **(4) Japan
-   (EDINET)**; **(5) the rest** (China A/H, India, the Middle East) later — no usable free
-   structured source today, so their US ADR filers only. The sources and caveats per market are in
+7. **Company classification and markets beyond the SEC (owner, 2026-11-16; order fixed
+   2026-11-17).** Every market: **its own regulator first**, every other source fill-only; never by
+   hand or a per-company table (a standard translated once — SIC, KSIC, GICS — is fine). Blanks stay
+   blank, every value records its source, reporting currency, refuse whole. Order of work: **(1) more
+   SEC filers** — done 2026-11-17 (the look-through's top 200, Irish 10-K filers found by name, a
+   held foreign listing linked through the identity store); **(2) South Korea** via OpenDART;
+   **(3) Europe** via ESEF (filings.xbrl.org, by LEI); then **Japan (EDINET)**, **Taiwan (MOPS)**,
+   **the rest** (China A/H, India, the Middle East — no usable free structured source, their US ADR
+   filers only). Korean and European companies get no Yahoo request: their price-based multiples
+   stay blank. The US classification shipped 2026-11-16; the insurer set waits for an insurer that
+   tags its premiums undimensioned (BRK does not). Sources and caveats per market:
    docs/company-financials.md, *Markets beyond the SEC*.
 7a. **The Company tab after the waterfall** (2026-11-16): read a quarter's own 10-Q for the
     company's own debt concepts (years only today, so CDNS's quarters stay without debt), and
