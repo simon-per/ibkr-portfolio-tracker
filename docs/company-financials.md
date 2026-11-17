@@ -919,7 +919,11 @@ than `PEERS_MIN` (4) others, its three-digit group (`sic // 10`, `widened`). The
 then the rest by TTM revenue, largest first, at most `PEERS_MAX` (15) rows. **Each row's figures are
 the overview's own** — `_priced` (rows, closes on the split basis, today's close) and `key_stats`,
 the one path `get_financials` reads too; `tests/test_company_peers.py` compares every peer's
-`key_stats` with its own overview's. No industry is no peers. On the tab: a collapsed card under the
+`key_stats` with its own overview's. **A company with no SIC** — a Korean or European one (#84,
+2026-11-17) — takes every listed company, of any regulator, that its page and theirs classify in
+the same sector and business model (`_sector_peers`, `basis` "sector"; Samsung's KSIC 264 beside the
+SEC's Technology filers, HSBC beside the banks); no sector is no peers. The card shows when the
+profile names an industry or a sector, headed by whichever it has. On the tab: a collapsed card under the
 charts (`CompanyPeersCard`), shown only when the profile names an industry, that asks the server
 only once opened (about six queries a peer); the industry and `SIC 3674` (or `SIC 367x` widened)
 on its header, a sortable table (`peerColumns`, in `tableFamily.test.tsx`) whose rows link through

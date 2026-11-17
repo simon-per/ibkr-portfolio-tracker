@@ -847,8 +847,12 @@ export function CompanyTab() {
                   ))
                 : <ChartSkeletons />}
             </div>
-            {data?.profile.industry && (
-              <CompanyPeersCard key={data.key} companyKey={data.key} industry={data.profile.industry} />
+            {data && (data.profile.industry || data.profile.sector !== 'Unknown') && (
+              <CompanyPeersCard
+                key={data.key}
+                companyKey={data.key}
+                industry={data.profile.industry ?? data.profile.sector}
+              />
             )}
             </>
           )}

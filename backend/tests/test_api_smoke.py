@@ -644,7 +644,7 @@ def test_company_financials_serve_their_contract_through_the_real_stack(client):
         assert client.get(f"/api/company-financials/{unknown}").status_code == 404
 
     # Another regulator's company: its figures, no price and no multiple (no Yahoo request
-    # is made for it), no SEC classification, no peers.
+    # is made for it), no SEC classification; no KSIC code here, so no sector and no peers.
     hynix = client.get("/api/company-financials/dart:00164779?period=annual").json()
     assert (hynix["key"], hynix["cik"], hynix["currency"]) == ("dart:00164779", None, "KRW")
     assert [p["value"] for p in hynix["series"]["revenue"]["points"]] == [32765.7, 66193.0]

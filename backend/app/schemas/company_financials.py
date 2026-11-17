@@ -339,6 +339,12 @@ class CompanyPeers(BaseModel):
     widened: bool = Field(
         ..., description="True when the peers are the three-digit SIC group's."
     )
+    basis: str = Field(
+        "sic",
+        description="`sic` (the SEC industry) or `sector` (a company with no SIC: its "
+        "sector and business model).",
+    )
+    sector: Optional[str] = Field(None, description="The sector peers share (basis `sector`).")
     peers: List[CompanyPeer] = Field(default_factory=list)
 
 

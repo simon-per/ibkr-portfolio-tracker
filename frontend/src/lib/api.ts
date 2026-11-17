@@ -1763,6 +1763,10 @@ export interface CompanyPeers {
   industry: string | null;
   /** True when the peers are the three-digit SIC group's. */
   widened: boolean;
+  /** `sic` (the SEC industry) or `sector` (no SIC: its sector and business model). */
+  basis: 'sic' | 'sector';
+  /** The sector the peers share (basis `sector`). */
+  sector: string | null;
   peers: CompanyPeer[];
 }
 

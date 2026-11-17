@@ -16,7 +16,7 @@ function peer(cik: number, symbol: string, stats: Partial<CompanyPeer['key_stats
 }
 
 const PEERS: CompanyPeers = {
-  key: 'sec:1', cik: 1, sic: 3674, industry: 'Semiconductors', widened: true,
+  key: 'sec:1', cik: 1, sic: 3674, industry: 'Semiconductors', widened: true, basis: 'sic', sector: null,
   peers: [
     peer(1, 'NVDA', { pe_ratio: 45, revenue: 300e9 }),
     peer(2, 'AVGO', { pe_ratio: null, revenue: 60e9 }),

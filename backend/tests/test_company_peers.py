@@ -114,3 +114,61 @@ async def test_the_response_declares_every_key_the_service_returns(db):
     for peer in body["peers"]:
         assert set(peer) == set(CompanyPeer.model_fields)
         assert set(peer["key_stats"]) == set(CompanyFinancialsKeyStats.model_fields)
+
+
+async def _korean(db, revenue=500.0, ksic="264"):
+    from app.models.company_financials import Company
+
+    company = Company(
+        scheme="dart",
+        native_id="00126380",
+        ticker="005930",
+        name="Samsung",
+        country="KR",
+        industry_code=ksic,
+        industry="Manufacture of telecommunication and broadcasting apparatuses",
+        universe_seen_at=STAMP,
+        fetched_at=utcnow(),
+    )
+    db.add(company)
+    await db.flush()
+    for end, metric in product(QUARTERS, ("revenue", "net_income")):
+        db.add(
+            CompanyFinancial(
+                company_id=company.id,
+                period_end=end,
+                fiscal_year=2025,
+                fiscal_period=f"Q{QUARTERS.index(end) + 1}",
+                metric=metric,
+                value=revenue if metric == "revenue" else revenue / 5,
+                unit="KRW",
+                source_concept="dart:X",
+                filed=end,
+                fetched_at=utcnow(),
+            )
+        )
+    await db.commit()
+    return company
+
+
+@pytest.mark.asyncio
+async def test_a_company_without_a_sic_has_its_sectors_peers(db):
+    # #84: a Korean company's peers are the listed companies its page and theirs put in
+    # its sector and business model — SIC 3674, 3672 and 7372 are Technology, as KSIC 264.
+    await _book(db)
+    samsung = await _korean(db)
+    service = CompanyFinancialsService(db)
+    body = await service.peers(samsung)
+    assert (body["basis"], body["sector"], body["sic"]) == ("sector", "Technology", None)
+    assert [p["symbol"] for p in body["peers"]] == ["005930", "DDD", "BBB", "CCC", "AAA"]
+    assert set(body) == set(CompanyPeers.model_fields)
+    own = await service.get_financials(samsung)
+    assert body["peers"][0]["key_stats"] == own["key_stats"]
+
+
+@pytest.mark.asyncio
+async def test_a_company_without_a_sic_or_a_sector_has_no_peers(db):
+    await _book(db)
+    unknown = await _korean(db, ksic=None)
+    body = await CompanyFinancialsService(db).peers(unknown)
+    assert body["peers"] == [] and body["sector"] is None

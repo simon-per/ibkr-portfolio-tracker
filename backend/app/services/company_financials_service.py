@@ -81,6 +81,7 @@ from app.repositories.market_price_repository import MarketPriceRepository
 from app.repositories.security_repository import held
 from app.repositories.sync_run_repository import utc_iso
 from app.services.company_classification import Classification, classify, gics_sector
+from app.services.sector_taxonomy import UNKNOWN
 from app.services.company_identity import IdentityMember
 from app.services.company_financials_normaliser import ANNUAL, SPLIT_RATIOS
 
@@ -1392,9 +1393,12 @@ class CompanyFinancialsService:
         """
         The Peers card (review item R1, 2026-11-08): the companies the tab lists in this
         one's SEC industry (`sic`), and when that holds fewer than `PEERS_MIN` others, in its
-        three-digit group. Each with the overview's key figures (`_priced`, `key_stats`),
-        largest TTM revenue first, at most `PEERS_MAX` with the company itself always
-        among them. No industry is no peers.
+        three-digit group. A company with no SIC — another regulator's (#84, 2026-11-17) —
+        takes every listed company of its sector and business model, as each one's own page
+        classifies it (`_classification`), SEC filers included (`basis` "sector"). Each with
+        the overview's key figures (`_priced`, `key_stats`), largest TTM revenue first, at
+        most `PEERS_MAX` with the company itself always among them. No industry and no
+        sector is no peers.
         """
         out: Dict[str, Any] = {
             "key": company.key,
@@ -1402,28 +1406,36 @@ class CompanyFinancialsService:
             "sic": company.sic,
             "industry": company.industry,
             "widened": False,
+            "basis": "sic",
+            "sector": None,
             "peers": [],
         }
-        if company.sic is None:
-            return out
-        listed = {c["cik"] for c in await self.list_companies() if c["cik"] is not None}
-        others = [
-            c
-            for c in (await self.repo.companies(listed)).values()
-            if c.cik != company.cik and c.sic is not None
-        ]
-        same = [c for c in others if c.sic == company.sic]
-        if len(same) < PEERS_MIN:
-            out["widened"] = True
-            same = [c for c in others if c.sic // 10 == company.sic // 10]
-        members = [company, *same]
-        held = await self._held_listings([c.cik for c in members])
+        listed_rows = await self.list_companies()
+        if company.sic is not None:
+            listed = {c["cik"] for c in listed_rows if c["cik"] is not None}
+            others = [
+                c
+                for c in (await self.repo.companies(listed)).values()
+                if c.cik != company.cik and c.sic is not None
+            ]
+            same = [c for c in others if c.sic == company.sic]
+            if len(same) < PEERS_MIN:
+                out["widened"] = True
+                same = [c for c in others if c.sic // 10 == company.sic // 10]
+            members = [company, *same]
+            held = await self._held_listings([c.cik for c in members])
+            listing_of = {m.key: held.get(m.cik) for m in members}
+        else:
+            out["basis"] = "sector"
+            members, listing_of = await self._sector_peers(company, listed_rows, out)
+            if not members:
+                return out
         rows = []
         for member in members:
             currency, stats = await self.key_figures(member)
             rows.append(
                 {
-                    **self._identity(member, held.get(member.cik)),
+                    **self._identity(member, listing_of.get(member.key)),
                     "currency": currency,
                     "key_stats": stats,
                 }
@@ -1438,6 +1450,43 @@ class CompanyFinancialsService:
         )
         out["peers"] = [mine, *rest[: PEERS_MAX - 1]]
         return out
+
+    async def _sector_peers(
+        self, company, listed_rows: List[Dict[str, Any]], out: Dict[str, Any]
+    ) -> Tuple[List[Any], Dict[str, Optional[Security]]]:
+        """The company and every listed company its page and theirs put in one sector and
+        business model, each with the held listing its page reads (the lowest symbol);
+        nothing when its own sector is unknown."""
+        by_key = await self.companies_by_key([r["key"] for r in listed_rows])
+        by_key.setdefault(company.key, company)
+        ids = sorted({i for r in listed_rows for i in r.get("security_ids") or []})
+        securities = (
+            {
+                s.id: s
+                for s in (
+                    await self.db.execute(select(Security).where(Security.id.in_(ids)))
+                ).scalars()
+            }
+            if ids
+            else {}
+        )
+        listing_of: Dict[str, Optional[Security]] = {}
+        for r in listed_rows:
+            held = [securities[i] for i in r.get("security_ids") or [] if i in securities]
+            listing_of[r["key"]] = min(held, key=lambda s: (s.symbol, s.id)) if held else None
+        mine = await self._classification(company, listing_of.get(company.key))
+        out["sector"] = mine.sector if mine.sector != UNKNOWN else None
+        if out["sector"] is None:
+            return [], listing_of
+        same = []
+        for r in listed_rows:
+            other = by_key.get(r["key"])
+            if other is None or other.key == company.key:
+                continue
+            kind = await self._classification(other, listing_of.get(other.key))
+            if (kind.sector, kind.business_model) == (mine.sector, mine.business_model):
+                same.append(other)
+        return [company, *same], listing_of
 
     async def screener(self) -> List[Dict[str, Any]]:
         """

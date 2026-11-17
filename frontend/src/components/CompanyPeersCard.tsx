@@ -130,9 +130,10 @@ export function peerColumns(): Column<CompanyPeer, PeerSortKey>[] {
 }
 
 /**
- * The companies the tab lists in this one's SEC industry, with the overview's key figures
- * (review item R1). Collapsed: it asks the server only once opened. The company itself
- * leads until a column is sorted.
+ * The companies the tab lists in this one's SEC industry — or, for a company with no SEC
+ * industry (Korean, European), in its sector and business model (#84) — with the overview's
+ * key figures (review item R1). Collapsed: it asks the server only once opened. The company
+ * itself leads until a column is sorted.
  */
 export function CompanyPeersCard({ companyKey, industry }: { companyKey: string; industry: string }) {
   const [open, setOpen] = useState(false)
@@ -188,7 +189,9 @@ export function CompanyPeersCard({ companyKey, industry }: { companyKey: string;
           ) : !peers.data ? (
             <div className="h-24 animate-pulse rounded-lg bg-muted" />
           ) : rows.length < 2 ? (
-            <p className="py-4 text-sm text-muted-foreground">No other company in this industry.</p>
+            <p className="py-4 text-sm text-muted-foreground">
+              No other company in this {peers.data.basis === 'sector' ? 'sector' : 'industry'}.
+            </p>
           ) : (
             <DataTable
               rows={rows}
