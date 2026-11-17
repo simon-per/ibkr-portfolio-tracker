@@ -70,6 +70,14 @@ def is_configured() -> bool:
     return bool((settings.edgar_user_agent or "").strip())
 
 
+@dataclass(frozen=True)
+class ListedTicker:
+    """One line of the SEC's ticker list: the filer and the SEC's name for it."""
+
+    cik: int
+    title: Optional[str]
+
+
 def sec_ticker(symbol: str) -> str:
     """A symbol as the SEC's list spells it: IBKR's "BRK B" and Yahoo's "BRK.B" are "BRK-B"."""
     return symbol.strip().upper().replace(" ", "-").replace(".", "-")
@@ -160,20 +168,28 @@ class EdgarClient(PacedGet):
 
     async def company_tickers(self) -> Dict[str, int]:
         """SEC ticker -> CIK. An answer that is not the expected shape is `EdgarError`."""
+        return {t: entry.cik for t, entry in (await self.company_ticker_list()).items()}
+
+    async def company_ticker_list(self) -> Dict[str, "ListedTicker"]:
+        """SEC ticker -> its CIK and the SEC's name for the company (`title`), from the one
+        request. An answer that is not the expected shape is `EdgarError`."""
         body = await self._get_json(TICKERS_URL)
         if not isinstance(body, dict):
             raise EdgarError("company_tickers.json answered without a ticker table")
-        out: Dict[str, int] = {}
+        out: Dict[str, ListedTicker] = {}
         for row in body.values():
             if not isinstance(row, dict):
                 continue
-            ticker, cik = row.get("ticker"), row.get("cik_str")
+            ticker, cik, title = row.get("ticker"), row.get("cik_str"), row.get("title")
             if (
                 isinstance(ticker, str)
                 and isinstance(cik, int)
                 and not isinstance(cik, bool)
             ):
-                out.setdefault(ticker.upper(), cik)
+                out.setdefault(
+                    ticker.upper(),
+                    ListedTicker(cik, title.strip() if isinstance(title, str) else None),
+                )
         if not out:
             raise EdgarError("company_tickers.json listed no ticker")
         return out

@@ -216,6 +216,11 @@ class SecTicker(Base):
     ticker: Mapped[str] = mapped_column(String(20), primary_key=True)
     cik: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
     checked_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+    # The SEC's name for the company (`title` of the ticker list), and the form of the
+    # newest annual report its filer lists (`10-K`, `20-F`; `-` for none), asked only for a
+    # company found by its name (`company_financials_sync.names_agree`, 2026-11-17).
+    title: Mapped[Optional[str]] = mapped_column(String(200), nullable=True)
+    annual_form: Mapped[Optional[str]] = mapped_column(String(10), nullable=True)
 
     def __repr__(self) -> str:
         return f"<SecTicker {self.ticker} cik={self.cik}>"

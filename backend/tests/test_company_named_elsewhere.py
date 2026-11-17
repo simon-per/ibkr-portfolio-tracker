@@ -103,9 +103,12 @@ async def test_the_named_companies_come_on_top_of_the_capped_index(
     await _named(db)
 
     named = await company_financials_sync.CompanyFinancialsSync(db).named_elsewhere()
-    assert [(c.ticker, c.isin, c.capped) for c in named] == [
-        ("AAPL", "US0378331005", False),
-        ("GOOGL", None, False),
+    # Roche has no US ISIN: it is named by its basket ticker, to be checked by name (its
+    # ROG is Rogers Corp's at the SEC, and this fake SEC lists no ROG at all).
+    assert [(c.ticker, c.isin, c.capped, c.name_check) for c in named] == [
+        ("AAPL", "US0378331005", False, False),
+        ("ROG", "CH0012032048", False, True),
+        ("GOOGL", None, False, False),
     ]
 
     edgar = Edgar()

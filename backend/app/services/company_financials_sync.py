@@ -23,6 +23,10 @@ is due, so a report reaches the tab the next morning rather than on Sunday.
   look-through's heaviest `NAMED_LOOKTHROUGH` companies with a US ISIN and the watchlist's
   US tickers, on top of the index's hundred. Each full pass stamps the companies it found
   (`universe_seen_at`), which is how the tab lists the current index and not a former member.
+  A look-through company **without** a US ISIN (an Irish 10-K filer: Eaton, Accenture) is
+  found by the baskets' ticker only when the SEC's name for that ticker agrees with the
+  company's (`names_agree`) and the SEC filer reports on 10-K (`annual_form`): Roche's ROG is
+  Rogers Corp's ticker there, Schneider's SU Suncor's (2026-11-17).
 
 A foreign private issuer's annual 20-F counts as an annual report (review item R6): ASML's in
 US GAAP, NU's and TSMC's in IFRS (`normaliser.IFRS_TWINS`), annual figures only. A filer
@@ -59,6 +63,8 @@ Touches neither Yahoo nor IBKR.
 
 import asyncio
 import logging
+import re
+import unicodedata
 import xml.etree.ElementTree as ET
 from collections import Counter, defaultdict
 from dataclasses import dataclass, field
@@ -87,6 +93,7 @@ from app.services.company_classification import classify, statement_model
 from app.services.company_financials_normaliser import normalise
 from app.services.company_vendor_fill import fill as vendor_fill
 from app.services.edgar_client import (
+    ANNUAL_FORM_PREFIXES,
     FINANCIAL_SIC,
     EdgarClient,
     EdgarError,
@@ -145,8 +152,14 @@ UNIVERSE_FUNDS = ("QQQM",)
 UNIVERSE_SIZE = 100
 #: The look-through's heaviest companies whose US filers the tab carries beside the index
 #: (`named_elsewhere`, review item R5; owner's approval 2026-11-07 for about twenty more
-#: companies' EDGAR and Yahoo requests a week).
-NAMED_LOOKTHROUGH = 100
+#: companies' EDGAR and Yahoo requests a week; 100 -> 200 on 2026-11-17, owner's approval
+#: for about thirty more companies' weekly closes and profile rotation).
+NAMED_LOOKTHROUGH = 200
+#: The annual report a company found by its name must file: a 10-K. A 20-F filer listed in
+#: New York through depositary receipts quotes a receipt that can stand for two shares, or
+#: half of one, beside an EPS per ordinary share, and its home regulator's report is the
+#: other markets' passes' (docs/company-financials.md, *Scope*).
+NAME_MATCH_FORMS = ("10-K",)
 #: Filing instances read for one company in one pass (two requests each). The first fill
 #: reads MA's six years of dividend gaps in about ten, BKR's nine in about twenty; a company
 #: that keeps tagging only on a dimension member needs one a quarter after that.
@@ -201,6 +214,74 @@ class Constituent:
     # Counted against `UNIVERSE_SIZE`: the index's lines. The companies the look-through and
     # the watchlist name (`named_elsewhere`) are not; they come on top.
     capped: bool = True
+    # A company without a US ISIN, found by the baskets' ticker: it resolves only when the
+    # SEC's name for the ticker agrees with one of `names` (`names_agree`) and the filer
+    # reports on 10-K (`NAME_MATCH_FORMS`).
+    name_check: bool = False
+    names: Tuple[str, ...] = ()
+
+
+#: Legal forms and share-class words, dropped from the end of a name before two names are
+#: compared (`name_tokens`). A standard's words, never a company's.
+LEGAL_FORMS = frozenset(
+    {
+        "inc", "incorporated", "corp", "corporation", "co", "company", "ltd", "limited",
+        "plc", "public", "llc", "lp", "ag", "sa", "se", "nv", "bv", "spa", "sab", "cv",
+        "de", "oyj", "asa", "kgaa", "gmbh", "aktiengesellschaft", "the", "adr", "ads",
+        "ord", "shs", "reg", "n",
+    }
+)
+_CLASS = re.compile(r"\b(?:class|cl)\s+[a-z]\b")
+_PARENS = re.compile(r"\([^)]*\)")
+#: A basket name this long may be cut short (`JOHNSON CONTROLS INTERNATION`).
+TRUNCATED_NAME_LENGTH = 24
+
+
+def name_tokens(name: str) -> List[str]:
+    """
+    A company name for comparison: accents and case dropped, dots of abbreviations closed
+    (S.A. is SA), `&` as `and`, parentheticals and share classes (`Class A`, `CL A`) removed,
+    then legal forms dropped from the end (`Corp plc`, `public limited company`, `AG`).
+    """
+    text = unicodedata.normalize("NFKD", name or "")
+    text = "".join(ch for ch in text if not unicodedata.combining(ch)).lower()
+    text = _PARENS.sub(" ", text).replace(".", "").replace("&", " and ")
+    text = re.sub(r"[^a-z0-9]+", " ", text)
+    tokens = _CLASS.sub(" ", text).split()
+    while tokens and tokens[-1] in LEGAL_FORMS:
+        tokens.pop()
+    return tokens
+
+
+def names_agree(names: Sequence[str], title: Optional[str]) -> bool:
+    """
+    Whether the SEC's name for a ticker (`title`) is one of `names` (the look-through's and
+    the baskets'), under `name_tokens`. Equal tokens agree; so does a basket name long
+    enough to have been cut short (`TRUNCATED_NAME_LENGTH`) whose tokens begin the SEC's,
+    its last token a prefix of the SEC's same token — two tokens at least. Nothing else:
+    Roche Holding is not Rogers, Schneider Electric not Suncor.
+    """
+    if not title:
+        return False
+    sec = name_tokens(title)
+    if not sec:
+        return False
+    for name in names:
+        ours = name_tokens(name)
+        if not ours:
+            continue
+        if ours == sec:
+            return True
+        short, long_ = (ours, sec) if len(ours) <= len(sec) else (sec, ours)
+        raw = name if short is ours else title
+        if (
+            len(raw.strip()) >= TRUNCATED_NAME_LENGTH
+            and len(short) >= 2
+            and short[:-1] == long_[: len(short) - 1]
+            and long_[len(short) - 1].startswith(short[-1])
+        ):
+            return True
+    return False
 
 
 @dataclass
@@ -315,29 +396,55 @@ class CompanyFinancialsSync:
         from app.services.lookthrough_service import LookthroughService
 
         view = await LookthroughService(self.db).get_lookthrough(limit=NAMED_LOOKTHROUGH)
-        wanted: List[Tuple[str, str]] = []
+        # (the ISINs whose basket lines name the ticker, the company's name, a US ISIN?)
+        wanted: List[Tuple[List[str], str, bool]] = []
         for row in view.get("companies") or []:
-            isin = next(
-                (i for i in sorted(row.get("isins") or []) if i.upper().startswith("US")),
-                None,
-            )
-            if isin is not None:
-                wanted.append((isin.upper(), row.get("name") or isin))
+            isins = sorted({i.upper() for i in row.get("isins") or [] if i})
+            us = [i for i in isins if i.startswith("US")]
+            if us:
+                wanted.append((us[:1], row.get("name") or us[0], True))
+            elif isins:
+                wanted.append((isins, row.get("name") or isins[0], False))
         counts: Dict[str, Counter] = defaultdict(Counter)
-        if wanted:
+        names: Dict[str, Counter] = defaultdict(Counter)
+        every = sorted({isin for isins, _, _ in wanted for isin in isins})
+        if every:
             found = await self.db.execute(
-                select(EtfHolding.constituent_isin, EtfHolding.constituent_ticker).where(
-                    EtfHolding.constituent_isin.in_([isin for isin, _ in wanted]),
+                select(
+                    EtfHolding.constituent_isin,
+                    EtfHolding.constituent_ticker,
+                    EtfHolding.constituent_name,
+                ).where(
+                    EtfHolding.constituent_isin.in_(every),
                     EtfHolding.constituent_ticker.is_not(None),
                 )
             )
-            for isin, ticker in found:
+            for isin, ticker, line_name in found:
                 counts[isin.upper()][sec_ticker(ticker)] += 1
+                if line_name:
+                    names[isin.upper()][line_name.strip()] += 1
         out: List[Constituent] = []
-        for isin, name in wanted:
-            if counts[isin]:
-                ticker = max(counts[isin].items(), key=lambda kv: (kv[1], kv[0]))[0]
-                out.append(Constituent(ticker, name, isin, capped=False))
+        for isins, name, us in wanted:
+            tally: Counter = Counter()
+            for isin in isins:
+                tally.update(counts[isin])
+            if not tally:
+                continue
+            ticker = max(tally.items(), key=lambda kv: (kv[1], kv[0]))[0]
+            if us:
+                out.append(Constituent(ticker, name, isins[0], capped=False))
+                continue
+            line_names = sorted({n for isin in isins for n in names[isin]})
+            out.append(
+                Constituent(
+                    ticker,
+                    name,
+                    isins[0],
+                    capped=False,
+                    name_check=True,
+                    names=tuple([name, *line_names]),
+                )
+            )
         items = (await self.db.execute(select(WatchlistItem))).scalars()
         for item in items:
             symbol = (item.yahoo_ticker or "").strip().upper()
@@ -386,18 +493,30 @@ class CompanyFinancialsSync:
             )
         ]
         known, asked = await self._known_tickers()
+        rows = await self.repo.ticker_rows()
         # A ticker asked before and not listed waits `CIK_RECHECK_AFTER`, like a held one.
         # Once per ticker: the index, the look-through and the watchlist can each name it,
-        # and two `record_ticker`s of one new ticker are two INSERTs (2026-11-11).
+        # and two `record_ticker`s of one new ticker are two INSERTs (2026-11-11). A ticker
+        # a company is found by its name through needs the SEC's name: asked once more when
+        # its row predates the name (`sec_tickers.title`).
         unknown = list(
             {
                 c.ticker: c
                 for c in constituents
-                if c.ticker not in known
-                and (
-                    force
-                    or c.ticker not in asked
-                    or asked[c.ticker] <= now - CIK_RECHECK_AFTER
+                if (
+                    c.ticker not in known
+                    and (
+                        force
+                        or c.ticker not in asked
+                        or asked[c.ticker] <= now - CIK_RECHECK_AFTER
+                    )
+                )
+                or (
+                    c.name_check
+                    and (
+                        c.ticker not in rows
+                        or (rows[c.ticker].cik is not None and rows[c.ticker].title is None)
+                    )
                 )
             }.values()
         )
@@ -422,6 +541,8 @@ class CompanyFinancialsSync:
             "filings_unreadable": 0,
             "ttm_dividend_gaps": [],
             "stale_figures": [],
+            "name_checks": 0,
+            "name_matched": [],
         }
         warnings: List[str] = []
         if missing_baskets:
@@ -431,9 +552,10 @@ class CompanyFinancialsSync:
             )
 
         if dry_run:
-            targets = self._targets(securities, stamps, constituents, known)
+            resolved = self._resolve(constituents, known, rows)
+            targets = self._targets(securities, stamps, resolved)
             due = await self._due(targets, now, force)
-            summary["universe"] = sum(1 for c in constituents if c.ticker in known)
+            summary["universe"] = sum(1 for _, cik in resolved if cik is not None)
             summary["companies_due"] = len(due)
             summary["profiles_due"] = len(await self._profiles_due(targets, now, force))
             summary["outcomes"] = [
@@ -460,15 +582,19 @@ class CompanyFinancialsSync:
             try:
                 if need_cik or unknown:
                     try:
-                        tickers = await client.company_tickers()
+                        listed = await client.company_ticker_list()
                         for security in need_cik:
                             ticker = sec_ticker(security.symbol)
+                            entry = listed.get(ticker)
                             await self.repo.record_cik(
-                                security.id, tickers.get(ticker), ticker, now
+                                security.id, entry.cik if entry else None, ticker, now
                             )
                         for constituent in unknown:
-                            cik = tickers.get(constituent.ticker)
-                            await self.repo.record_ticker(constituent.ticker, cik, now)
+                            entry = listed.get(constituent.ticker)
+                            cik = entry.cik if entry else None
+                            await self.repo.record_ticker(
+                                constituent.ticker, cik, now, entry.title if entry else None
+                            )
                             if cik is not None:
                                 known[constituent.ticker] = cik
                         await self.db.commit()
@@ -480,10 +606,14 @@ class CompanyFinancialsSync:
                             f"the next pass."
                         )
                     stamps = await self.repo.cik_rows(s.id for s in securities)
-                targets = self._targets(securities, stamps, constituents, known)
-                universe = await self._record_universe(
-                    constituents, known, now, stamp=wanted is None
+                rows = await self.repo.ticker_rows()
+                await self._check_forms(client, constituents, rows, summary)
+                resolved = self._resolve(constituents, known, rows)
+                summary["name_matched"] = sorted(
+                    c.ticker for c, cik in resolved if c.name_check and cik is not None
                 )
+                targets = self._targets(securities, stamps, resolved)
+                universe = await self._record_universe(resolved, now, stamp=wanted is None)
                 summary["universe"] = len(universe)
                 await self.db.commit()
                 due = await self._due(targets, now, force)
@@ -570,9 +700,8 @@ class CompanyFinancialsSync:
         constituents, _ = await self.universe()
         stamps = await self.repo.cik_rows(s.id for s in securities)
         known, _ = await self._known_tickers()
-        due = await self._filing_due(
-            self._targets(securities, stamps, constituents, known), now
-        )
+        resolved = self._resolve(constituents, known, await self.repo.ticker_rows())
+        due = await self._filing_due(self._targets(securities, stamps, resolved), now)
         summary: Dict[str, Any] = {
             "status": "success",
             "watching": len(due),
@@ -731,12 +860,71 @@ class CompanyFinancialsSync:
                 known.setdefault(company.ticker, company.cik)
         return known, asked
 
+    @staticmethod
+    def _resolve(
+        constituents: Sequence[Constituent], known: Dict[str, int], rows: Dict[str, Any]
+    ) -> List[Tuple[Constituent, Optional[int]]]:
+        """
+        Each constituent and its CIK, or None. A company found by its name
+        (`Constituent.name_check`) takes the SEC's answer for its ticker only when the SEC's
+        name agrees (`names_agree`) and its annual report is a 10-K (`NAME_MATCH_FORMS`);
+        never a CIK another table knows the ticker by.
+        """
+        out: List[Tuple[Constituent, Optional[int]]] = []
+        for c in constituents:
+            if not c.name_check:
+                out.append((c, known.get(c.ticker)))
+                continue
+            row = rows.get(c.ticker)
+            ok = (
+                row is not None
+                and row.cik is not None
+                and names_agree(c.names or (c.name,), row.title)
+                and (row.annual_form or "").startswith(NAME_MATCH_FORMS)
+            )
+            out.append((c, row.cik if ok else None))
+        return out
+
+    async def _check_forms(
+        self,
+        client: EdgarClient,
+        constituents: Sequence[Constituent],
+        rows: Dict[str, Any],
+        summary: Dict[str, Any],
+    ) -> None:
+        """
+        For a company found by its name whose SEC name agrees, the form of its newest
+        annual report (the `submissions` document, one small request), asked once and kept
+        on its ticker's row (`sec_tickers.annual_form`; `-` when it lists none).
+        """
+        for c in constituents:
+            row = rows.get(c.ticker)
+            if (
+                not c.name_check
+                or row is None
+                or row.cik is None
+                or row.annual_form is not None
+                or not names_agree(c.names or (c.name,), row.title)
+            ):
+                continue
+            try:
+                filings = await client.periodic_filings(row.cik)
+            except EdgarError as e:
+                logger.warning("EDGAR filing list for %s failed: %s", c.ticker, e)
+                continue
+            summary["name_checks"] += 1
+            annual = next(
+                (f.form for f in filings or [] if f.form.startswith(ANNUAL_FORM_PREFIXES)),
+                "-",
+            )
+            await self.repo.record_annual_form(c.ticker, annual)
+        await self.db.commit()
+
     def _targets(
         self,
         securities: Sequence[Security],
         stamps,
-        constituents: Sequence[Constituent],
-        known: Dict[str, int],
+        resolved: Sequence[Tuple[Constituent, Optional[int]]],
     ) -> List[Target]:
         """Every company in scope, held ones first, then the universe heaviest first."""
         by_cik: Dict[int, Target] = {}
@@ -746,24 +934,19 @@ class CompanyFinancialsSync:
                 by_cik.setdefault(row.cik, Target(row.cik)).symbols.append(
                     security.symbol
                 )
-        for cik in self._universe_ciks(constituents, known):
+        for cik in self._universe_ciks(resolved):
             target = by_cik.setdefault(cik, Target(cik))
             if not target.symbols:
-                target.symbols.append(
-                    next(c.ticker for c in constituents if known.get(c.ticker) == cik)
-                )
+                target.symbols.append(next(c.ticker for c, k in resolved if k == cik))
         return list(by_cik.values())
 
     @staticmethod
-    def _universe_ciks(
-        constituents: Sequence[Constituent], known: Dict[str, int]
-    ) -> List[int]:
+    def _universe_ciks(resolved: Sequence[Tuple[Constituent, Optional[int]]]) -> List[int]:
         """The first `UNIVERSE_SIZE` distinct companies among the index's constituents,
         then every company named elsewhere (`named_elsewhere`) not among them."""
         ciks: List[int] = []
         capped = 0
-        for constituent in constituents:
-            cik = known.get(constituent.ticker)
+        for constituent, cik in resolved:
             if cik is None or cik in ciks:
                 continue
             if constituent.capped:
@@ -775,15 +958,13 @@ class CompanyFinancialsSync:
 
     async def _record_universe(
         self,
-        constituents: Sequence[Constituent],
-        known: Dict[str, int],
+        resolved: Sequence[Tuple[Constituent, Optional[int]]],
         now: datetime,
         stamp: bool,
     ) -> List[int]:
-        ciks = self._universe_ciks(constituents, known)
+        ciks = self._universe_ciks(resolved)
         first = {}
-        for constituent in constituents:
-            cik = known.get(constituent.ticker)
+        for constituent, cik in resolved:
             if cik is not None:
                 first.setdefault(cik, constituent)
         for cik in ciks:

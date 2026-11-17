@@ -201,8 +201,36 @@ is one company. Measured budget, approved: about twenty more companies, so about
 companyfacts requests a week, about twenty more Yahoo weekly-close requests every Sunday
 (`company_price_sync`), and the Yahoo profile rotation about 20% longer (`company_profile_sync`).
 They are stamped like the index's, so every reader of the stamp (the picker, the price pass, the
-profile chunk) takes them with no further change. Irish-domiciled 10-K filers outside the index
-(Accenture, Medtronic, Eaton) carry no US ISIN and stay without a page (accepted).
+profile chunk) takes them with no further change.
+
+**Widened 2026-11-17** (owner's order: more SEC filers first; approval for about 30–35 more
+companies' weekly closes and profile rotation): `NAMED_LOOKTHROUGH` 100 → 200, and **a company
+without a US ISIN** is taken too, by the ticker the baskets most often give any of its ISINs —
+**only when the SEC's name for that ticker agrees** (`names_agree`) **and its filer reports on
+10-K** (`NAME_MATCH_FORMS`). The rule (`name_tokens`): accents, case, abbreviation dots (S.A. is
+SA), parentheticals and share classes (`Class A`, `CL A`) dropped, then legal forms dropped from
+the end (`LEGAL_FORMS`: `Corp plc`, `public limited company`, `AG`, `SE`, …); the tokens must be
+equal, or a basket name long enough to have been cut short (24 characters) must begin the SEC's,
+its last token a prefix of the SEC's (`JOHNSON CONTROLS INTERNATION`). The names compared are the
+look-through's (GLEIF's legal name) and every basket's for those ISINs. The SEC's name and the
+form are kept on the ticker's row (`sec_tickers.title`, `annual_form`, migration
+`d5f7b9c1e3a6`): one ticker-list request when a needed name is missing, one `submissions`
+request per agreeing ticker, once (`name_checks`, `name_matched` in the run's record); the name
+check never takes a CIK another table knows the ticker by (Roche's basket ticker `ROP` is Roper's,
+a Nasdaq-100 company). **Why 10-K only**: a 20-F filer's New York listing is often a depositary
+receipt standing for two shares or half of one, beside an EPS per ordinary share, and nothing in
+companyfacts says which; and a European filer's own regulator is ESEF (*Europe*, below).
+`tests/test_company_name_match.py` pins Roche's ROG not resolving to Rogers Corp.
+
+**Measured on SEC's real list** (2026-11-17, the look-through's top 200 on a production snapshot):
+51 companies without a US ISIN; 25 tickers the SEC does not list (home-market codes: 000660, IFX,
+SIE, 7203, …); 5 listed under **another company's** name and refused — SU (Suncor for Schneider),
+ROP (Roper for Roche), TRN (Trinity for Terna), ALV (Autoliv for Allianz), AIR (AAR for Airbus);
+21 names agree, of which the 10-K filers not already listed are **Johnson Controls, Eaton,
+Accenture and nVent**, and SAP, GlobalFoundries, Tower, Shell, AstraZeneca, BHP, Santander,
+TotalEnergies (20-F) and Royal Bank of Canada, Toronto-Dominion (40-F) are refused by form. The
+look-through's rows 101–200 with a US ISIN add 30 more (ServiceNow, Procter & Gamble, Merck,
+Chevron, …; Hydro One's `H-CT` is no SEC ticker). Medtronic is not among the top 200.
 
 - **A constituent nobody holds gets a `sec_companies` row and never a `securities` row**: every
   Yahoo loop reads `securities`, and a hundred new rows there would be a hundred new price
@@ -564,6 +592,8 @@ the repository's `rows_of` / `coverage_of` / `_replace` pick the column (`_owned
   (`_replace`) is not.
 - **Measured on a production snapshot** (2026-11-17): upgrade 2.6 s, 151,011 rows and their value
   sum unchanged, integrity and foreign-key checks clean; downgrade drops only `company_id` rows.
+- **A held listing links through the identity store, never by ticker** (`_linked_listings`, under
+  *Service and API*): 2330@TWSE opens TSMC's page.
 - **No Yahoo for another regulator's company** (owner, 2026-11-17): the price pass and the profile
   chunk take only companies with a CIK, and `_priced` gives one no closes — not even its held
   listing's daily close — so its P/E, market cap and every multiple stay absent.

@@ -122,13 +122,27 @@ class CompanyFinancialsRepository:
         return {row.ticker: row for row in result.scalars()}
 
     async def record_ticker(
-        self, ticker: str, cik: Optional[int], checked_at: datetime
+        self,
+        ticker: str,
+        cik: Optional[int],
+        checked_at: datetime,
+        title: Optional[str] = None,
     ) -> None:
+        """The SEC's answer for a ticker: its CIK (None: not listed) and its name. A new
+        CIK forgets the annual form recorded for the old one."""
         row = await self.session.get(SecTicker, ticker)
         if row is None:
             row = SecTicker(ticker=ticker, checked_at=checked_at)
             self.session.add(row)
-        row.cik, row.checked_at = cik, checked_at
+        if row.cik != cik:
+            row.annual_form = None
+        row.cik, row.checked_at, row.title = cik, checked_at, title
+
+    async def record_annual_form(self, ticker: str, form: str) -> None:
+        """The form of the newest annual report the ticker's filer lists (`-`: none)."""
+        row = await self.session.get(SecTicker, ticker)
+        if row is not None:
+            row.annual_form = form
 
     # ── sec_companies ────────────────────────────────────────────────────────
 
