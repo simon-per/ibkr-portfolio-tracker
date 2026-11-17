@@ -107,8 +107,11 @@ Only what is still unverified.
 
 - **The Company tab's source waterfall (deployed 2026-11-16 as `736f9b9`, `/health` checked; with the 2026-11-15 gap fills):** migrations
   `f1b3d5e7a9c2` and `a2c4e6f8b0d1`. Nothing moves until each company is refetched — the Sunday
-  2026-11-22 05:00 pass does all of them (fetched > 6 days ago). Do not `--force` it sooner: that
-  re-asks Yahoo for every profile. That first pass reads more filings than any after it (the
+  2026-11-22 05:00 pass does all of them (fetched > 6 days ago), or sooner by hand:
+  `docker exec backend-portfolio-backend-1 python -m app.cli.fetch_company_financials --force`,
+  which is EDGAR only (no Yahoo, no IBKR: an earlier note here said otherwise and was wrong) and
+  also reads every company's SEC profile for the classification. Not within 10 minutes of a
+  05:00 run (the weekday check writes the same rows). That first pass reads more filings than any after it (the
   companies' own capex and debt concepts, ten years of BRK's and PCAR's segment columns, the
   filings companyfacts skipped) within 24 a company, and SEC's `index.json` answers 503 now and
   then: a company whose read fails resumes the Sunday after. Then, on the public API: AEP's and
