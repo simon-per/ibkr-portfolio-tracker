@@ -105,7 +105,7 @@ code trace; all of them shipped that evening (waves 1–3, the product issues #7
 
 Only what is still unverified.
 
-- **The Company tab beyond today's SEC scope, steps 0+1 (branch `company-markets`, 2026-11-17):**
+- **The Company tab beyond today's SEC scope, steps 0+1 (deployed 2026-11-17 as `81b081b`):**
   migrations `c4e6a8b0d2f4` (`companies`, `company_financials.company_id`; tested up/down/up on a
   production snapshot) and `d5f7b9c1e3a6` (`sec_tickers.title`, `annual_form`). Right after the
   deploy: `/api/company-financials/companies` carries `key` (`sec:<cik>`) on every row and TSMC's
@@ -116,6 +116,19 @@ Only what is still unverified.
   Irish 10-K filers). Then `company_prices_refresh` asks Yahoo for about 33 more companies' weekly
   closes and the 05:00 profile chunk's rotation is that much longer — the budget the owner
   approved; record the real counts (`companies_due`, `fetched` on the price pass) here.
+- **Korea and Europe, steps 2+3 (2026-11-17):** migration `e6a8c0d2f4b7` (`company_reports`,
+  `dart_corp_codes`). Job `company_markets_refresh`, **Sunday 05:00**, first run 2026-11-22: a
+  `company_dart_refresh` row (needs `OPENDART_API_KEY` in the VPS `.env`; without it the job
+  records nothing for Korea) — Samsung and SK Hynix, about 97 requests, ~20 minutes at OpenDART's
+  pace from Europe (measured locally; read the VPS's real `requests` and duration), `rows_written`
+  about 1,000, `refused_year` empty — then a `company_esef_refresh` row: 21 LEIs asked, 11
+  companies with filings, about 51 reports and 74 requests, two `too_large` warnings (Santander's
+  FY2022 and FY2024). Then `/api/company-financials/companies` lists `dart:00126380`,
+  `dart:00164779` (Samsung's two held listings and SK Hynix's open their pages) and eleven `lei:`
+  companies, each page in KRW/EUR/USD/GBP with P/E, market cap and multiples blank and no Yahoo
+  request for any of them (`company_prices_refresh` asks no more than step 1 added). To fill
+  sooner: `fetch_company_markets --source dart` / `--source esef` (never `fetch_company_financials
+  --force`).
 
 - **The Company tab's source waterfall (deployed 2026-11-16 as `736f9b9`, `/health` checked; with the 2026-11-15 gap fills):** migrations
   `f1b3d5e7a9c2` and `a2c4e6f8b0d1`. **Refetched by hand 2026-11-17** on `284608b`
@@ -553,8 +566,11 @@ Rough priority. Re-verify each `path:line` in code before fixing; lines move.
    hand or a per-company table (a standard translated once — SIC, KSIC, GICS — is fine). Blanks stay
    blank, every value records its source, reporting currency, refuse whole. Order of work: **(1) more
    SEC filers** — done 2026-11-17 (the look-through's top 200, Irish 10-K filers found by name, a
-   held foreign listing linked through the identity store); **(2) South Korea** via OpenDART;
-   **(3) Europe** via ESEF (filings.xbrl.org, by LEI); then **Japan (EDINET)**, **Taiwan (MOPS)**,
+   held foreign listing linked through the identity store); **(2) South Korea** via OpenDART —
+   built 2026-11-17 (Samsung, SK Hynix); **(3) Europe** via ESEF (filings.xbrl.org, by LEI) —
+   built 2026-11-17 (11 of 21 with an LEI; German and Swiss issuers stay blank: the index holds
+   none, and no free regulator API serves them — a paid fill-only vendor such as EODHD would be the
+   owner's call); next **Japan (EDINET)**, **Taiwan (MOPS)**,
    **the rest** (China A/H, India, the Middle East — no usable free structured source, their US ADR
    filers only). Korean and European companies get no Yahoo request: their price-based multiples
    stay blank. The US classification shipped 2026-11-16; the insurer set waits for an insurer that
@@ -580,6 +596,13 @@ Rough priority. Re-verify each `path:line` in code before fixing; lines move.
 
 One line each, newest first; drop the oldest.
 
+- **2026-11-17 (the Company tab beyond the SEC, /goal run)** — four commits: one company key for
+  every regulator (`companies`, `sec:`/`dart:`/`lei:`), the SEC widening (top 200, Irish 10-K
+  filers by name, 2330 → TSMC; deployed), South Korea via OpenDART and Europe via ESEF, both
+  through the one normaliser, once per report, no Yahoo. Measured on a production snapshot: the
+  look-through's top 200 with a page 82.6% → 86.5% before the SEC widening's Sunday pass; Korea
+  fully covered, EU/UK 11 companies; Germany and Switzerland blank.
+
 - **2026-11-16 (the Company tab's source waterfall, /goal run; merged to `main` and deployed)** — measured all 132 companies
   before and after; five layers, each its own commit: the filings companyfacts skipped (7a), IFRS
   20-F instances (7b), the companies' own capex/debt concepts by label, BRK's and PCAR's segment
@@ -600,7 +623,3 @@ One line each, newest first; drop the oldest.
 - **2026-11-11 (EPS-gap fill)** — a forced EDGAR fetch failed on a ticker named twice (two
   INSERTs; fixed, `496fbec`), then read the EPS-gap filings; AEP's and EXC's Q2 2026 10-Qs,
   missing from companyfacts, read by hand. SEC stays the only source.
-- **2026-11-08/09 (P/E medians follow-up, pushed and run)** — median spans end at the newest
-  point; BKR's Class A-only EPS read from its filings, and a filing's period no longer lost to its
-  comparatives (BKR's Q2 2026); the screener serves 3/5/10Y medians with a switch and a server
-  cache. BKR fetched by hand on production; P/E back.
