@@ -126,8 +126,8 @@ export function Dashboard() {
   const route = useTabRoute()
   const selectTab = useCallback(
     (tab: string) => {
-      // Re-selecting the open tab keeps a `#company/<cik>` the user arrived on.
-      if (tab !== route.tab && isDashboardTab(tab)) replaceRoute({ tab, cik: null })
+      // Re-selecting the open tab keeps a `#company/<key>` the user arrived on.
+      if (tab !== route.tab && isDashboardTab(tab)) replaceRoute({ tab, company: null })
     },
     [route.tab],
   )

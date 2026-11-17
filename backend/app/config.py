@@ -64,6 +64,12 @@ class Settings(BaseSettings):
     # operator's email does not belong in it. Never logged; app/redact.py masks it.
     edgar_user_agent: str = ""
 
+    # OpenDART (Korea's Financial Supervisory Service), the Company tab's Korean figures
+    # (docs/company-financials.md, *South Korea*). A free key; it travels in the request's
+    # query string (`crtfc_key`), so app/redact.py masks it. Without it the Korean pass makes
+    # no request, as the Alpha Vantage fill does without its key.
+    opendart_api_key: str = ""
+
     # Database Configuration. The default is local development's backend/portfolio.db.
     # The container never uses it: docker-compose.yml sets DATABASE_URL to
     # /app/data/portfolio.db (the directory mount) in `environment:`, which overrides

@@ -18,7 +18,12 @@ from pydantic import BaseModel, Field
 
 
 class CompanyFinancialsCompany(BaseModel):
-    cik: int = Field(..., description="The SEC Central Index Key; the path's id.")
+    key: str = Field(
+        ..., description="The company's id: `sec:<cik>`, `dart:<corp_code>` or `lei:<LEI>`."
+    )
+    cik: Optional[int] = Field(
+        None, description="The SEC Central Index Key; null for another regulator's company."
+    )
     security_id: Optional[int] = Field(
         None, description="The held listing (lowest symbol); null for a company not held."
     )
@@ -30,7 +35,7 @@ class CompanyFinancialsCompany(BaseModel):
     name: str
     isin: Optional[str] = Field(None, description="For the logo.")
     held: bool = Field(
-        ..., description="False for a Nasdaq-100 constituent the account does not hold."
+        ..., description="Whether the account holds any listing of the company."
     )
     currency: Optional[str] = Field(
         None, description="The reporting currency of the stored figures."
@@ -208,7 +213,7 @@ class CompanyFinancialsProfile(BaseModel):
     Growth and returns are fractions (0.25 is 25%); anything unknown is null.
     """
 
-    industry: Optional[str] = Field(None, description="The SEC's SIC description.")
+    industry: Optional[str] = Field(None, description="The regulator's industry (the SEC's SIC description).")
     business_model: str = Field(
         ..., description="`industrial`, `bank` (banks and brokers) or `insurer` "
         "(`company_classification`): which figures apply."
@@ -266,7 +271,8 @@ class CompanyDividendTrack(BaseModel):
 class CompanyPeer(BaseModel):
     """One company of the Peers card: who, and the overview's key figures."""
 
-    cik: int
+    key: str
+    cik: Optional[int] = None
     security_id: Optional[int] = None
     symbol: str
     name: str
@@ -284,14 +290,15 @@ class CompanyScreenerRow(BaseModel):
     each, less one.
     """
 
-    cik: int
+    key: str
+    cik: Optional[int] = None
     security_id: Optional[int] = None
     symbol: str
     name: str
     isin: Optional[str] = None
     held: bool
     currency: Optional[str] = Field(None, description="The reporting currency of its figures.")
-    industry: Optional[str] = Field(None, description="The SEC's SIC description.")
+    industry: Optional[str] = Field(None, description="The regulator's industry (the SEC's SIC description).")
     period_end: Optional[str] = None
     market_cap: Optional[float] = None
     revenue_yoy: Optional[float] = None
@@ -321,9 +328,10 @@ class CompanyScreenerRow(BaseModel):
 class CompanyPeers(BaseModel):
     """The Peers card (review item R1): the company first, then its industry's largest."""
 
-    cik: int
+    key: str
+    cik: Optional[int] = None
     sic: Optional[int] = None
-    industry: Optional[str] = Field(None, description="The SEC's SIC description.")
+    industry: Optional[str] = Field(None, description="The regulator's industry (the SEC's SIC description).")
     widened: bool = Field(
         ..., description="True when the peers are the three-digit SIC group's."
     )
@@ -345,7 +353,12 @@ class CompanyFinancialsLatestQuarter(BaseModel):
 
 
 class CompanyFinancialsResponse(BaseModel):
-    cik: int = Field(..., description="The SEC Central Index Key; the path's id.")
+    key: str = Field(
+        ..., description="The company's id: `sec:<cik>`, `dart:<corp_code>` or `lei:<LEI>`."
+    )
+    cik: Optional[int] = Field(
+        None, description="The SEC Central Index Key; null for another regulator's company."
+    )
     security_id: Optional[int] = Field(
         None, description="The held listing (lowest symbol); null for a company not held."
     )
@@ -353,7 +366,7 @@ class CompanyFinancialsResponse(BaseModel):
     name: str
     isin: Optional[str] = Field(None, description="For the logo.")
     held: bool = Field(
-        ..., description="False for a Nasdaq-100 constituent the account does not hold."
+        ..., description="Whether the account holds any listing of the company."
     )
     currency: Optional[str] = None
     period: str = Field(..., description="`quarterly`, `ttm` or `annual`.")

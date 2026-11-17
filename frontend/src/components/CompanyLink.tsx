@@ -1,7 +1,7 @@
 import { useMemo, type MouseEvent, type ReactNode } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { companyFinancialsCompaniesQuery } from '@/lib/queryCache'
-import { CompanyLinksContext, NO_COMPANY_LINKS, companyLinks, useCompanyCik, type CompanyRef } from '@/lib/companyLinks'
+import { CompanyLinksContext, NO_COMPANY_LINKS, companyLinks, useCompanyKey, type CompanyRef } from '@/lib/companyLinks'
 import { companyHref } from '@/lib/tabRoute'
 import { cn } from '@/lib/utils'
 
@@ -39,11 +39,11 @@ export function CompanyLink({
   className?: string
   children: ReactNode
 }) {
-  const cik = useCompanyCik({ securityId, isin, isins, ticker })
-  if (cik == null) return <>{children}</>
+  const key = useCompanyKey({ securityId, isin, isins, ticker })
+  if (key == null) return <>{children}</>
   return (
     <a
-      href={companyHref(cik)}
+      href={companyHref(key)}
       title="Open company"
       onClick={toTop}
       tabIndex={decorative ? -1 : undefined}

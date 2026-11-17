@@ -18,7 +18,7 @@ import {
   visibleOverviewGroups,
 } from './companyFinancials'
 import {
-  AAPL_CIK, AMZN_CIK, FIXTURE_COMPANIES, FIXTURE_KEY_STATS, FIXTURE_PROFILE, NVDA_CIK, emptySeriesSet, fixtureFinancials,
+  AAPL_KEY, AMZN_KEY, FIXTURE_COMPANIES, FIXTURE_KEY_STATS, FIXTURE_PROFILE, NVDA_KEY, emptySeriesSet, fixtureFinancials,
   fixtureSeries,
 } from './companyFinancials.fixture'
 
@@ -224,23 +224,23 @@ describe('hasAnyData', () => {
 
 describe('resolveCompany', () => {
   it('prefers the pick, then the remembered pick, then the first held company', () => {
-    expect(resolveCompany(FIXTURE_COMPANIES, AMZN_CIK, NVDA_CIK)?.symbol).toBe('AMZN')
-    expect(resolveCompany(FIXTURE_COMPANIES, null, AAPL_CIK)?.symbol).toBe('AAPL')
+    expect(resolveCompany(FIXTURE_COMPANIES, AMZN_KEY, NVDA_KEY)?.symbol).toBe('AMZN')
+    expect(resolveCompany(FIXTURE_COMPANIES, null, AAPL_KEY)?.symbol).toBe('AAPL')
     expect(resolveCompany(FIXTURE_COMPANIES, null, null)?.symbol).toBe('NVDA')
     expect(resolveCompany(FIXTURE_COMPANIES.filter((c) => !c.held), null, null)?.symbol).toBe('AAPL')
   })
 
   it('drops a remembered company no longer in the list', () => {
-    expect(resolveCompany(FIXTURE_COMPANIES, null, 999)?.symbol).toBe('NVDA')
-    expect(resolveCompany([], null, NVDA_CIK)).toBeNull()
+    expect(resolveCompany(FIXTURE_COMPANIES, null, 'sec:999')?.symbol).toBe('NVDA')
+    expect(resolveCompany([], null, NVDA_KEY)).toBeNull()
   })
 })
 
 describe('companyGroups', () => {
-  it('puts the held companies first and the Nasdaq-100 after, leaving out an empty group', () => {
+  it('puts the held companies first and the rest after, leaving out an empty group', () => {
     expect(companyGroups(FIXTURE_COMPANIES).map((g) => [g.label, g.companies.map((c) => c.symbol)])).toEqual([
       ['Held', ['NVDA', 'AMZN']],
-      ['Nasdaq-100', ['AAPL']],
+      ['Not held', ['AAPL']],
     ])
     expect(companyGroups(FIXTURE_COMPANIES.filter((c) => c.held)).map((g) => g.label)).toEqual(['Held'])
   })

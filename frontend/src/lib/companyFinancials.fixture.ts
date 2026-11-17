@@ -87,18 +87,21 @@ export const FIXTURE_PROFILE: CompanyFinancialsProfile = {
 export const NVDA_CIK = 1045810
 export const AMZN_CIK = 1018724
 export const AAPL_CIK = 320193
+export const NVDA_KEY = `sec:${NVDA_CIK}`
+export const AMZN_KEY = `sec:${AMZN_CIK}`
+export const AAPL_KEY = `sec:${AAPL_CIK}`
 
 export const FIXTURE_COMPANIES: CompanyFinancialsCompany[] = [
   {
-    cik: AAPL_CIK, security_id: null, security_ids: [], symbol: 'AAPL', name: 'Apple Inc', isin: 'US0378331005', held: false,
+    key: AAPL_KEY, cik: AAPL_CIK, security_id: null, security_ids: [], symbol: 'AAPL', name: 'Apple Inc', isin: 'US0378331005', held: false,
     currency: 'USD', first_period_end: '2009-06-27', last_period_end: '2025-06-28', last_fetched_at: '2026-10-24T06:00:00',
   },
   {
-    cik: NVDA_CIK, security_id: 11, security_ids: [11], symbol: 'NVDA', name: 'NVIDIA CORP', isin: 'US67066G1040', held: true,
+    key: NVDA_KEY, cik: NVDA_CIK, security_id: 11, security_ids: [11], symbol: 'NVDA', name: 'NVIDIA CORP', isin: 'US67066G1040', held: true,
     currency: 'USD', first_period_end: '2009-01-25', last_period_end: '2025-01-26', last_fetched_at: '2026-10-24T06:00:00',
   },
   {
-    cik: AMZN_CIK, security_id: 22, security_ids: [22], symbol: 'AMZN', name: 'AMAZON COM INC', isin: 'US0231351067', held: true,
+    key: AMZN_KEY, cik: AMZN_CIK, security_id: 22, security_ids: [22], symbol: 'AMZN', name: 'AMAZON COM INC', isin: 'US0231351067', held: true,
     currency: 'USD', first_period_end: '2009-12-31', last_period_end: '2025-06-30', last_fetched_at: '2026-10-24T06:00:00',
   },
 ]
@@ -110,6 +113,7 @@ export function fixtureFinancials(
 ): CompanyFinancialsResponse {
   const { series, ...rest } = over
   return {
+    key: NVDA_KEY,
     cik: NVDA_CIK,
     security_id: 11,
     symbol: 'NVDA',

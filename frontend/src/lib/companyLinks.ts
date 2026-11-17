@@ -16,27 +16,28 @@ import type { CompanyFinancialsCompany } from './api'
  * provider — every component test — draws exactly what it drew before links existed.
  */
 
+/** Each map's value is the company's key (`sec:320193`, `dart:00164779`). */
 export interface CompanyLinks {
-  bySecurity: ReadonlyMap<number, number>
-  byIsin: ReadonlyMap<string, number>
-  byTicker: ReadonlyMap<string, number>
+  bySecurity: ReadonlyMap<number, string>
+  byIsin: ReadonlyMap<string, string>
+  byTicker: ReadonlyMap<string, string>
 }
 
 export const NO_COMPANY_LINKS: CompanyLinks = { bySecurity: new Map(), byIsin: new Map(), byTicker: new Map() }
 
 export function companyLinks(companies: readonly CompanyFinancialsCompany[]): CompanyLinks {
-  const bySecurity = new Map<number, number>()
-  const byIsin = new Map<string, number>()
-  const byTicker = new Map<string, number>()
+  const bySecurity = new Map<number, string>()
+  const byIsin = new Map<string, string>()
+  const byTicker = new Map<string, string>()
   for (const company of companies) {
-    for (const id of company.security_ids ?? []) bySecurity.set(id, company.cik)
+    for (const id of company.security_ids ?? []) bySecurity.set(id, company.key)
     if (company.security_id != null && !bySecurity.has(company.security_id)) {
-      bySecurity.set(company.security_id, company.cik)
+      bySecurity.set(company.security_id, company.key)
     }
     const isin = company.isin?.trim().toUpperCase()
-    if (isin && !byIsin.has(isin)) byIsin.set(isin, company.cik)
+    if (isin && !byIsin.has(isin)) byIsin.set(isin, company.key)
     const ticker = company.symbol.trim().toUpperCase()
-    if (ticker && !byTicker.has(ticker)) byTicker.set(ticker, company.cik)
+    if (ticker && !byTicker.has(ticker)) byTicker.set(ticker, company.key)
   }
   return { bySecurity, byIsin, byTicker }
 }
@@ -49,15 +50,15 @@ export interface CompanyRef {
   ticker?: string | null
 }
 
-/** The company's CIK, or null: by the security first, then by ISIN, then by the ticker. */
-export function companyCikFor(links: CompanyLinks, { securityId, isin, isins, ticker }: CompanyRef): number | null {
+/** The company's key, or null: by the security first, then by ISIN, then by the ticker. */
+export function companyKeyFor(links: CompanyLinks, { securityId, isin, isins, ticker }: CompanyRef): string | null {
   if (securityId != null) {
-    const cik = links.bySecurity.get(securityId)
-    if (cik != null) return cik
+    const key = links.bySecurity.get(securityId)
+    if (key != null) return key
   }
   for (const code of [isin, ...(isins ?? [])]) {
-    const cik = code ? links.byIsin.get(code.trim().toUpperCase()) : undefined
-    if (cik != null) return cik
+    const key = code ? links.byIsin.get(code.trim().toUpperCase()) : undefined
+    if (key != null) return key
   }
   if (ticker) return links.byTicker.get(ticker.trim().toUpperCase()) ?? null
   return null
@@ -65,6 +66,6 @@ export function companyCikFor(links: CompanyLinks, { securityId, isin, isins, ti
 
 export const CompanyLinksContext = createContext<CompanyLinks>(NO_COMPANY_LINKS)
 
-export function useCompanyCik(ref: CompanyRef): number | null {
-  return companyCikFor(useContext(CompanyLinksContext), ref)
+export function useCompanyKey(ref: CompanyRef): string | null {
+  return companyKeyFor(useContext(CompanyLinksContext), ref)
 }

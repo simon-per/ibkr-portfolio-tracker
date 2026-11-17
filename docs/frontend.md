@@ -673,13 +673,14 @@ there, "Buy" everywhere else); the server now labels its counts too (docs/flex-a
 The tabs were uncontrolled state (`Tabs defaultValue="performance"`): a reload always landed on
 Performance, Back left the app, and nothing could link to a tab. Now `Tabs` takes an optional
 controlled `value` / `onValueChange`, and the Dashboard drives it from `location.hash`:
-`#dividends` for a tab, `#company/<cik>` for a company, nothing for Performance (the default keeps
+`#dividends` for a tab, `#company/<key>` for a company (an SEC filer's bare CIK, as before
+2026-11-17, else `dart:<corp_code>` or `lei:<LEI>`; `companyHref`), nothing for Performance (the default keeps
 the URL bare). An unknown or malformed hash — the hidden `#analytics`, `#company/abc` — opens
 Performance (or the Company tab without a company).
 
 - **One history entry per jump, none per tab click.** A trigger click (or arrow key) *replaces* the
   hash (`replaceRoute`, `history.replaceState`), so Back does not step through every tab looked at.
-  A company link is a plain `<a href="#company/<cik>">`, whose navigation *pushes* an entry, so Back
+  A company link is a plain `<a href="#company/<key>">`, whose navigation *pushes* an entry, so Back
   returns to the tab the click came from. Re-selecting the open tab keeps a company in the hash.
 - **One store, every reader.** `useTabRoute` reads the hash through `useSyncExternalStore`,
   re-read on `hashchange`, `popstate` and `portfolio:route` — the event `replaceRoute` dispatches,
@@ -1171,12 +1172,13 @@ after Fundamentals, `Building2`), its wiring in `lib/companyFinancials.ts`, the 
   so switching it asks the server nothing. `companyFinancials.ts` merges series by `period_end`
   for Recharts (each row carries the points' `yoy` too) and picks axis ticks, nothing more.
 - **Layout** (enlarged 2026-10-25, owner: "way too small"). A picker card (a native `<select>` of
-  `symbol · name` in two groups, *Held* then *Nasdaq-100* (`companyGroups`), by CIK; the last pick
-  remembered per browser under `company-financials:cik` through `lib/storage.ts`; a pick no longer
+  `symbol · name` in two groups, *Held* then *Not held* (`companyGroups`), by key; the last pick
+  remembered per browser under `company-financials:cik` through `lib/storage.ts` (a key; a bare
+  CIK an older build stored reads as `sec:<cik>`); a pick no longer
   listed falls back to the first held company; a company not held shows its logo by ISIN) with three
   `SegmentedControl`s in its aside. **A company in the URL wins** (2026-11-07, *The tab in the URL*
-  above): `#company/<cik>` — a holding's link or a reload — opens that company over the remembered
-  pick and becomes it; a pick in the picker replaces the hash without a history entry; a CIK the
+  above): `#company/<key>` — a holding's link or a reload — opens that company over the remembered
+  pick and becomes it; a pick in the picker replaces the hash without a history entry; a key the
   list no longer has falls through like a stale pick. **The picker card's body is the overview**
   (2026-11-07, replacing the flat Key figures strip; *The overview* below), then
   a grid of the cards with a value (revenue, operating income, net income, FCF, margins, valuation

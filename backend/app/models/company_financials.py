@@ -16,6 +16,13 @@ company, for its P/E (`company_price_sync`).
 **Keyed by company, not by security** (2026-10-25): a constituent nobody holds has no
 `securities` row, and must not get one — every Yahoo loop reads that table. Two listings
 of one company (GOOG, GOOGL) share one set of rows.
+
+**Beyond the SEC** (2026-11-17): `companies` is a company whose figures come from another
+regulator — OpenDART (`dart:<corp_code>`) or an ESEF annual report found by LEI
+(`lei:<LEI>`) — under a surrogate id. Its figures are `company_financials` rows carrying
+`company_id` instead of `cik` (exactly one of the two, by a CHECK), so one table and one
+reader serve every market. An SEC filer stays on its CIK (`sec:<cik>`). `CompanyKey` is the
+one spelling of a company's public id.
 """
 
 from datetime import date, datetime
@@ -24,6 +31,7 @@ from typing import Optional
 from sqlalchemy import (
     JSON,
     BigInteger,
+    CheckConstraint,
     Date,
     DateTime,
     Float,
@@ -37,6 +45,18 @@ from sqlalchemy import (
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.database import Base
+
+#: The schemes a company key is spelled in (`<scheme>:<native id>`): the SEC's CIK, OpenDART's
+#: corp_code, and the LEI an ESEF annual report is filed under.
+SEC_SCHEME = "sec"
+DART_SCHEME = "dart"
+LEI_SCHEME = "lei"
+OTHER_SCHEMES = (DART_SCHEME, LEI_SCHEME)
+
+
+def company_key(scheme: str, native_id: object) -> str:
+    """The company's public id (`sec:320193`, `dart:00126380`, `lei:969500A1YF1XUYYXS284`)."""
+    return f"{scheme}:{native_id}"
 
 
 class SecCompany(Base):
@@ -110,8 +130,77 @@ class SecCompany(Base):
     vendor_checked_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
     vendor_miss_count: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
 
+    @property
+    def key(self) -> str:
+        return company_key(SEC_SCHEME, self.cik)
+
+    #: Not a row of `companies`: an SEC filer's figures are keyed by its CIK.
+    company_id = None
+    scheme = SEC_SCHEME
+
+    @property
+    def industry(self) -> Optional[str]:
+        return self.sic_description
+
     def __repr__(self) -> str:
         return f"<SecCompany cik={self.cik} {self.ticker}>"
+
+
+class Company(Base):
+    """
+    A company whose figures come from a regulator other than the SEC (docs/company-
+    financials.md, *Markets beyond the SEC*): OpenDART for a Korean listing (`scheme`
+    `dart`, `native_id` its corp_code), an ESEF annual report for a European one (`lei`,
+    its LEI). A surrogate `id` keys its `company_financials` rows; `key` is its public id.
+    The same bookkeeping as `sec_companies` where it applies: the pass's stamp of the
+    companies it found (`universe_seen_at`), the last write (`fetched_at`), and the shared
+    miss back-off's pair. No price columns: no Yahoo request is ever made for one.
+    """
+
+    __tablename__ = "companies"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    scheme: Mapped[str] = mapped_column(String(8), nullable=False)
+    native_id: Mapped[str] = mapped_column(String(40), nullable=False)
+    # The listing's code at home (005930), else the fund baskets' ticker.
+    ticker: Mapped[Optional[str]] = mapped_column(String(20), nullable=True)
+    name: Mapped[Optional[str]] = mapped_column(String(200), nullable=True)
+    isin: Mapped[Optional[str]] = mapped_column(String(12), nullable=True)
+    country: Mapped[Optional[str]] = mapped_column(String(2), nullable=True)
+    # The regulator's industry code and its name (DART's KSIC `induty_code`); NULL where the
+    # source states none (ESEF).
+    industry_code: Mapped[Optional[str]] = mapped_column(String(10), nullable=True)
+    industry: Mapped[Optional[str]] = mapped_column(String(200), nullable=True)
+    # `MMDD`, like `sec_companies.fiscal_year_end`.
+    fiscal_year_end: Mapped[Optional[str]] = mapped_column(String(4), nullable=True)
+    statement_model: Mapped[Optional[str]] = mapped_column(String(16), nullable=True)
+    profile_checked_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    universe_seen_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    fetched_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    facts_checked_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    facts_miss_count: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+
+    __table_args__ = (
+        UniqueConstraint("scheme", "native_id", name="uq_companies_scheme_native_id"),
+    )
+
+    @property
+    def key(self) -> str:
+        return company_key(self.scheme, self.native_id)
+
+    @property
+    def company_id(self) -> int:
+        return self.id
+
+    #: No CIK, and none of SEC's classification inputs.
+    cik = None
+    sic = None
+    sic_description = None
+    owner_org = None
+    filed_splits = None
+
+    def __repr__(self) -> str:
+        return f"<Company {self.key} {self.ticker}>"
 
 
 class SecTicker(Base):
@@ -159,14 +248,18 @@ class CompanyFinancial(Base):
     One normalised figure: a discrete fiscal quarter (Q1-Q4) or a fiscal year (FY) of one
     metric, for one company. Q4 and FY share a `period_end`, hence `fiscal_period` in the
     key. `value` is in `unit` (a currency, `<currency>/shares`, or `shares`), split-adjusted
-    to the newest filing's basis. A period a company never reported has no row.
+    to the newest filing's basis. A period a company never reported has no row. The company
+    is an SEC filer (`cik`) or one of `companies` (`company_id`), never both.
     """
 
     __tablename__ = "company_financials"
 
     id: Mapped[int] = mapped_column(primary_key=True)
-    cik: Mapped[int] = mapped_column(
-        ForeignKey("sec_companies.cik", ondelete="CASCADE"), nullable=False
+    cik: Mapped[Optional[int]] = mapped_column(
+        ForeignKey("sec_companies.cik", ondelete="CASCADE"), nullable=True
+    )
+    company_id: Mapped[Optional[int]] = mapped_column(
+        ForeignKey("companies.id", ondelete="CASCADE"), nullable=True
     )
     period_end: Mapped[date] = mapped_column(Date, nullable=False)
     fiscal_year: Mapped[int] = mapped_column(Integer, nullable=False)
@@ -186,7 +279,19 @@ class CompanyFinancial(Base):
             "metric",
             name="uq_company_financials_period_metric",
         ),
+        UniqueConstraint(
+            "company_id",
+            "period_end",
+            "fiscal_period",
+            "metric",
+            name="uq_company_financials_company_period_metric",
+        ),
+        CheckConstraint(
+            "(cik IS NULL) <> (company_id IS NULL)",
+            name="ck_company_financials_one_company",
+        ),
         Index("ix_company_financials_cik", "cik"),
+        Index("ix_company_financials_company_id", "company_id"),
     )
 
     def __repr__(self) -> str:

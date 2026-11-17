@@ -11,7 +11,7 @@ const NONE = spans(null, null, null)
 
 function company(cik: number, symbol: string, figures: Partial<CompanyScreenerRow>): CompanyScreenerRow {
   return {
-    cik, security_id: null, symbol, name: `${symbol} Inc`, isin: null, held: false,
+    key: `sec:${cik}`, cik, security_id: null, symbol, name: `${symbol} Inc`, isin: null, held: false,
     currency: 'USD', industry: 'Semiconductors', period_end: '2026-09-30', market_cap: 1e12,
     revenue_yoy: null, revenue_cagr_5y: 0.2, eps_yoy: null, eps_cagr_5y: 0.3, gross_margin: null,
     operating_margin: null, fcf_margin: 0.3, roe: 0.4, net_cash: null, pe_ratio: 30,

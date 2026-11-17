@@ -226,7 +226,7 @@ export function CompanyScreenerCard() {
             <DataTable
               rows={rows}
               columns={columns}
-              getRowKey={(row) => row.cik}
+              getRowKey={(row) => row.key}
               label="Screener table"
               density="normal"
               minWidthClassName="min-w-[64rem]"

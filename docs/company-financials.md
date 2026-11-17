@@ -543,18 +543,51 @@ value) and `fetched_at`. **A period never reported has no row; nothing is stored
 dividend per share read from a filing's instance carries its concept's name like any other; its
 filing is in `sec_filing_reads` (cik, accn, form, filed, `facts` as JSON, read_at, reader).
 
+### One key for every regulator's company
+
+Since 2026-11-17 (migration `c4e6a8b0d2f4`) a company has a **key**, `<scheme>:<native id>`:
+`sec:<cik>` for an SEC filer, `dart:<corp_code>` for a Korean company (OpenDART), `lei:<LEI>` for a
+European one (an ESEF report). An SEC filer stays on `sec_companies` and its CIK-keyed tables,
+untouched; another regulator's company is a row of **`companies`** (a surrogate `id`, `scheme`,
+`native_id`, unique together), and its figures are `company_financials` rows carrying
+`company_id` instead of `cik` — a CHECK holds every row to exactly one of the two, and each has its
+own unique (company, period end, fiscal period, metric). `models.company_key` is the one spelling
+of a key; `SecCompany` and `Company` expose the same attributes the service reads (`key`, `cik`,
+`company_id`, `industry`), so one `_priced`, one `key_stats`, one `build_series` serve both, and
+the repository's `rows_of` / `coverage_of` / `_replace` pick the column (`_owned_by`).
+
+- **Why not re-key the CIK tables onto a surrogate id** (the alternative): eight tables and about
+  150,000 rows rewritten, and every query of the weekly EDGAR pass, the price pass, the profile
+  chunk and the vendor fill touched, for SEC filers that gain nothing — a CIK is already a stable,
+  unique id. **Why not a second figures table** for the other regulators: two tables of one shape
+  with two writers is the drift docs/failure-modes.md catalogues; one table and one writer
+  (`_replace`) is not.
+- **Measured on a production snapshot** (2026-11-17): upgrade 2.6 s, 151,011 rows and their value
+  sum unchanged, integrity and foreign-key checks clean; downgrade drops only `company_id` rows.
+- **No Yahoo for another regulator's company** (owner, 2026-11-17): the price pass and the profile
+  chunk take only companies with a CIK, and `_priced` gives one no closes — not even its held
+  listing's daily close — so its P/E, market cap and every multiple stay absent.
+
 ## Service and API
 
-`GET /api/company-financials/companies` — companies with stored figures, one per CIK: the held
-ones and the newest pass's Nasdaq-100 (above): `cik, security_id, security_ids, symbol, name,
-isin, held, currency, first_period_end, last_period_end, last_fetched_at`. A held company is named
-by its listing with the lowest symbol (`security_id` set); one not held by its basket ticker, name
-and ISIN (`security_id` null; the ISIN finds its logo). `security_ids` names **every** held listing
-(2026-11-07), so a table row of any of them can link to the company — GOOG and GOOGL are both
-Alphabet, and only GOOG was named before; empty for a company not held.
+`GET /api/company-financials/companies` — companies with stored figures, one per company: the held
+SEC filers, the newest pass's Nasdaq-100 and named companies (above), and each other regulator's
+companies of its newest pass: `key, cik, security_id, security_ids, symbol, name, isin, held,
+currency, first_period_end, last_period_end, last_fetched_at` (`cik` null beyond the SEC). A held
+SEC filer is named by its CIK-mapped listing with the lowest symbol (`security_id` set); any other
+by its own ticker, name and ISIN (`security_id` null; the ISIN finds its logo). `security_ids`
+names **every** held listing (2026-11-07), so a table row of any of them can link to the company —
+GOOG and GOOGL are both Alphabet. **Since 2026-11-17 that includes every held listing the identity
+store folds with the company** (`_linked_listings`, `identity_service.group_companies`: ISIN, LEI,
+share-class FIGI, `ISSUER_OVERRIDES`), never a ticker: 2330@TWSE opens TSMC's page (filed by its
+ADR, TSM), ASML@AEB ASML's, 000660 SK Hynix's. A fold reaching two listed companies links neither.
+It is a link only: the page's figures, closes and per-share basis stay its own (TSM's EPS is per
+common share in TWD, one ADR is five shares; 2330's TWD close is never put beside it). `held` is
+whether any listing is held.
 
-`GET /api/company-financials/{cik}?period=quarterly|ttm|annual&range=3y|5y|10y|max`
-(defaults `ttm`, `10y`): the same identity fields, then `currency, period, range, as_of,
+`GET /api/company-financials/{ref}?period=quarterly|ttm|annual&range=3y|5y|10y|max` — `ref` is the
+key or, as every link was before 2026-11-17, a bare CIK; an unknown scheme or a malformed id is 404
+(defaults `ttm`, `10y`): the same identity fields (`key`, `cik`, ...), then `currency, period, range, as_of,
 warnings, key_stats, profile, series` (`profile` and `series.price`: *The overview* below), each series `{points: [{period_end, label, value, yoy}], cagr, yoy}` — every point
 carries its own YoY by the series' rule (it may compare with a point before the range), for the
 tab's hover — and `cagrs` `{y3, y5, y10}`. The series: revenue, revenue per share, operating
@@ -771,7 +804,7 @@ ignores staleness and back-off. It records a `manual_company_financials_fetch` r
 The P/E's closes come from Yahoo (`company_price_sync`, CLAUDE.md rule 1; enabled by the owner
 2026-10-25): **one history request per company a week**, about a hundred, after the EDGAR pass.
 
-- **Scope**: the companies the tab lists (`list_companies`), by CIK, asked by the SEC's ticker
+- **Scope**: the SEC filers the tab lists (`list_companies`, `cik` not null), by CIK, asked by the SEC's ticker
   (Yahoo spells US listings the same, BRK-B). No `securities` row is read or written, so
   `yahoo_eligible` has nothing to filter and a constituent never joins the price loops.
 - **Kept** (`company_prices`, `company_splits`, migration `f6a8b0c2d4e7`): the last trading day's
@@ -849,7 +882,7 @@ filings' `currency`.
 
 ## Peers
 
-`GET /api/company-financials/{cik}/peers` (`CompanyFinancialsService.peers`, review item R1,
+`GET /api/company-financials/{ref}/peers` (`CompanyFinancialsService.peers`, review item R1,
 2026-11-08): the companies the tab lists (`list_companies`'s scope) in the company's SEC industry
 (`sec_companies.sic`, filled by the Sunday pass's `submissions` read), and when that holds fewer
 than `PEERS_MIN` (4) others, its three-digit group (`sic // 10`, `widened`). The company first,

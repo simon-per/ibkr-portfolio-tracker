@@ -5,7 +5,7 @@ import { useMemo, useSyncExternalStore } from 'react'
  *
  * The tabs were uncontrolled state: a reload always landed on Performance, Back left the
  * app, and nothing could link to a tab or a company. Now `#dividends` is a tab and
- * `#company/<cik>` a company, so a reload keeps both and a holding's row can link to its
+ * `#company/<key>` a company, so a reload keeps both and a holding's row can link to its
  * company with a plain anchor.
  *
  * **One history entry per jump, none per tab click.** A tab click *replaces* the hash
@@ -27,11 +27,18 @@ export type DashboardTab = (typeof DASHBOARD_TABS)[number]
 
 export interface TabRoute {
   tab: DashboardTab
-  /** The company's SEC CIK on `#company/<cik>`; null everywhere else. */
-  cik: number | null
+  /**
+   * The company's key on `#company/<key>` (`sec:320193`, `dart:00164779`, `lei:<LEI>`); null
+   * everywhere else. An SEC filer's hash is its bare CIK, as every link was before other
+   * regulators' companies existed, so old URLs keep working.
+   */
+  company: string | null
 }
 
-export const DEFAULT_ROUTE: TabRoute = { tab: 'performance', cik: null }
+export const DEFAULT_ROUTE: TabRoute = { tab: 'performance', company: null }
+
+/** A company key as the server spells it, or a bare CIK. */
+const COMPANY_REF = /^(?:(?:sec:)?[1-9]\d{0,9}|dart:\d{8}|lei:[0-9A-Z]{20})$/
 
 const ROUTE_EVENT = 'portfolio:route'
 
@@ -39,24 +46,34 @@ export function isDashboardTab(value: string): value is DashboardTab {
   return (DASHBOARD_TABS as readonly string[]).includes(value)
 }
 
-/** `#company/320193` → company 320193; an unknown tab, or a malformed one, → Performance. */
+/**
+ * `#company/320193` → company `sec:320193`, `#company/dart:00164779` → that one; an unknown
+ * tab, or a malformed one, → Performance.
+ */
 export function parseTabHash(hash: string): TabRoute {
   const [tab, id, ...rest] = hash.replace(/^#/, '').split('/')
   if (!isDashboardTab(tab)) return DEFAULT_ROUTE
-  if (tab === 'company' && rest.length === 0 && id !== undefined && /^[1-9]\d{0,9}$/.test(id)) {
-    return { tab, cik: Number(id) }
+  if (tab === 'company' && rest.length === 0 && id !== undefined) {
+    let ref = id
+    try {
+      ref = decodeURIComponent(id)
+    } catch {
+      return { tab, company: null }
+    }
+    if (COMPANY_REF.test(ref)) return { tab, company: ref.includes(':') ? ref : `sec:${ref}` }
   }
-  return { tab, cik: null }
+  return { tab, company: null }
 }
 
 /** The hash for a route: empty for the default, so Performance's URL stays bare. */
-export function routeHash({ tab, cik }: TabRoute): string {
-  if (tab === 'company' && cik != null) return companyHref(cik)
+export function routeHash({ tab, company }: TabRoute): string {
+  if (tab === 'company' && company != null) return companyHref(company)
   return tab === DEFAULT_ROUTE.tab ? '' : `#${tab}`
 }
 
-export function companyHref(cik: number): string {
-  return `#company/${cik}`
+/** An SEC filer by its bare CIK (the URLs that already exist), any other by its key. */
+export function companyHref(key: string): string {
+  return `#company/${key.startsWith('sec:') ? key.slice(4) : key}`
 }
 
 function subscribe(onChange: () => void): () => void {

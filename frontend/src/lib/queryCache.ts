@@ -186,10 +186,10 @@ export const lookthroughFundamentalsQuery = queryOptions({
 })
 
 /** The Peers card's rows (review item R1): asked only once the card is opened. */
-export const companyPeersQuery = (cik: number) =>
+export const companyPeersQuery = (key: string) =>
   queryOptions({
-    queryKey: ['company-financials', 'peers', cik],
-    queryFn: () => api.getCompanyPeers(cik),
+    queryKey: ['company-financials', 'peers', key],
+    queryFn: () => api.getCompanyPeers(key),
     staleTime: 30 * 60 * 1000,
   })
 
@@ -202,13 +202,13 @@ export const companyScreenerQuery = queryOptions({
 })
 
 export const companyFinancialsQuery = (
-  cik: number,
+  key: string,
   period: CompanyFinancialsPeriod,
   range: CompanyFinancialsRange,
 ) =>
   queryOptions({
-    queryKey: ['company-financials', 'series', cik, period, range],
-    queryFn: () => api.getCompanyFinancials(cik, period, range),
+    queryKey: ['company-financials', 'series', key, period, range],
+    queryFn: () => api.getCompanyFinancials(key, period, range),
     staleTime: 30 * 60 * 1000,
   })
 

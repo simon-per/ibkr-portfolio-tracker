@@ -10,13 +10,13 @@ import type { CompanyFinancialsCompany } from '@/lib/api'
 
 function peer(cik: number, symbol: string, stats: Partial<CompanyPeer['key_stats']>): CompanyPeer {
   return {
-    cik, security_id: null, symbol, name: `${symbol} Inc`, isin: null, held: false,
+    key: `sec:${cik}`, cik, security_id: null, symbol, name: `${symbol} Inc`, isin: null, held: false,
     currency: 'USD', key_stats: { ...FIXTURE_KEY_STATS, ...stats },
   }
 }
 
 const PEERS: CompanyPeers = {
-  cik: 1, sic: 3674, industry: 'Semiconductors', widened: true,
+  key: 'sec:1', cik: 1, sic: 3674, industry: 'Semiconductors', widened: true,
   peers: [
     peer(1, 'NVDA', { pe_ratio: 45, revenue: 300e9 }),
     peer(2, 'AVGO', { pe_ratio: null, revenue: 60e9 }),
@@ -34,7 +34,7 @@ function renderCard() {
   return render(
     <QueryClientProvider client={client}>
       <CompanyLinksContext.Provider value={LINKS}>
-        <CompanyPeersCard cik={1} industry="Semiconductors" />
+        <CompanyPeersCard companyKey="sec:1" industry="Semiconductors" />
       </CompanyLinksContext.Provider>
     </QueryClientProvider>,
   )
@@ -54,7 +54,7 @@ describe('CompanyPeersCard (review item R1)', () => {
 
     fireEvent.click(screen.getByRole('button', { name: /Peers/ }))
     await screen.findByTestId('company-peers')
-    await waitFor(() => expect(get).toHaveBeenCalledWith(1))
+    await waitFor(() => expect(get).toHaveBeenCalledWith('sec:1'))
     // The three-digit group is named as such.
     expect(await screen.findByText('SIC 367x')).toBeTruthy()
   })

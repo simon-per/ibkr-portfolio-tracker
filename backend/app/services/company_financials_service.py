@@ -64,7 +64,12 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.clock import utc_today, utcnow
-from app.models.company_financials import CompanyFinancial, SecCompany
+from app.models.company_financials import (
+    OTHER_SCHEMES,
+    SEC_SCHEME,
+    CompanyFinancial,
+    SecCompany,
+)
 from app.models.analyst_rating import rating_of
 from app.models.earnings_event import EarningsEvent
 from app.models.etf_basket import EtfHolding
@@ -76,6 +81,7 @@ from app.repositories.market_price_repository import MarketPriceRepository
 from app.repositories.security_repository import held
 from app.repositories.sync_run_repository import utc_iso
 from app.services.company_classification import Classification, classify, gics_sector
+from app.services.company_identity import IdentityMember
 from app.services.company_financials_normaliser import ANNUAL, SPLIT_RATIOS
 
 PERIODS = ("quarterly", "ttm", "annual")
@@ -914,10 +920,13 @@ class CompanyFinancialsService:
         return {cik: members[0] for cik, members in (await self._held_members(ciks)).items()}
 
     @staticmethod
-    def _identity(company: SecCompany, listing: Optional[Security]) -> Dict[str, Any]:
-        """Who the company is on the tab: its held listing when there is one."""
+    def _identity(company, listing: Optional[Security]) -> Dict[str, Any]:
+        """Who the company is on the tab: its held listing when there is one (an SEC
+        filer's listing mapped to its CIK; another regulator's company is named by its own
+        record)."""
         if listing is not None:
             return {
+                "key": company.key,
                 "cik": company.cik,
                 "security_id": listing.id,
                 "symbol": listing.symbol,
@@ -925,8 +934,9 @@ class CompanyFinancialsService:
                 "isin": listing.isin,
                 "held": True,
             }
-        symbol = company.ticker or str(company.cik)
+        symbol = company.ticker or company.key
         return {
+            "key": company.key,
             "cik": company.cik,
             "security_id": None,
             "symbol": symbol,
@@ -935,33 +945,129 @@ class CompanyFinancialsService:
             "held": False,
         }
 
-    async def list_companies(self) -> List[Dict[str, Any]]:
+    async def company_by_key(self, ref: str):
         """
-        Companies with stored figures: those held, and the Nasdaq-100 constituents of the
-        newest full pass (`universe_seen_at`), one entry per company (CIK).
+        The company a path names: `sec:<cik>` or a bare CIK (every link before 2026-11-17),
+        `dart:<corp_code>`, `lei:<LEI>`. None when the pass never looked at it.
+        """
+        scheme, sep, native = ref.strip().partition(":")
+        if not sep:
+            scheme, native = SEC_SCHEME, scheme
+        if scheme == SEC_SCHEME:
+            if not native.isdigit() or len(native) > 10:
+                return None
+            return await self.db.get(SecCompany, int(native))
+        if scheme in OTHER_SCHEMES and native:
+            return await self.repo.other_company(scheme, native)
+        return None
+
+    async def _listed(self) -> Tuple[List[Any], Dict[int, List[Security]]]:
+        """
+        The companies the tab lists, of every regulator, and the SEC filers' held listings
+        (by CIK): an SEC filer held or found by the newest full pass (`universe_seen_at`),
+        and another regulator's company found by the newest pass of its own scheme.
         """
         companies = await self.repo.companies()
         members = await self._held_members(companies)
-        listings = {cik: held_listings[0] for cik, held_listings in members.items()}
         latest = await self.repo.latest_universe_stamp()
-        listed = [
+        listed: List[Any] = [
             c
             for c in companies.values()
-            if c.cik in listings
+            if c.cik in members
             or (latest is not None and c.universe_seen_at == latest)
         ]
-        coverage = await self.repo.coverage(c.cik for c in listed)
+        for scheme in OTHER_SCHEMES:
+            stamp = await self.repo.latest_other_universe_stamp(scheme)
+            if stamp is None:
+                continue
+            listed.extend(
+                c
+                for c in await self.repo.other_companies(scheme)
+                if c.universe_seen_at == stamp
+            )
+        return listed, members
+
+    async def _linked_listings(
+        self, listed: Sequence[Any], members: Dict[int, List[Security]]
+    ) -> Dict[str, List[int]]:
+        """
+        Company key -> every held listing of it: an SEC filer's listings mapped to its CIK,
+        and any held listing **the identity store folds with the company**
+        (`identity_service.group_companies`: ISIN, LEI, share-class FIGI, the declared
+        issuer overrides) — so 2330@TWSE opens TSMC's page, filed by its ADR, and 000660
+        SK Hynix's. Never by ticker. A fold reaching two listed companies links neither by
+        identity. A link only: the page's figures, prices and per-share basis stay its own.
+        """
+        from app.services.identity_service import group_companies
+
+        held_rows = (
+            await self.db.execute(
+                select(Security).where(held()).order_by(Security.symbol, Security.id)
+            )
+        ).scalars().all()
+        by_id = {s.id: s for s in held_rows}
+        idents: List[IdentityMember] = [
+            IdentityMember(ref=f"security:{s.id}", isin=s.isin, fallback_name=s.symbol)
+            for s in held_rows
+            if s.isin
+        ]
+        for company in listed:
+            isins = {company.isin} | {s.isin for s in members.get(company.cik, [])}
+            for isin in sorted(i for i in isins if i):
+                idents.append(
+                    IdentityMember(
+                        ref=f"company:{company.key}|{isin}", isin=isin, fallback_name=isin
+                    )
+                )
+        out: Dict[str, set] = {
+            c.key: {s.id for s in members.get(c.cik, [])} for c in listed
+        }
+        for group in await group_companies(self.db, idents):
+            keys = {
+                m.ref.removeprefix("company:").split("|")[0]
+                for m in group.members
+                if m.ref.startswith("company:")
+            }
+            if len(keys) != 1:
+                continue
+            (key,) = keys
+            out[key] |= {
+                int(m.ref.removeprefix("security:"))
+                for m in group.members
+                if m.ref.startswith("security:")
+            }
+        return {
+            key: [
+                sid
+                for sid in sorted(ids, key=lambda i: (by_id[i].symbol, i) if i in by_id else ("", i))
+            ]
+            for key, ids in out.items()
+        }
+
+    async def list_companies(self) -> List[Dict[str, Any]]:
+        """
+        Companies with stored figures, one entry per company: the SEC filers held and those
+        of the newest full pass (`universe_seen_at`), and the other regulators' companies of
+        their newest pass. `held` is whether the account holds any listing of it
+        (`security_ids`, `_linked_listings`).
+        """
+        listed, members = await self._listed()
+        listings = {cik: held_listings[0] for cik, held_listings in members.items()}
+        coverage = await self.repo.coverage_of(listed)
+        linked = await self._linked_listings(listed, members)
         out = []
         for company in listed:
-            cov = coverage.get(company.cik)
+            cov = coverage.get(company.key)
             if cov is None:
                 continue
+            ids = linked.get(company.key, [])
             out.append(
                 {
                     **self._identity(company, listings.get(company.cik)),
                     # Every held listing, so a row of any of them (GOOG and GOOGL are
-                    # both Alphabet) can link to the company.
-                    "security_ids": [s.id for s in members.get(company.cik, [])],
+                    # both Alphabet, 2330 is TSMC) can link to the company.
+                    "security_ids": ids,
+                    "held": bool(ids),
                     "currency": cov["currency"],
                     "first_period_end": cov["first"].isoformat()
                     if cov["first"]
@@ -970,7 +1076,22 @@ class CompanyFinancialsService:
                     "last_fetched_at": utc_iso(cov["fetched_at"]),
                 }
             )
-        out.sort(key=lambda c: (c["symbol"], c["cik"]))
+        out.sort(key=lambda c: (c["symbol"], c["key"]))
+        return out
+
+    async def companies_by_key(self, keys) -> Dict[str, Any]:
+        """Key -> company object, of every regulator, for these keys."""
+        wanted = set(keys)
+        ciks = [
+            int(k.split(":", 1)[1]) for k in wanted if k.startswith(f"{SEC_SCHEME}:")
+        ]
+        out: Dict[str, Any] = {
+            c.key: c for c in (await self.repo.companies(ciks)).values()
+        }
+        if any(not k.startswith(f"{SEC_SCHEME}:") for k in wanted):
+            for c in await self.repo.other_companies():
+                if c.key in wanted:
+                    out[c.key] = c
         return out
 
     async def _closes(
@@ -1037,7 +1158,7 @@ class CompanyFinancialsService:
         return eps_basis(closes, splits, max(r.filed for r in rows), filed)
 
     async def _yahoo_figures(
-        self, company: SecCompany, listing: Optional[Security]
+        self, company, listing: Optional[Security]
     ) -> Dict[str, Any]:
         """
         The overview's Yahoo figures, from one source per company: **a held company's from
@@ -1068,7 +1189,12 @@ class CompanyFinancialsService:
                 "next_earnings_date": upcoming.earnings_date if upcoming else None,
                 "next_eps_estimate": upcoming.eps_estimate if upcoming else None,
             }
-        row = (await self.repo.yahoo_profiles([company.cik])).get(company.cik)
+        # Another regulator's company is never asked about at Yahoo (owner, 2026-11-17).
+        row = (
+            (await self.repo.yahoo_profiles([company.cik])).get(company.cik)
+            if company.cik is not None
+            else None
+        )
         if row is None or row.fetched_at is None:
             return {
                 "figures": None,
@@ -1087,7 +1213,7 @@ class CompanyFinancialsService:
 
     async def _profile(
         self,
-        company: SecCompany,
+        company,
         listing: Optional[Security],
         closes: Prices,
         currency: Optional[str],
@@ -1119,7 +1245,7 @@ class CompanyFinancialsService:
         counts = yahoo["counts"]
         kind = await self._classification(company, listing)
         return {
-            "industry": company.sic_description,
+            "industry": company.industry,
             "business_model": kind.business_model,
             "business_model_source": kind.business_model_source,
             "sector": kind.sector,
@@ -1145,7 +1271,7 @@ class CompanyFinancialsService:
         }
 
     async def _classification(
-        self, company: SecCompany, listing: Optional[Security]
+        self, company, listing: Optional[Security]
     ) -> Classification:
         """The company's business model and sector (`company_classification.classify`): SEC's
         three sources from `sec_companies`, then the fund baskets' GICS vote for its ISINs and
@@ -1184,19 +1310,25 @@ class CompanyFinancialsService:
                 out[listing.id] = track
         return out
 
-    async def _priced(self, company: SecCompany) -> Dict[str, Any]:
+    async def _priced(self, company) -> Dict[str, Any]:
         """
         One company's stored rows, coverage, held listing and closes — as quoted and on the
         figures' split basis — and today's close for the multiples (None past
         `PRICE_MAX_AGE_DAYS`). The one path to a company's key figures: the overview and
         the Peers card both read them here (`tests/test_company_peers.py`).
+
+        **Another regulator's company has no closes** (owner, 2026-11-17): no Yahoo request
+        is made for it, and its held listing's daily close is not put beside its figures, so
+        its P/E, market cap and every multiple stay absent.
         """
-        rows = await self.repo.rows_for(company.cik)
-        coverage = (await self.repo.coverage([company.cik])).get(company.cik)
-        listing = (await self._held_listings([company.cik])).get(company.cik)
+        rows = await self.repo.rows_of(company)
+        coverage = (await self.repo.coverage_of([company])).get(company.key)
         currency = coverage["currency"] if coverage else None
-        closes = await self._closes(company.cik, rows, currency, listing)
-        prices = await self._on_eps_basis(company.cik, rows, closes)
+        listing, closes, prices = None, [], []
+        if company.cik is not None:
+            listing = (await self._held_listings([company.cik])).get(company.cik)
+            closes = await self._closes(company.cik, rows, currency, listing)
+            prices = await self._on_eps_basis(company.cik, rows, closes)
         current = None
         if prices and (utc_today() - prices[-1][0]).days <= PRICE_MAX_AGE_DAYS:
             current = prices[-1][1]
@@ -1210,13 +1342,13 @@ class CompanyFinancialsService:
             "current": current,
         }
 
-    async def key_figures(self, company: SecCompany) -> Tuple[Optional[str], Dict[str, Any]]:
+    async def key_figures(self, company) -> Tuple[Optional[str], Dict[str, Any]]:
         """A company's reporting currency and the overview's key figures, by the one path
         (`_priced`, `key_stats`): the Peers card and the look-through's fundamentals."""
         priced = await self._priced(company)
         return priced["currency"], key_stats(priced["rows"], priced["current"])
 
-    async def peers(self, company: SecCompany) -> Dict[str, Any]:
+    async def peers(self, company) -> Dict[str, Any]:
         """
         The Peers card (review item R1, 2026-11-08): the companies the tab lists in this
         one's SEC industry (`sic`), and when that holds fewer than `PEERS_MIN` others, in its
@@ -1225,15 +1357,16 @@ class CompanyFinancialsService:
         among them. No industry is no peers.
         """
         out: Dict[str, Any] = {
+            "key": company.key,
             "cik": company.cik,
             "sic": company.sic,
-            "industry": company.sic_description,
+            "industry": company.industry,
             "widened": False,
             "peers": [],
         }
         if company.sic is None:
             return out
-        listed = {c["cik"] for c in await self.list_companies()}
+        listed = {c["cik"] for c in await self.list_companies() if c["cik"] is not None}
         others = [
             c
             for c in (await self.repo.companies(listed)).values()
@@ -1299,7 +1432,7 @@ class CompanyFinancialsService:
         companies = (
             await self.db.execute(
                 select(SecCompany.cik, SecCompany.prices_fetched_at, SecCompany.sic_description)
-                .where(SecCompany.cik.in_([c["cik"] for c in listed]))
+                .where(SecCompany.cik.in_([c["cik"] for c in listed if c["cik"] is not None]))
                 .order_by(SecCompany.cik)
             )
         ).all()
@@ -1326,10 +1459,10 @@ class CompanyFinancialsService:
 
     async def _screen(self, listed: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         """The screener's rows, computed: one company's page in one line each."""
-        companies = await self.repo.companies({c["cik"] for c in listed})
+        companies = await self.companies_by_key(c["key"] for c in listed)
         out: List[Dict[str, Any]] = []
         for entry in listed:
-            company = companies.get(entry["cik"])
+            company = companies.get(entry["key"])
             if company is None:
                 continue
             priced = await self._priced(company)
@@ -1338,9 +1471,12 @@ class CompanyFinancialsService:
             track = dividend_track(rows, stats)
             own = multiple_medians(rows, priced["prices"])
             row: Dict[str, Any] = {
-                **{key: entry[key] for key in ("cik", "security_id", "symbol", "name", "isin", "held")},
+                **{
+                    key: entry[key]
+                    for key in ("key", "cik", "security_id", "symbol", "name", "isin", "held")
+                },
                 "currency": priced["currency"],
-                "industry": company.sic_description,
+                "industry": company.industry,
                 "period_end": stats["period_end"],
                 "market_cap": stats["market_cap"],
                 "revenue_yoy": stats["revenue_yoy"],
@@ -1371,7 +1507,7 @@ class CompanyFinancialsService:
 
     async def get_financials(
         self,
-        company: SecCompany,
+        company,
         period: str = DEFAULT_PERIOD,
         range_key: str = DEFAULT_RANGE,
     ) -> Dict[str, Any]:
@@ -1382,8 +1518,9 @@ class CompanyFinancialsService:
         identity = self._identity(company, listing)
         warnings: List[str] = []
         if not rows:
+            source = "SEC" if company.cik is not None else "regulatory"
             warnings.append(
-                f"No SEC financial statements are stored for {identity['symbol']}."
+                f"No {source} financial statements are stored for {identity['symbol']}."
             )
         return {
             **identity,

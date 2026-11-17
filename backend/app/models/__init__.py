@@ -33,6 +33,7 @@ from app.models.etf_basket import EtfBasket, EtfHolding, ConstituentIdentifierMi
 from app.models.isin_identity import IsinIdentity
 from app.models.security_logo import SecurityLogo
 from app.models.company_financials import (
+    Company,
     CompanyFinancial,
     CompanyPrice,
     CompanySplit,
@@ -50,6 +51,7 @@ from app.models.crypto import (
 )
 
 __all__ = [
+    "Company",
     "VendorStatement",
     "Security",
     "TaxLot",

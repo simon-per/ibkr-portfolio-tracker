@@ -1616,10 +1616,12 @@ export interface CompanyDividendTrack {
   payout_ratio: number | null;
 }
 
-/** `/api/company-financials/companies`: one SEC filer the Company tab can show, held or in the Nasdaq-100. */
+/** `/api/company-financials/companies`: one company the Company tab can show — an SEC filer, or another regulator's (OpenDART, ESEF). */
 export interface CompanyFinancialsCompany {
-  /** The SEC Central Index Key: the company's id on this API. */
-  cik: number;
+  /** The company's id: `sec:<cik>`, `dart:<corp_code>` or `lei:<LEI>` (docs/company-financials.md). */
+  key: string;
+  /** The SEC Central Index Key; null for another regulator's company. */
+  cik: number | null;
   /** The held listing (lowest symbol); null for a Nasdaq-100 constituent not held. */
   security_id: number | null;
   /** Every held listing (GOOG and GOOGL are both Alphabet); empty when not held. */
@@ -1739,7 +1741,8 @@ export interface LookthroughFundamentals {
 
 /** One company of the Company tab's Peers card (review item R1). */
 export interface CompanyPeer {
-  cik: number;
+  key: string;
+  cik: number | null;
   security_id: number | null;
   symbol: string;
   name: string;
@@ -1752,7 +1755,8 @@ export interface CompanyPeer {
 
 /** The companies the tab lists in one company's SEC industry, the company first. */
 export interface CompanyPeers {
-  cik: number;
+  key: string;
+  cik: number | null;
   sic: number | null;
   industry: string | null;
   /** True when the peers are the three-digit SIC group's. */
@@ -1767,7 +1771,8 @@ export interface CompanyPeers {
  * the company's history). Money is in `currency`.
  */
 export interface CompanyScreenerRow {
-  cik: number;
+  key: string;
+  cik: number | null;
   security_id: number | null;
   symbol: string;
   name: string;
@@ -1906,12 +1911,14 @@ export interface CompanyFinancialsKeyStats {
 export type CompanyFinancialsSeriesKey = keyof CompanyFinancialsSeriesSet;
 
 /**
- * `/api/company-financials/{cik}`. Money is in `currency` units (not thousands);
+ * `/api/company-financials/{key}`. Money is in `currency` units (not thousands);
  * margins are fractions. The browser draws these and computes nothing from them.
  */
 export interface CompanyFinancialsResponse {
-  /** The SEC Central Index Key: the company's id on this API. */
-  cik: number;
+  /** The company's id: `sec:<cik>`, `dart:<corp_code>` or `lei:<LEI>` (docs/company-financials.md). */
+  key: string;
+  /** The SEC Central Index Key; null for another regulator's company. */
+  cik: number | null;
   /** The held listing (lowest symbol); null for a Nasdaq-100 constituent not held. */
   security_id: number | null;
   symbol: string;
@@ -2340,20 +2347,20 @@ class ApiClient {
   }
 
   async getCompanyFinancials(
-    cik: number,
+    key: string,
     period: CompanyFinancialsPeriod,
     range: CompanyFinancialsRange,
   ): Promise<CompanyFinancialsResponse> {
     const params = new URLSearchParams({ period, range });
-    return this.request<CompanyFinancialsResponse>(`/api/company-financials/${cik}?${params}`);
+    return this.request<CompanyFinancialsResponse>(`/api/company-financials/${encodeURIComponent(key)}?${params}`);
   }
 
   async getLookthroughFundamentals(): Promise<LookthroughFundamentals> {
     return this.request<LookthroughFundamentals>('/api/portfolio/lookthrough/fundamentals');
   }
 
-  async getCompanyPeers(cik: number): Promise<CompanyPeers> {
-    return this.request<CompanyPeers>(`/api/company-financials/${cik}/peers`);
+  async getCompanyPeers(key: string): Promise<CompanyPeers> {
+    return this.request<CompanyPeers>(`/api/company-financials/${encodeURIComponent(key)}/peers`);
   }
 
   async getCompanyScreener(): Promise<CompanyScreenerRow[]> {

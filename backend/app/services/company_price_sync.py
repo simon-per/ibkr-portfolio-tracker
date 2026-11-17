@@ -112,6 +112,10 @@ class CompanyPriceSync:
         wanted = {sec_ticker(s) for s in symbols} if symbols else None
         out = []
         for entry in listed:
+            # SEC filers only: another regulator's company is never priced at Yahoo (owner,
+            # 2026-11-17), so its multiples stay absent.
+            if entry["cik"] is None:
+                continue
             company = companies.get(entry["cik"])
             if company is None or not company.ticker:
                 continue

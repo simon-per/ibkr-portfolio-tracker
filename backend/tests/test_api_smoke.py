@@ -46,7 +46,12 @@ from app.models.crypto import (
     CryptoSnapshot,
 )
 from app.models.cash_flow import CashFlow, DEPOSIT_WITHDRAW
-from app.models.company_financials import CompanyFinancial, SecCompany, SecurityCik
+from app.models.company_financials import (
+    Company,
+    CompanyFinancial,
+    SecCompany,
+    SecurityCik,
+)
 from app.models.dividend_forecast_snapshot import (
     DividendForecastSnapshot,
     DividendForecastSnapshotLine,
@@ -122,6 +127,9 @@ READ_ENDPOINTS = [
     "/api/company-financials/937966?period=annual&range=max",
     "/api/company-financials/320193",   # a Nasdaq-100 constituent not held
     "/api/company-financials/1234567",  # a known company without figures
+    "/api/company-financials/sec:937966",      # the same company by its key
+    "/api/company-financials/dart:00164779",   # another regulator's company
+    "/api/company-financials/dart:00164779/peers",
     "/api/company-financials/937966/peers",  # its industry widened to 355x: Apple
     "/api/company-financials/screener",      # every listed company, one row each
 ]
@@ -181,11 +189,32 @@ async def _seed(session: AsyncSession) -> None:
     session.add(SecCompany(cik=7654321, ticker="GONE", name="Former member",
                            universe_seen_at=pass_at - timedelta(days=7), fetched_at=pass_at))
     session.add(SecCompany(cik=1234567, ticker="EMPTY"))
+    # TSMC's ADR files the 20-F; the held 2330 listing (security 4) links to its page through
+    # the identity store's issuer override, never by ticker.
+    session.add(SecCompany(cik=1046179, ticker="TSM", name="Taiwan Semiconductor",
+                           isin="US8740391003", universe_seen_at=pass_at, fetched_at=pass_at))
+    # Another regulator's company (OpenDART), found by its own pass; held by nobody here.
+    session.add(Company(id=1, scheme="dart", native_id="00164779", ticker="000660",
+                        name="SK hynix Inc.", isin="KR7000660001", country="KR",
+                        industry="Manufacture of semiconductors", universe_seen_at=pass_at,
+                        fetched_at=pass_at))
     for cik in (320193, 7654321):
         session.add(CompanyFinancial(
             cik=cik, period_end=date(2024, 12, 31), fiscal_year=2024, fiscal_period="FY",
             metric="revenue", value=391.0, unit="USD", source_concept="Revenues",
             filed=date(2025, 1, 31), fetched_at=pass_at,
+        ))
+    session.add(CompanyFinancial(
+        cik=1046179, period_end=date(2024, 12, 31), fiscal_year=2024, fiscal_period="FY",
+        metric="revenue", value=2894.3, unit="TWD", source_concept="Revenues",
+        filed=date(2025, 4, 17), fetched_at=pass_at,
+    ))
+    for year, value in ((2023, 32765.7), (2024, 66193.0)):
+        session.add(CompanyFinancial(
+            company_id=1, period_end=date(year, 12, 31), fiscal_year=year,
+            fiscal_period="FY", metric="revenue", value=value, unit="KRW",
+            source_concept="dart:ifrs-full_Revenue", filed=date(year + 1, 3, 19),
+            fetched_at=pass_at,
         ))
     quarter_ends = [date(2023, 3, 31), date(2023, 6, 30), date(2023, 9, 30), date(2023, 12, 31),
                     date(2024, 3, 31), date(2024, 6, 30), date(2024, 9, 30), date(2024, 12, 31)]
@@ -554,16 +583,28 @@ def test_logos_serve_both_listings_of_an_isin_through_the_real_stack(client):
 
 def test_company_financials_serve_their_contract_through_the_real_stack(client):
     companies = client.get("/api/company-financials/companies").json()
-    # The held company and the current constituent; never the former member.
-    assert [(c["symbol"], c["cik"], c["security_id"], c["held"]) for c in companies] == [
-        ("AAPL", 320193, None, False), ("ASML", 937966, 1, True)]
-    assert companies[0]["name"] == "Apple Inc" and companies[0]["isin"] == "US0378331005"
-    assert [c["security_ids"] for c in companies] == [[], [1]]
-    assert companies[1]["currency"] == "USD"
-    assert companies[1]["last_fetched_at"].endswith("+00:00")
+    # The held company and the current constituents; never the former member. Another
+    # regulator's company beside them, keyed by its own scheme.
+    assert [(c["key"], c["symbol"], c["cik"], c["security_id"], c["held"]) for c in companies] == [
+        ("dart:00164779", "000660", None, None, False),
+        ("sec:320193", "AAPL", 320193, None, False),
+        ("sec:937966", "ASML", 937966, 1, True),
+        ("sec:1046179", "TSM", 1046179, None, True),
+    ]
+    by_key = {c["key"]: c for c in companies}
+    apple_row = by_key["sec:320193"]
+    assert apple_row["name"] == "Apple Inc" and apple_row["isin"] == "US0378331005"
+    # ASML@AEB shares the NASDAQ listing's ISIN, and 2330 is TSMC by the issuer override:
+    # each links through the identity store.
+    assert [c["security_ids"] for c in companies] == [[], [], [1, 2], [4]]
+    assert by_key["sec:937966"]["currency"] == "USD"
+    assert by_key["dart:00164779"]["currency"] == "KRW"
+    assert by_key["sec:937966"]["last_fetched_at"].endswith("+00:00")
 
     body = client.get("/api/company-financials/937966").json()
-    assert (body["cik"], body["security_id"], body["held"]) == (937966, 1, True)
+    assert (body["key"], body["cik"], body["security_id"], body["held"]) == (
+        "sec:937966", 937966, 1, True)
+    assert client.get("/api/company-financials/sec:937966").json() == body
     assert (body["period"], body["range"], body["warnings"]) == ("ttm", "10y", [])
     # The overview's profile and the price series ride on the same response.
     assert "industry" in body["profile"] and "target_upside" in body["profile"]
@@ -599,6 +640,19 @@ def test_company_financials_serve_their_contract_through_the_real_stack(client):
     empty = client.get("/api/company-financials/1234567").json()
     assert empty["warnings"] and empty["series"]["revenue"]["points"] == []
     assert client.get("/api/company-financials/999").status_code == 404
+    for unknown in ("dart:999", "lei:NOPE", "xyz:1", "sec:abc", "sec:12345678901"):
+        assert client.get(f"/api/company-financials/{unknown}").status_code == 404
+
+    # Another regulator's company: its figures, no price and no multiple (no Yahoo request
+    # is made for it), no SEC classification, no peers.
+    hynix = client.get("/api/company-financials/dart:00164779?period=annual").json()
+    assert (hynix["key"], hynix["cik"], hynix["currency"]) == ("dart:00164779", None, "KRW")
+    assert [p["value"] for p in hynix["series"]["revenue"]["points"]] == [32765.7, 66193.0]
+    assert hynix["series"]["price"]["points"] == []
+    assert hynix["key_stats"]["pe_ratio"] is None and hynix["key_stats"]["market_cap"] is None
+    assert hynix["profile"]["industry"] == "Manufacture of semiconductors"
+    assert hynix["profile"]["price"] is None
+    assert client.get("/api/company-financials/dart:00164779/peers").json()["peers"] == []
 
     # The Peers card (review item R1): one other in 3559 is too few, so 355x; the company
     # first, with its own overview's figures.
@@ -612,7 +666,7 @@ def test_company_financials_serve_their_contract_through_the_real_stack(client):
     # The screener: the tab's companies, one row each, the row the company's own page in one
     # line — routed before `/{cik}`, which would otherwise take the path and 422 it.
     screener = client.get("/api/company-financials/screener").json()
-    assert [r["cik"] for r in screener] == [c["cik"] for c in companies]
+    assert [r["key"] for r in screener] == [c["key"] for c in companies]
     asml = next(r for r in screener if r["cik"] == 937966)
     assert asml["pe_ratio"] == body["key_stats"]["pe_ratio"]
     assert asml["market_cap"] == body["key_stats"]["market_cap"]

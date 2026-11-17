@@ -77,13 +77,19 @@ class CompanyProfileSync:
 
     async def index_only(self) -> List[Dict[str, Any]]:
         """
-        The companies the Company tab lists that nobody holds — its own list
-        (`list_companies`), so the chunk asks about exactly what the tab can show. A company
-        without an SEC ticker on record has nothing to ask Yahoo by.
+        The SEC filers the Company tab lists with no held listing mapped to their CIK — its
+        own list (`list_companies`), so the chunk asks about exactly what the tab can show.
+        A company without an SEC ticker on record has nothing to ask Yahoo by. TSMC stays in:
+        2330@TWSE links to its page (`held`) but is not the listing its figures are read by.
+        **Another regulator's company is never asked** (`cik` null; owner, 2026-11-17).
         """
         companies = await CompanyFinancialsService(self.db).list_companies()
         return [
-            c for c in companies if not c["held"] and not str(c["symbol"]).isdigit()
+            c
+            for c in companies
+            if c["cik"] is not None
+            and c["security_id"] is None
+            and not str(c["symbol"]).isdigit()
         ]
 
     async def refresh(self) -> Dict[str, Any]:

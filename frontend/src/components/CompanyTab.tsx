@@ -579,7 +579,7 @@ function CompanyOverview({ data }: { data: CompanyFinancialsResponse }) {
           <RangeBar low={profile.week52_low} high={profile.week52_high} price={profile.price} format={price} />
         </div>
       )}
-      {profile.description && <Description key={data.cik} text={profile.description} />}
+      {profile.description && <Description key={data.key} text={profile.description} />}
       {groups.length > 0 && (
         <div className="space-y-2" data-testid="overview-figures">
           {data.key_stats.label && (
@@ -701,8 +701,8 @@ export function CompanyTab() {
   // A company in the URL (`lib/tabRoute.ts`: a holding's link, or a reload) wins over this
   // browser's last pick; one the list no longer has falls through like a stale pick.
   const route = useTabRoute()
-  const linked = route.tab === 'company' ? route.cik : null
-  const [picked, setPicked] = useState<number | null>(null)
+  const linked = route.tab === 'company' ? route.company : null
+  const [picked, setPicked] = useState<string | null>(null)
   const [stored] = useState(readCompanyPick)
   const [period, setPeriod] = useState<CompanyFinancialsPeriod>('ttm')
   const [range, setRange] = useState<CompanyFinancialsRange>('10y')
@@ -711,16 +711,16 @@ export function CompanyTab() {
 
   const companies = useQuery(companyFinancialsCompaniesQuery)
   const company = companies.data ? resolveCompany(companies.data, linked ?? picked, stored) : null
-  const shownCik = company?.cik ?? null
+  const shownKey = company?.key ?? null
 
   // A company opened by link becomes the remembered pick, so the tab's own trigger
   // reopens it rather than the one picked before the link was followed.
   useEffect(() => {
-    if (linked != null && shownCik === linked) writeCompanyPick(linked)
-  }, [linked, shownCik])
+    if (linked != null && shownKey === linked) writeCompanyPick(linked)
+  }, [linked, shownKey])
 
   const financials = useQuery({
-    ...companyFinancialsQuery(company?.cik ?? -1, period, range),
+    ...companyFinancialsQuery(company?.key ?? '', period, range),
     enabled: company != null,
     // The last company's charts stay, dimmed, while the next loads: a skeleton would unmount
     // the toggle just pressed (#68).
@@ -728,11 +728,11 @@ export function CompanyTab() {
   })
   const data = financials.data
 
-  const pick = (cik: number) => {
-    setPicked(cik)
-    writeCompanyPick(cik)
+  const pick = (key: string) => {
+    setPicked(key)
+    writeCompanyPick(key)
     // Into the URL too, without a history entry: a reload keeps the company.
-    replaceRoute({ tab: 'company', cik })
+    replaceRoute({ tab: 'company', company: key })
   }
 
   if (companies.isError) {
@@ -753,7 +753,7 @@ export function CompanyTab() {
       <Card>
         <SectionHeader title="Company" icon={Building2} iconTone="muted" />
         <CardContent>
-          <p className="py-8 text-center text-sm text-muted-foreground">No companies with SEC filings stored.</p>
+          <p className="py-8 text-center text-sm text-muted-foreground">No companies with filings stored.</p>
         </CardContent>
       </Card>
     )
@@ -775,14 +775,14 @@ export function CompanyTab() {
               {companies.data ? (
                 <select
                   aria-label="Company"
-                  value={company?.cik ?? ''}
-                  onChange={(e) => pick(Number(e.target.value))}
+                  value={company?.key ?? ''}
+                  onChange={(e) => pick(e.target.value)}
                   className="h-9 min-w-0 max-w-full rounded-lg border border-border bg-card px-2.5 text-sm font-medium transition-colors hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                 >
                   {companyGroups(companies.data).map((group) => (
                     <optgroup key={group.label} label={group.label}>
                       {group.companies.map((c) => (
-                        <option key={c.cik} value={c.cik}>
+                        <option key={c.key} value={c.key}>
                           {c.symbol} · {displayName(c.name)}
                         </option>
                       ))}
@@ -837,7 +837,7 @@ export function CompanyTab() {
                     <CompanyChartCard
                       // A new company or basis is a new set of series: the legend's hidden
                       // lines and the hovered period reset (review item U4).
-                      key={`${data.cik}:${chart.id}:${basis}`}
+                      key={`${data.key}:${chart.id}:${basis}`}
                       chart={chart}
                       basis={basis}
                       data={data}
@@ -848,7 +848,7 @@ export function CompanyTab() {
                 : <ChartSkeletons />}
             </div>
             {data?.profile.industry && (
-              <CompanyPeersCard key={data.cik} cik={data.cik} industry={data.profile.industry} />
+              <CompanyPeersCard key={data.key} companyKey={data.key} industry={data.profile.industry} />
             )}
             </>
           )}

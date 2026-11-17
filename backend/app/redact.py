@@ -55,6 +55,7 @@ _LITERAL_SECRET_SETTINGS = (
     "coingecko_api_key",
     "logo_dev_secret_key",
     "alpha_vantage_api_key",
+    "opendart_api_key",
     "openfigi_api_key",
     "api_admin_token",
     # Not a secret, but it carries the operator's email address (docs/company-financials.md).

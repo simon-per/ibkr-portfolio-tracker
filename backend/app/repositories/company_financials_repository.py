@@ -6,6 +6,10 @@ Reads and writes of `company_financials`, `sec_companies`, `security_ciks`,
 company's rows are deleted and the new set inserted in one transaction, so a reader never
 sees half of one fetch beside half of the previous one. `write_prices` does the same for
 the stretch of closes one fetch covers.
+
+A company is an SEC filer (`SecCompany`, rows by `cik`) or one of `companies` (`Company`,
+rows by `company_id`, docs/company-financials.md *Markets beyond the SEC*); the readers that
+take a company object (`rows_of`, `coverage_of`) serve both through `_owned_by`.
 """
 
 from datetime import date, datetime
@@ -16,6 +20,7 @@ from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.company_financials import (
+    Company,
     CompanyFinancial,
     CompanyPrice,
     CompanySplit,
@@ -29,7 +34,14 @@ from app.models.company_financials import (
 from app.services.miss_backoff import miss_backoff_until
 
 
-def facts_backoff_until(row: Optional[SecCompany]) -> Optional[datetime]:
+def _owned_by(company):
+    """The `company_financials` rows of this company, an SEC filer or one of `companies`."""
+    if company.cik is not None:
+        return CompanyFinancial.cik == company.cik
+    return CompanyFinancial.company_id == company.company_id
+
+
+def facts_backoff_until(row) -> Optional[datetime]:
     """When companyfacts may next be asked for this company, or None if it may now."""
     if row is None:
         return None
@@ -157,6 +169,68 @@ class CompanyFinancialsRepository:
             await self.session.execute(select(func.max(SecCompany.universe_seen_at)))
         ).scalar()
 
+    # ── companies (the other regulators) ─────────────────────────────────────
+
+    async def other_companies(self, scheme: Optional[str] = None) -> List[Company]:
+        """Every company of another regulator than the SEC, or of one scheme."""
+        query = select(Company).order_by(Company.id)
+        if scheme is not None:
+            query = query.where(Company.scheme == scheme)
+        return list((await self.session.execute(query)).scalars())
+
+    async def other_company(self, scheme: str, native_id: str) -> Optional[Company]:
+        return (
+            await self.session.execute(
+                select(Company).where(
+                    Company.scheme == scheme, Company.native_id == native_id
+                )
+            )
+        ).scalar_one_or_none()
+
+    async def ensure_other_company(
+        self, scheme: str, native_id: str, **fields: Optional[str]
+    ) -> Company:
+        """The company's row, created if new; what is given (not None) replaces what was
+        stored."""
+        row = await self.other_company(scheme, native_id)
+        if row is None:
+            row = Company(scheme=scheme, native_id=native_id)
+            self.session.add(row)
+            await self.session.flush()
+        for name, value in fields.items():
+            if value is not None:
+                setattr(row, name, value)
+        return row
+
+    async def latest_other_universe_stamp(self, scheme: str) -> Optional[datetime]:
+        return (
+            await self.session.execute(
+                select(func.max(Company.universe_seen_at)).where(Company.scheme == scheme)
+            )
+        ).scalar()
+
+    async def replace_company_rows(
+        self, company: Company, rows: Sequence[dict], fetched_at: datetime
+    ) -> None:
+        """Every figure of one company of another regulator, replaced as one set — the
+        same write as `replace_rows`, keyed by `company_id`; clears its miss stamps."""
+        await self._replace(company, rows, fetched_at)
+        company.fetched_at = fetched_at
+        company.facts_checked_at = None
+        company.facts_miss_count = None
+
+    async def _replace(self, company, rows: Sequence[dict], fetched_at: datetime) -> None:
+        """Delete the company's rows and insert `rows`: the one figure write."""
+        await self.session.execute(delete(CompanyFinancial).where(_owned_by(company)))
+        owner = (
+            {"cik": company.cik}
+            if company.cik is not None
+            else {"company_id": company.company_id}
+        )
+        self.session.add_all(
+            CompanyFinancial(**owner, fetched_at=fetched_at, **row) for row in rows
+        )
+
     async def record_miss(self, cik: int, checked_at: datetime) -> None:
         """companyfacts had nothing this app reads; `facts_backoff_until` spaces the next ask."""
         row = await self.ensure_company(cik)
@@ -226,12 +300,7 @@ class CompanyFinancialsRepository:
         if entity_name and not company.name:
             company.name = entity_name
         company.filed_splits = json.dumps(list(splits)) if splits else None
-        await self.session.execute(
-            delete(CompanyFinancial).where(CompanyFinancial.cik == cik)
-        )
-        self.session.add_all(
-            CompanyFinancial(cik=cik, fetched_at=fetched_at, **row) for row in rows
-        )
+        await self._replace(company, rows, fetched_at)
         company.fetched_at = fetched_at
         company.facts_checked_at = None
         company.facts_miss_count = None
@@ -327,41 +396,69 @@ class CompanyFinancialsRepository:
         )
         return list(result.scalars())
 
+    async def rows_of(self, company) -> List[CompanyFinancial]:
+        """A company's figures, an SEC filer's or another regulator's."""
+        result = await self.session.execute(
+            select(CompanyFinancial)
+            .where(_owned_by(company))
+            .order_by(CompanyFinancial.period_end, CompanyFinancial.fiscal_period)
+        )
+        return list(result.scalars())
+
     async def coverage(self, ciks: Iterable[int]) -> Dict[int, dict]:
-        """Per company with rows: first and last period end, newest fetch, row count, and
+        """Per SEC filer with rows: first and last period end, newest fetch, row count, and
         the most common monetary unit (its reporting currency)."""
-        wanted = list(ciks)
+        return await self._coverage(CompanyFinancial.cik, ciks)
+
+    async def coverage_of(self, companies: Iterable) -> Dict[str, dict]:
+        """`coverage` for company objects of any regulator, by `key`."""
+        sec, other = {}, {}
+        for company in companies:
+            if company.cik is not None:
+                sec[company.cik] = company.key
+            else:
+                other[company.company_id] = company.key
+        out = {
+            sec[cik]: entry
+            for cik, entry in (await self._coverage(CompanyFinancial.cik, sec)).items()
+        }
+        found = await self._coverage(CompanyFinancial.company_id, other)
+        out.update({other[cid]: entry for cid, entry in found.items()})
+        return out
+
+    async def _coverage(self, column, owners: Iterable[int]) -> Dict[int, dict]:
+        wanted = list(owners)
         if not wanted:
             return {}
         result = await self.session.execute(
             select(
-                CompanyFinancial.cik,
+                column,
                 func.min(CompanyFinancial.period_end),
                 func.max(CompanyFinancial.period_end),
                 func.max(CompanyFinancial.fetched_at),
                 func.count(CompanyFinancial.id),
             )
-            .where(CompanyFinancial.cik.in_(wanted))
-            .group_by(CompanyFinancial.cik)
+            .where(column.in_(wanted))
+            .group_by(column)
         )
         out = {
-            cik: {"first": first, "last": last, "fetched_at": fetched, "rows": n}
-            for cik, first, last, fetched, n in result.all()
+            owner: {"first": first, "last": last, "fetched_at": fetched, "rows": n}
+            for owner, first, last, fetched, n in result.all()
         }
         units = await self.session.execute(
-            select(CompanyFinancial.cik, CompanyFinancial.unit, func.count())
+            select(column, CompanyFinancial.unit, func.count())
             .where(
-                CompanyFinancial.cik.in_(list(out)),
+                column.in_(list(out)),
                 CompanyFinancial.metric == "revenue",
             )
-            .group_by(CompanyFinancial.cik, CompanyFinancial.unit)
+            .group_by(column, CompanyFinancial.unit)
         )
         best: Dict[int, tuple] = {}
-        for cik, unit, n in units.all():
-            if cik not in best or n > best[cik][1]:
-                best[cik] = (unit, n)
-        for cik, entry in out.items():
-            entry["currency"] = best.get(cik, (None,))[0]
+        for owner, unit, n in units.all():
+            if owner not in best or n > best[owner][1]:
+                best[owner] = (unit, n)
+        for owner, entry in out.items():
+            entry["currency"] = best.get(owner, (None,))[0]
         return out
 
     # ── company_prices, company_splits ───────────────────────────────────────

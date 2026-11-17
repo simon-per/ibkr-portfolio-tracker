@@ -134,10 +134,10 @@ export function peerColumns(): Column<CompanyPeer, PeerSortKey>[] {
  * (review item R1). Collapsed: it asks the server only once opened. The company itself
  * leads until a column is sorted.
  */
-export function CompanyPeersCard({ cik, industry }: { cik: number; industry: string }) {
+export function CompanyPeersCard({ companyKey, industry }: { companyKey: string; industry: string }) {
   const [open, setOpen] = useState(false)
   const contentId = useId()
-  const peers = useQuery({ ...companyPeersQuery(cik), enabled: open })
+  const peers = useQuery({ ...companyPeersQuery(companyKey), enabled: open })
   const [sortKey, setSortKey] = useState<PeerSortKey | null>(null)
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc')
   const columns = useMemo(() => peerColumns(), [])
@@ -193,7 +193,7 @@ export function CompanyPeersCard({ cik, industry }: { cik: number; industry: str
             <DataTable
               rows={rows}
               columns={columns}
-              getRowKey={(row) => row.cik}
+              getRowKey={(row) => row.key}
               label="Peers table"
               density="normal"
               minWidthClassName="min-w-[48rem]"

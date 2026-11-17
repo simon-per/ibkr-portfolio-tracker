@@ -167,7 +167,7 @@ const SPARSE_DRAWDOWN = {
 const SPARSE_PROJECTION = { year: 1, value: null, moneyIn: null, gains: null }
 
 const SPARSE_PEER = {
-  cik: 1, security_id: null, symbol: 'X', name: '', isin: null, held: false, currency: null,
+  key: 'sec:1', cik: 1, security_id: null, symbol: 'X', name: '', isin: null, held: false, currency: null,
   key_stats: {
     label: null, period_end: null, revenue: null, revenue_yoy: null, revenue_cagr_5y: null,
     net_income: null, eps_diluted: null, eps_yoy: null, eps_cagr_5y: null, fcf: null,
@@ -180,7 +180,7 @@ const SPARSE_PEER = {
 
 const NO_SPANS = { y3: null, y5: null, y10: null }
 const SPARSE_SCREENER = {
-  cik: 1, security_id: null, symbol: 'X', name: '', isin: null, held: false, currency: null,
+  key: 'sec:1', cik: 1, security_id: null, symbol: 'X', name: '', isin: null, held: false, currency: null,
   industry: null, period_end: null, market_cap: null, revenue_yoy: null, revenue_cagr_5y: null,
   eps_yoy: null, eps_cagr_5y: null, gross_margin: null, operating_margin: null, fcf_margin: null,
   roe: null, net_cash: null, pe_ratio: null, pe_median: NO_SPANS, pe_vs_median: NO_SPANS,
