@@ -376,6 +376,11 @@ SHARES_FROM_EPS_MAX_ERROR = 0.02
 # diluted count may sit well off NI/EPS (anti-dilution in a loss year) without being one.
 SHARES_SLIP_EPS_MAX_ERROR = 0.25
 SHARES_SLIP_TOLERANCE = 0.5
+# A year's dividend per share times its diluted count more than this many times both the
+# dividends the year paid and its profit is a tagging slip, left absent (never rescaled):
+# Terna's ESEF reports tag the interim dividend in cents as euros (11.92 for 0.1192, a
+# 2,279% payout; #83). Generous on purpose: a special dividend stays within a few times.
+DPS_SLIP_FACTOR = 10
 SHARE_COUNT_SLIPS: Tuple[Fraction, ...] = (
     Fraction(1, 1000),
     Fraction(1000),
@@ -2031,6 +2036,27 @@ def _quarter_totals(
     return out
 
 
+def _drop_implausible_dividends(values) -> None:
+    """
+    A year's dividend per share that the year's own figures cannot have paid
+    (`DPS_SLIP_FACTOR`): absent. Years only, and only with dividends paid above zero to
+    weigh it against — a quarter's payment can fall in the next quarter, and a dividend
+    with nothing paid beside it (a first declaration) has no witness.
+    """
+    dps = values["dividends_per_share"]
+    for key, obs in list(dps.items()):
+        if key[0] != ANNUAL:
+            continue
+        shares = values["diluted_shares"].get(key)
+        paid = values["dividends_paid"].get(key)
+        if shares is None or shares.value <= 0 or paid is None or paid.value <= 0:
+            continue
+        income = values["net_income"].get(key)
+        witness = max(paid.value, abs(income.value) if income is not None else 0.0)
+        if obs.value * shares.value > DPS_SLIP_FACTOR * witness:
+            del dps[key]
+
+
 def _flat_rate_years(values, keys, calendar, latest, totals, mapping) -> None:
     """
     A fiscal year — or its tail, from a quarter to the year end — whose every
@@ -2349,6 +2375,7 @@ def normalise(
     if dropped:
         _fill_shares_from_eps(values, keys)
     _fill_eps_from_shares(values, keys)
+    _drop_implausible_dividends(values)
 
     cash = values["cash"]
     if cash:

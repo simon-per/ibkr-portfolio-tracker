@@ -989,7 +989,7 @@ All three were misses: the normaliser read 10-K/10-Q facts in us-gaap only.
 - **An annual-only filer's TTM is its fiscal years** (`_series_points`): each year is its own
   trailing twelve months, so the default view and the key figures show the latest year; the
   quarterly view stays empty. A filer counts as quarterly only by a quarter's own statement
-  figure (`QUARTER_WITNESSES`: revenue, net income, operating cash flow): TSMC's 20-F tags each
+  figure (`QUARTER_WITNESSES`: revenue, net income, diluted EPS, operating cash flow): TSMC's 20-F tags each
   quarter's dividend per share, which until 2026-11-17 (#82) blanked its key figures.
 - They are asked again when their miss back-off runs out (at most 30 days); TSMC is in scope only
   while something names its US listing (held as 2330 on the TWSE, it is not a US listing).
@@ -1407,7 +1407,12 @@ separately, or filed only under a company's own extension concept, which company
   FY2022 on, and its TTM FCF starts at Q3 FY2024 (checked on production, 2026-10-25). Reaching extension concepts would need each
   filing's XBRL instance, a different source.
 - A unit slip in a monetary concept that no newer filing overlaps is not caught (the share-count
-  check has NI / EPS to compare with; revenue has nothing).
+  check has NI / EPS to compare with; revenue has nothing). A **year's dividend per share** has
+  witnesses and is checked (`_drop_implausible_dividends`, #83): times the diluted count it may
+  not exceed `DPS_SLIP_FACTOR` (10) times both the year's dividends paid and its profit, or it is
+  left absent, never rescaled. Measured 2026-11-17 over 954 company-years with dividends paid:
+  only Terna's FY2022-FY2024 (11.92 for 0.1192 — cents tagged as euros) and Santander's FY2023
+  (8.1 for 0.081) exceed even 3x; every SEC filer's year is within it.
 - **Dividend per share gaps left** (about 90 quarters across 20 companies, 2026-11-07):
   IBKR's three quarters before 2014, whose rungs no declared total vouches for; AMAT before
   2012 and in FY2013, and MELI, AMGN and MAR, tag each declaration on a one-day or

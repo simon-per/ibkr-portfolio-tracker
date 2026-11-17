@@ -23,7 +23,7 @@ APP = Path(__file__).resolve().parent.parent / "app"
 def test_no_other_module_asks_alpha_vantage():
     """The family test: a second caller must go through `alpha_vantage.ask`."""
     naming = sorted(
-        str(p.relative_to(APP))
+        p.relative_to(APP).as_posix()
         for p in APP.rglob("*.py")
         if "alphavantage.co" in p.read_text("utf-8")
     )

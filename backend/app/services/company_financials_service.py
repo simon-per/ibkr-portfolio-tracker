@@ -629,7 +629,7 @@ def _with_roe(points: List[Point], rows: Sequence[CompanyFinancial], period: str
 #: What makes a filer a quarterly reporter: a quarter's own statement figure. A dividend per
 #: share declared each quarter does not — TSMC's 20-F tags its quarterly dividends, and TSMC
 #: files no quarterly statements this reads (2026-11-17: its key figures were blank).
-QUARTER_WITNESSES = ("revenue", "net_income", "operating_cash_flow")
+QUARTER_WITNESSES = ("revenue", "net_income", "eps_diluted", "operating_cash_flow")
 
 
 def _reports_quarters(quarterly: Sequence[Point]) -> bool:

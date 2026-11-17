@@ -445,3 +445,36 @@ async def test_a_pass_stopped_part_way_asks_the_list_again_and_reads_the_rest(db
     page = await svc.get_financials(await svc.company_by_key(f"lei:{LEI}"), "annual", "max")
     labels = {p["label"] for p in page["series"]["revenue"]["points"]}
     assert {"FY2022", "FY2023", "FY2024"} <= labels
+
+
+def _year_facts(dps):
+    def f(concept, val, unit="EUR"):
+        return {
+            "concept": concept,
+            "unit": unit,
+            "start": "2024-01-01",
+            "end": "2024-12-31",
+            "val": val,
+            "accn": "fxo-2024",
+            "filed": "2025-04-01",
+            "form": "annual report",
+        }
+
+    return [
+        f("Revenue", 3616.2e6),
+        f("ProfitLossAttributableToOwnersOfParent", 1061.9e6),
+        f("DilutedEarningsLossPerShare", 0.523, "EUR/shares"),
+        f("DividendsPaidClassifiedAsFinancingActivities", 690.6e6),
+        f("DividendsRecognisedAsDistributionsToOwnersPerShare", dps, "EUR/shares"),
+    ]
+
+
+@pytest.mark.parametrize("dps,kept", [(11.92, False), (0.3946, True)])
+def test_a_dividend_per_share_the_year_cannot_have_paid_is_absent(dps, kept):
+    # Terna's FY2024 report tags its interim dividend in cents as euros (#83).
+    from app.services.regulator_facts import normalise_reports
+
+    rows = normalise_reports("Terna", _year_facts(dps), "esef", {}).rows
+    got = [r["value"] for r in rows if r["metric"] == "dividends_per_share"]
+    assert got == ([dps] if kept else [])
+    assert any(r["metric"] == "revenue" for r in rows)
