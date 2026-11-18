@@ -560,7 +560,7 @@ Rough priority. Re-verify each `path:line` in code before fixing; lines move.
    `alembic check`.
 4. **KPI audit 2026-10-02 — low priority (owner):** deposit-driven % read as growth (Total Value
     chip, dividend chips; Period Gain % fixed on the fintech branch); MoM/YoY chips in the dividend tooltip; a 3% EUR risk-free rate (1W risk from 5 returns fixed on the fintech branch); PEG mixes three methods;
-    "Rose after sale" counts ETF rotations; cost basis labelled "total invested".
+    "Rose after sale" counts ETF rotations.
 5. **Project the benchmark's baseline like the portfolio's** — the running cost basis is converted
     at each point's date, the portfolio's per lot at `open_date`; under 0.5%. Re-project the cost
     events at read time; **do not** make the portfolio convert per date (breaks the contributions
