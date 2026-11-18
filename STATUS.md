@@ -120,8 +120,8 @@ Only what is still unverified.
   evening — TSMC's key figures (FY2025) and no Quarterly view or fake latest quarter; HSBC's and
   Santander's currencies; Samsung's sector peers; the look-through fundamentals card in 1.5 s
   (was ~10 s); Terna named "TERNA S.P.A." with no slipped dividend (after `fetch_company_markets
-  --source esef --force`: 695 rows, 25 requests). **Still to see:** #88 a message on the next
-  `market_data_only` run; #92 the 18:00 sync of 2026-11-19 refreshing IQQ's basket from
+  --source esef --force`: 695 rows, 25 requests); a message on every `market_data_only` run (#88,
+  22:00). **Still to see:** #92 the 18:00 sync of 2026-11-19 refreshing IQQ's basket from
   BlackRock's US site (no `IQQ: basket refresh failed` warning).
 - **Korea and Europe, steps 2+3 (2026-11-17):** migration `e6a8c0d2f4b7` (`company_reports`,
   `dart_corp_codes`). Job `company_markets_refresh`, **Sunday 05:00**, first run 2026-11-22: a
