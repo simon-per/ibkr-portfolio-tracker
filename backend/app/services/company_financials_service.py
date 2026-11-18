@@ -795,8 +795,11 @@ def latest_quarter(rows: Sequence[CompanyFinancial]) -> Optional[Dict[str, Any]]
     date, revenue, diluted EPS and FCF against the same quarter a year before (the
     series' YoY rule), and the operating margin's change in points. The overview's
     "Latest quarter" row — what the newest report said, which a TTM blends into three
-    older quarters. None without a quarter.
+    older quarters. None without a quarter, and for an annual-only filer whose quarters are
+    its dividends alone (`reports_quarters`: TSMC's read "Q4 FY2025" with every figure null).
     """
+    if not reports_quarters(rows):
+        return None
     points = _series_points(rows, "quarterly")
     if not points:
         return None

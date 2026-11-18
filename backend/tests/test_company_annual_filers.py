@@ -16,6 +16,7 @@ from app.services.company_financials_normaliser import IFRS_TWINS, METRICS, norm
 from app.services.company_financials_service import (
     build_series,
     key_stats,
+    latest_quarter,
     reports_quarters,
 )
 
@@ -201,6 +202,8 @@ def test_quarterly_dividends_alone_do_not_make_an_annual_filer_quarterly():
     assert (stats["label"], stats["revenue"]) == ("FY2024", 11.5e9)
     ttm = build_series(rows, "ttm", "max")["revenue"]["points"]
     assert [p["label"] for p in ttm] == ["FY2023", "FY2024"]
+    # No "latest quarter" made of dividends alone.
+    assert latest_quarter(rows) is None
 
 
 def test_an_annual_filer_reports_no_quarters_a_quarterly_one_does():

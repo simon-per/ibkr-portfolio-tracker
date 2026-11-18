@@ -116,7 +116,7 @@ Only what is still unverified.
   Irish 10-K filers). Then `company_prices_refresh` asks Yahoo for about 33 more companies' weekly
   closes and the 05:00 profile chunk's rotation is that much longer — the budget the owner
   approved; record the real counts (`companies_due`, `fetched` on the price pass) here.
-- **Fixes #82–#90 (branch `loop-improvements`, not deployed yet):** after the
+- **Fixes #82–#91 (branch `loop-improvements`, not deployed yet):** after the
   deploy TSMC's key figures and screener row are filled (FY2025, TWD); HSBC's and Santander's rows
   carry a currency; a Korean or European company's Peers card lists its sector's companies
   (Samsung beside the SEC's Technology filers, HSBC beside the banks); #86:

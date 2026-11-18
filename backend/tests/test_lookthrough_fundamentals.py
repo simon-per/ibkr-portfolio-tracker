@@ -7,6 +7,8 @@ look-through row to a company by ISIN, its key figures by the overview's one pat
 key set against the response model in both directions. Pure.
 """
 
+from pathlib import Path
+
 import pytest
 
 from app.clock import utcnow
@@ -104,7 +106,7 @@ async def test_the_endpoint_maps_rows_by_isin_to_the_overviews_figures(db, monke
 
 def test_the_figures_come_from_the_overviews_path():
     """No copy of `key_stats` here: the module asks the service for a company's figures."""
-    source = open(module.__file__, encoding="utf-8").read()
+    source = Path(module.__file__).read_text(encoding="utf-8")
     assert "key_figures(" in source and "def key_stats" not in source
 
 
