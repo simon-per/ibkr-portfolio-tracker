@@ -122,6 +122,19 @@
 Moved from STATUS.md on 2026-10-14. Each is known, measured and accepted, mostly by owner
 decision; read the entry before "fixing" one.
 
+- **A Korean or European company's page has no price, P/E, market cap or valuation multiple.**
+  Owner decision (2026-11-17): only SEC filers' weekly closes come from Yahoo, so a `dart:` or
+  `lei:` company's price-based figures stay blank, never filled from another listing's price.
+  Its statements, margins, growth and ROE are there (docs/company-financials.md, *Markets beyond
+  the SEC*).
+- **German and Swiss companies (SAP, Siemens, Infineon, E.ON, Allianz; ABB, Roche, Novartis,
+  Nestlé) have no Company page.** Germany's register does not pass its ESEF reports to
+  filings.xbrl.org and has no API; Swiss issuers file no ESEF at all. A paid fill-only vendor
+  would be the owner's call (STATUS *Worth doing next* 7). An AIM company (Serabi) files none.
+- **A European company has no Quarterly view, and its TTM is its fiscal year.** ESEF is the annual
+  report only (half-years are voluntary and not read); so for TSMC, ASML and NU, whose 20-F is
+  annual too.
+
 - **A lot transferred in kind with an open date after the deposit ledger begins reads as profit.**
   Cash transferred in after `coverage_from` has its own leg (`capital_legs`, review item C2), but
   an in-kind lot is only told apart from a purchase by the absence of a BUY, which is no evidence
