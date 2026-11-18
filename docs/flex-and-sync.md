@@ -1702,7 +1702,10 @@ therefore reports **`scheduler_jobstore_persistent`**: if it is `false`, a deplo
 Berlin slot still loses that sync, whatever `/api/scheduler/status` says.
 
 **`/api/` protections that are not `single_flight`.** Three middlewares in `app/main.py`, innermost
-last, so a rejection from any of them still carries a correlation id:
+last, so a rejection from any of them still carries a correlation id. CORS sits just inside the
+request id and outside the rate limit and write auth (#90, 2026-11-18): their 401 and 429 reach a
+listed origin with its CORS header, so a dev server's browser shows the refusal, not a CORS error
+(`test_cors_is_outside_the_middlewares_that_refuse`).
 
 - **`app/auth.py`** gates every `POST/PUT/PATCH/DELETE` under `/api/` on `settings.api_admin_token`
   (`X-API-Key`, or `Authorization: Bearer`, compared with `secrets.compare_digest` **on bytes** —

@@ -515,6 +515,27 @@ def test_a_listed_origin_may_preflight_a_keyed_write(client):
     assert "access-control-allow-credentials" not in r.headers
 
 
+def test_a_refusal_reaches_a_listed_origin_as_itself(client, monkeypatch):
+    """#90: CORS sits outside write auth, so a 401 carries the CORS header a listed origin
+    needs to read it, and the request id beside it."""
+    origins = _cors_options()["allow_origins"]
+    if not origins:
+        pytest.skip("CORS_ORIGINS is empty in this environment")
+    monkeypatch.setattr(settings, "api_admin_token", TOKEN, raising=False)
+    r = client.delete("/api/watchlist/1", headers={"Origin": origins[0]})
+    assert r.status_code == 401
+    assert r.headers["access-control-allow-origin"] == origins[0]
+    assert REQUEST_ID_HEADER.lower() in {h.lower() for h in r.headers}
+
+
+def test_cors_is_outside_the_middlewares_that_refuse():
+    """The stack, outermost first: request id, CORS, rate limit, write auth."""
+    names = [getattr(m.cls, "__name__", "") for m in app.user_middleware]
+    cors = next(i for i, m in enumerate(app.user_middleware) if m.cls is CORSMiddleware)
+    # `user_middleware` lists the outermost first; the http middlewares are wrapped.
+    assert cors == 1, names
+
+
 def test_a_preflight_for_an_unlisted_header_is_refused(client):
     origins = _cors_options()["allow_origins"]
     if not origins:

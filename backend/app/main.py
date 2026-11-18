@@ -201,6 +201,15 @@ app = FastAPI(
 CORS_ALLOW_METHODS = ["GET", "HEAD", *sorted(MUTATING_METHODS), "OPTIONS"]
 CORS_ALLOW_HEADERS = ["Content-Type", API_KEY_HEADER, "Authorization", REQUEST_ID_HEADER]
 
+# `add_middleware` builds the stack outermost-LAST, so these run in reverse of the
+# order written: request id first (every log line and every response, including the
+# ones the layers below reject, carries it), then CORS, then the rate limit (cheap, and it
+# should shed load before any real work), then write auth. CORS sits outside the two that
+# refuse, so a 401 or a 429 reaches a listed origin as itself: registered first (innermost)
+# until 2026-11-18, it left them without CORS headers, and a dev server's browser reported
+# a CORS failure instead of the refusal (#90).
+app.middleware("http")(write_auth_middleware)
+app.middleware("http")(rate_limit_middleware)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.cors_origins_list,
@@ -208,13 +217,6 @@ app.add_middleware(
     allow_methods=CORS_ALLOW_METHODS,
     allow_headers=CORS_ALLOW_HEADERS,
 )
-
-# `add_middleware` builds the stack outermost-LAST, so these run in reverse of the
-# order written: request id first (every log line and every response, including the
-# ones the layers below reject, carries it), then the rate limit (cheap, and it should
-# shed load before any real work), then write auth.
-app.middleware("http")(write_auth_middleware)
-app.middleware("http")(rate_limit_middleware)
 app.middleware("http")(request_id_middleware)
 
 # Nothing escapes as an unlabelled 500 with a possibly-token-bearing message.
