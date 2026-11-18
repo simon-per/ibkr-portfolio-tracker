@@ -116,19 +116,13 @@ Only what is still unverified.
   Irish 10-K filers). Then `company_prices_refresh` asks Yahoo for about 33 more companies' weekly
   closes and the 05:00 profile chunk's rotation is that much longer — the budget the owner
   approved; record the real counts (`companies_due`, `fetched` on the price pass) here.
-- **Fixes #82–#92 (branch `loop-improvements`, not deployed yet):** after the
-  deploy TSMC's key figures and screener row are filled (FY2025, TWD); HSBC's and Santander's rows
-  carry a currency; a Korean or European company's Peers card lists its sector's companies
-  (Samsung beside the SEC's Technology filers, HSBC beside the banks); #86:
-  `/api/portfolio/lookthrough/fundamentals` answers in about the look-through's own time (~2 s,
-  was ~10 s) once the screener's figures are kept — time it twice after the deploy; #87: TSMC's
-  or Schneider's page offers no Quarterly view (Quarterly on NVDA, then Schneider, shows its TTM);
-  #88: `/api/scheduler/history` shows a message on every `market_data_only` run; #89: the
-  Look-through names Terna "TERNA S.P.A." (its Company page too, after the next ESEF pass); #92:
-  the 18:00 sync's basket refresh reads IQQ again (no `IQQ: basket refresh failed` warning; it
-  failed on 2026-11-18 and its previous basket stays in use until then). Terna's and Santander's slipped dividends per share go only when their figures
-  are rewritten: run `fetch_company_markets --source esef --force` once after the deploy, then
-  Terna shows no dividend per share and no 2,279% payout.
+- **Fixes #82–#92 (deployed 2026-11-18 as `dbc66ef`, `/health` checked):** verified live the same
+  evening — TSMC's key figures (FY2025) and no Quarterly view or fake latest quarter; HSBC's and
+  Santander's currencies; Samsung's sector peers; the look-through fundamentals card in 1.5 s
+  (was ~10 s); Terna named "TERNA S.P.A." with no slipped dividend (after `fetch_company_markets
+  --source esef --force`: 695 rows, 25 requests). **Still to see:** #88 a message on the next
+  `market_data_only` run; #92 the 18:00 sync of 2026-11-19 refreshing IQQ's basket from
+  BlackRock's US site (no `IQQ: basket refresh failed` warning).
 - **Korea and Europe, steps 2+3 (2026-11-17):** migration `e6a8c0d2f4b7` (`company_reports`,
   `dart_corp_codes`). Job `company_markets_refresh`, **Sunday 05:00**, first run 2026-11-22: a
   `company_dart_refresh` row (needs `OPENDART_API_KEY` in the VPS `.env`; without it the job
@@ -593,8 +587,6 @@ Rough priority. Re-verify each `path:line` in code before fixing; lines move.
     company's own debt concepts (years only today, so CDNS's quarters stay without debt), and
     PCAR's quarters (its 10-Qs state no segment total in a concept `SEGMENT_DEBT` reads); and whatever the first
     `company_vendor_fill` runs leave in `unproven` (docs/company-financials.md, *Known gaps*).
-8. *(built 2026-11-17 on `loop-improvements`, #86: the look-through fundamentals card reads the
-    screener's kept key figures; drop this item once deployed and timed.)*
 9. **Dividends: a forecast check** (owner asked 2026-11-08 what is best; proposal given, not
     built): log each projected payment as it stood ~30 days before its pay date and score it
     against what IBKR paid, in the payment's own currency so FX is not an error.
