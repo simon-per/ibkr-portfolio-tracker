@@ -298,38 +298,34 @@ def _blackrock_funds():
 
 
 @pytest.mark.parametrize("isin", sorted(_blackrock_funds()))
-def test_a_us_domiciled_ishares_fund_declares_the_locale_that_can_find_it(isin):
+def test_a_us_domiciled_ishares_fund_declares_the_site_that_can_find_it(isin):
     """
-    One varnish host serves every iShares domicile, but `locale` chooses which catalogue the
-    portfolio is looked up in — and a fund missing from that catalogue answers a flat
-    `400 BAD_REQUEST_INVALID_PARAM_VALUES`, not an empty basket. Measured on IQQ (2026-08-24):
-    `en_GB` 400s, `en_US` returns all 106 rows from the identical URL.
+    Each iShares domicile is served from its own site (`BLACKROCK_SITES`), and a fund
+    missing from a site's catalogue answers a 400 or a 404, not an empty basket: the UK host
+    found IQQ under `en_US` until 2026-11-18, then 404'd in either locale (#92). Keyed on the
+    ISIN's own country prefix so the next US iShares fund is caught by declaration rather
+    than by somebody debugging a 404.
+    """
+    from app.services.etf_basket_fetch import BLACKROCK_SITES
 
-    So the default `en_GB` in `BLACKROCK_PARAMS` is correct only for the UCITS lines, and a
-    US-domiciled entry that forgets to override it is unreachable. Keyed on the ISIN's own
-    country prefix so the next US iShares fund is caught by declaration rather than by
-    somebody debugging a 400.
-    """
     source = _blackrock_funds()[isin]
-    locale = source.params.get("locale")
+    site = source.params.get("site", "uk")
+    assert site in BLACKROCK_SITES, f"{source.symbol}: unknown site {site!r}"
+    assert "locale" not in source.params, "the site decides the locale"
     if isin.upper().startswith("US"):
-        assert locale and not locale.endswith("_GB"), (
-            f"{source.symbol} ({isin}) is US-domiciled, so the default en_GB catalogue will "
-            f"400 on it — declare params={{'locale': 'en_US'}}"
+        assert site == "us", (
+            f"{source.symbol} ({isin}) is US-domiciled — declare params={{'site': 'us'}}"
         )
     else:
-        assert locale is None or locale == "en_GB", (
-            f"{source.symbol} ({isin}) is a UCITS line and should use the default locale"
-        )
+        assert site == "uk", f"{source.symbol} ({isin}) is a UCITS line on the UK site"
 
 
 @pytest.mark.asyncio
-async def test_the_declared_locale_reaches_the_request_and_nothing_else_moves():
+async def test_the_declared_site_reaches_the_request_and_nothing_else_moves():
     """
-    The override is a single key on an existing param dict, which is exactly the kind of
-    change that silently applies to every fund or to none. Both directions are asserted, and
-    no network is touched — the request is captured, not sent. Driven through `fetch_bodies`,
-    the dispatcher both the CLI and the evening refresh call, so the probe is the live path.
+    The site decides the host, `targetSite` and `locale`, and nothing else: both directions
+    are asserted, and no network is touched — the request is captured, not sent. Driven
+    through `fetch_bodies`, the dispatcher both the CLI and the evening refresh call.
     """
     from app.services.etf_basket_fetch import fetch_bodies
 
@@ -350,13 +346,15 @@ async def test_the_declared_locale_reaches_the_request_and_nothing_else_moves():
     await fetch_bodies(_Client(), "US46438T3095", FUND_SOURCES["US46438T3095"])
     await fetch_bodies(_Client(), "IE00B4L5Y983", FUND_SOURCES["IE00B4L5Y983"])
 
-    us_params, uk_params = captured[0][1], captured[1][1]
-    assert us_params["locale"] == "en_US", "the declared locale did not reach the request"
-    assert uk_params["locale"] == "en_GB", "the override leaked onto a UCITS fund"
+    (us_url, us_params), (uk_url, uk_params) = captured
+    assert "blk-one01-product-data" in us_url and "uk-retail01-product-data" in uk_url
+    assert (us_params["targetSite"], us_params["locale"]) == ("us-ishares", "en_US")
+    assert (uk_params["targetSite"], uk_params["locale"]) == ("ishares-uk", "en_GB")
     assert us_params["portfolioId"] == "351653"
-    # Everything other than locale and portfolioId must be identical, or the override has
-    # quietly become a second endpoint.
-    assert {k: v for k, v in us_params.items() if k not in ("locale", "portfolioId")} ==            {k: v for k, v in uk_params.items() if k not in ("locale", "portfolioId")}
+    moved = ("targetSite", "locale", "portfolioId")
+    assert {k: v for k, v in us_params.items() if k not in moved} == {
+        k: v for k, v in uk_params.items() if k not in moved
+    }
 
 
 def test_an_accepted_proxy_is_one_with_no_route_to_a_basket():

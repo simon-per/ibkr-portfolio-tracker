@@ -52,17 +52,29 @@ REQUEST_TIMEOUT_S = 60.0
 
 DWS_URL = "https://etf.dws.com/etfdata/export/GBR/ENG/csv/product/constituent/{isin}/"
 
-BLACKROCK_URL = (
-    "https://www.blackrock.com/varnish-api/uk-retail01-product-data/product-data/api/v2/"
-    "get-product-data"
-)
 BLACKROCK_PARAMS = {
     "appType": "PRODUCT_PAGE",
     "appSubType": "ISHARES",
-    "targetSite": "ishares-uk",
-    "locale": "en_GB",
     "userType": "individual",
     "component": "holdings",
+}
+# Each iShares domicile is served from its own site: the host, `targetSite` and `locale` its
+# product page reads (a fund's `params["site"]`, `uk` by default). The UK host once served
+# IQQ too under `en_US` (2026-08-24); on 2026-11-18 it answered 404 for IQQ in either locale
+# while the UCITS lines kept working, and IQQ's own US product page reads its holdings from
+# `blk-one01` with `targetSite=us-ishares` (#92). The payload shape is identical, so
+# `parse_ishares` needs no branch.
+BLACKROCK_SITES = {
+    "uk": (
+        "https://www.blackrock.com/varnish-api/uk-retail01-product-data/product-data/api/v2/"
+        "get-product-data",
+        {"targetSite": "ishares-uk", "locale": "en_GB"},
+    ),
+    "us": (
+        "https://www.blackrock.com/varnish-api/blk-one01-product-data/product-data/api/v2/"
+        "get-product-data",
+        {"targetSite": "us-ishares", "locale": "en_US"},
+    ),
 }
 
 # The route Vanguard's own fund page calls since the old `/investment-products/etfs/profile/
@@ -125,18 +137,14 @@ async def fetch_blackrock(client: httpx.AsyncClient, isin: str, source: FundSour
     portfolio_id = source.params.get("portfolio_id")
     if not portfolio_id:
         raise FetchError(f"{source.symbol}: no portfolio_id declared in app/etf_sources.py")
-    # One host serves every iShares domicile, but the **locale** selects which catalogue it
-    # looks the portfolio up in, and a fund absent from that catalogue is a flat
-    # `400 BAD_REQUEST_INVALID_PARAM_VALUES` rather than an empty basket. Measured against
-    # IQQ (a US-listed fund) on 2026-08-24: `en_GB` 400s, `en_US` returns all 106 rows from
-    # the same URL. So the default stays `en_GB` for the UCITS lines and a fund overrides it
-    # rather than this gaining a second endpoint — the payload shape is identical, which is
-    # why `parse_ishares` needs no branch.
-    params = {**BLACKROCK_PARAMS, "portfolioId": portfolio_id}
-    locale = source.params.get("locale")
-    if locale:
-        params["locale"] = locale
-    response = await client.get(BLACKROCK_URL, params=params)
+    # The fund's domicile site (`BLACKROCK_SITES`): a fund missing from a site's catalogue
+    # is a 400 or a 404, never an empty basket.
+    site = source.params.get("site", "uk")
+    if site not in BLACKROCK_SITES:
+        raise FetchError(f"{source.symbol}: unknown BlackRock site {site!r}")
+    url, site_params = BLACKROCK_SITES[site]
+    params = {**BLACKROCK_PARAMS, **site_params, "portfolioId": portfolio_id}
+    response = await client.get(url, params=params)
     response.raise_for_status()
     return response.content
 

@@ -622,14 +622,15 @@ has no route at all, and it borrows VT's basket until one exists.
 | **Defiance** | `defianceetfs.com/<ticker>-full-holdings/` | **not** `/<ticker>/`, whose table is rendered client-side and absent from the response |
 | **VanEck** | `vaneck.com/nl/en/investments/<slug>/downloads/holdings/` | XLSX. Needs a **cookie jar** (a cookieless GET loops the consent redirects) and the `/nl/en/` locale **pinned**. Parsed with `zipfile` + `ElementTree`; do not add `openpyxl` for one 5 kB file a week |
 
-**The BlackRock row has a second dimension: `locale` selects the catalogue, and a fund missing
-from it 400s rather than returning nothing.** One host serves every domicile, but the default
-`en_GB` in `BLACKROCK_PARAMS` only finds the UCITS lines — the US-domiciled **IQQ** answers
-`400 BAD_REQUEST_INVALID_PARAM_VALUES` under `en_GB` and returns all 106 rows under `en_US` from
-the identical URL. So a US iShares fund declares `params={"locale": "en_US"}` rather than the
-adapter growing a second endpoint; the payload shape is identical, which is why `parse_ishares`
-has no branch for it. Pinned by a family rule keyed on the ISIN's country prefix, so the next US
-iShares fund is caught by declaration rather than by somebody debugging a 400.
+**The BlackRock row has a second dimension: each domicile is its own site.** A fund declares
+`params={"site": "us"}` (default `uk`), and the site (`etf_basket_fetch.BLACKROCK_SITES`) decides
+the host, `targetSite` and `locale` — nothing else in the request moves. A fund missing from a
+site's catalogue answers a 400 or a 404, never an empty basket. The UK host served the
+US-domiciled **IQQ** under `en_US` from 2026-08-24; on 2026-11-18 it answered 404 in either
+locale while the UCITS lines kept working, and IQQ's own US product page reads its holdings from
+`blk-one01-product-data` with `targetSite=us-ishares` — 105 rows, the same payload shape, so
+`parse_ishares` has no branch (#92). Pinned by a family rule keyed on the ISIN's country prefix, so
+the next US iShares fund is caught by declaration rather than by somebody debugging a 404.
 
 **Note also that IQQ's `portfolio_id` happens to equal the id in its product-page URL, and the
 UCITS entries' do not** — IWDA's page is `/products/251882/` against `portfolio_id` 287737. Read

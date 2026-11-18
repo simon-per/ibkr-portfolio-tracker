@@ -123,18 +123,17 @@ FUND_SOURCES: Dict[str, FundSource] = {
         params={"portfolio_id": "251857"},
     ),
 
-    # The first **US-domiciled** iShares line held here, and the only entry needing a
-    # `locale`. The same varnish host serves it, but the locale chooses which catalogue the
-    # portfolio is looked up in: `en_GB` answers a flat 400 for a US fund while `en_US`
-    # returns the full basket from the identical URL (measured 2026-08-24, 106 rows, as-of
-    # 2026-08-21). Its `portfolio_id` is also the id in its product-page URL — true here and
+    # The first **US-domiciled** iShares line held here, and the only entry on BlackRock's US
+    # site (`etf_basket_fetch.BLACKROCK_SITES`): the UK host's `en_US` catalogue served it
+    # until 2026-11-18, then answered 404; the US site returns its 105 rows (#92). Its
+    # `portfolio_id` is also the id in its product-page URL — true here and
     # NOT true of the UCITS entries above, where the two differ, so read it from the sitemap
     # rather than assuming this generalises.
     "US46438T3095": FundSource(
         symbol="IQQ",
         name="iShares Nasdaq 100 ETF",
         adapter="blackrock",
-        params={"portfolio_id": "351653", "locale": "en_US"},
+        params={"portfolio_id": "351653", "site": "us"},
     ),
 
     # --- Xtrackers / DWS -----------------------------------------------------------
