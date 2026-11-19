@@ -413,7 +413,7 @@ EXTENSION_SINCE = date(2009, 1, 1)
 #: the vendor fill, the other regulators, the standard taxonomies). Any other prefix is the
 #: company's own concept, read by its label (`cdns:CarryingValueOfDebtOutstanding`).
 APP_SOURCE_PREFIXES = frozenset(
-    {"segments", "alpha_vantage", "dart", "esef", "us-gaap", "ifrs-full", "dei", "srt"}
+    {"segments", "alpha_vantage", "dart", "esef", "twse", "us-gaap", "ifrs-full", "dei", "srt"}
 )
 DEBT_METRICS = ("debt_total", "debt_current", "debt_noncurrent")
 

@@ -49,6 +49,15 @@ def _source(name: str):
             esef_sync.EuropeFinancialsSync,
             None,
         )
+    if name == "twse":
+        from app.services import twse_sync
+
+        return (
+            twse_sync.TWSE_GATE,
+            twse_sync.MANUAL_SYNC_TYPE,
+            twse_sync.TaiwanFinancialsSync,
+            None,
+        )
     raise ValueError(name)
 
 
@@ -99,7 +108,7 @@ def main() -> int:
     parser = argparse.ArgumentParser(
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
     )
-    parser.add_argument("--source", choices=("dart", "esef"), required=True)
+    parser.add_argument("--source", choices=("dart", "esef", "twse"), required=True)
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--force", action="store_true")
     args = parser.parse_args()

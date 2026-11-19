@@ -2012,9 +2012,10 @@ class SchedulerService:
         each under its own gate and with its own `sync_runs` row: OpenDART's Korean reports
         (`dart_sync.KoreaFinancialsSync`, `company_dart_refresh`; without a key it records
         nothing), then the ESEF annual reports (`esef_sync.EuropeFinancialsSync`,
-        `company_esef_refresh`). One failing never stops the other.
+        `company_esef_refresh`), then Taiwan's MOPS reports (`twse_sync.TaiwanFinancialsSync`,
+        `company_twse_refresh`). One failing never stops the others.
         """
-        from app.services import dart_sync, esef_sync
+        from app.services import dart_sync, esef_sync, twse_sync
 
         dart = await self._company_job(
             dart_sync.DART_GATE, dart_sync.SCHEDULED_SYNC_TYPE, dart_sync.RESULT_KEY,
@@ -2026,7 +2027,14 @@ class SchedulerService:
             "European company financials refresh",
             lambda db: esef_sync.EuropeFinancialsSync(db).refresh(),
         )
-        return {"type": "company_markets_refresh", "dart": dart, "esef": esef}
+        twse = await self._company_job(
+            twse_sync.TWSE_GATE, twse_sync.SCHEDULED_SYNC_TYPE, twse_sync.RESULT_KEY,
+            "Taiwan company financials refresh",
+            lambda db: twse_sync.TaiwanFinancialsSync(db).refresh(),
+        )
+        return {
+            "type": "company_markets_refresh", "dart": dart, "esef": esef, "twse": twse
+        }
 
     async def _company_job(
         self, gate: str, sync_type: str, result_key: str, label: str, run

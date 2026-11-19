@@ -1618,7 +1618,7 @@ export interface CompanyDividendTrack {
 
 /** `/api/company-financials/companies`: one company the Company tab can show — an SEC filer, or another regulator's (OpenDART, ESEF). */
 export interface CompanyFinancialsCompany {
-  /** The company's id: `sec:<cik>`, `dart:<corp_code>` or `lei:<LEI>` (docs/company-financials.md). */
+  /** The company's id: `sec:<cik>`, `dart:<corp_code>`, `lei:<LEI>` or `twse:<stock code>` (docs/company-financials.md). */
   key: string;
   /** The SEC Central Index Key; null for another regulator's company. */
   cik: number | null;
@@ -1921,7 +1921,7 @@ export type CompanyFinancialsSeriesKey = keyof CompanyFinancialsSeriesSet;
  * margins are fractions. The browser draws these and computes nothing from them.
  */
 export interface CompanyFinancialsResponse {
-  /** The company's id: `sec:<cik>`, `dart:<corp_code>` or `lei:<LEI>` (docs/company-financials.md). */
+  /** The company's id: `sec:<cik>`, `dart:<corp_code>`, `lei:<LEI>` or `twse:<stock code>` (docs/company-financials.md). */
   key: string;
   /** The SEC Central Index Key; null for another regulator's company. */
   cik: number | null;

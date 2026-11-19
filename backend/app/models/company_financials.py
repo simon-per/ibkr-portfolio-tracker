@@ -47,11 +47,13 @@ from sqlalchemy.orm import Mapped, mapped_column
 from app.database import Base
 
 #: The schemes a company key is spelled in (`<scheme>:<native id>`): the SEC's CIK, OpenDART's
-#: corp_code, and the LEI an ESEF annual report is filed under.
+#: corp_code, the LEI an ESEF annual report is filed under, and a Taiwan listing's stock code
+#: (MOPS, 2026-11-19).
 SEC_SCHEME = "sec"
 DART_SCHEME = "dart"
 LEI_SCHEME = "lei"
-OTHER_SCHEMES = (DART_SCHEME, LEI_SCHEME)
+TWSE_SCHEME = "twse"
+OTHER_SCHEMES = (DART_SCHEME, LEI_SCHEME, TWSE_SCHEME)
 
 
 def company_key(scheme: str, native_id: object) -> str:

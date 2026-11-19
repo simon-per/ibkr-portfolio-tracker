@@ -1519,12 +1519,37 @@ opens in 2027.
   of the same index; borsapi.se covers Sweden and the US only. A vendor with German and Swiss
   fundamentals (EODHD) would be a fill-only source and a cost decision for the owner.
 
+### Taiwan (MOPS)
+
+Built 2026-11-19 (`twse_sync.TaiwanFinancialsSync`, `twse:` keys, `--source twse`, the weekly
+markets job after ESEF; `tests/test_company_twse.py`). Hon Hai and MediaTek; TSMC keeps its SEC
+page (its 20-F).
+
+- **Source**: MOPS serves each listed company's quarterly report as **Inline XBRL**, one file per
+  company and quarter, `…/server-java/FileDownLoad?step=9&fileName=tifrs-<form>-<code>-<year>Q<n>.html
+  &filePath=/home/html/nas/ifrs/<year>/` on `mopsov.twse.com.tw`, from 2019 (earlier years are
+  XBRL instances in another layout). No key; a missing file is a 320-byte HTML page
+  (`is_report`). The bulk `tifrs-<year>Q<n>.zip` of every company exists too, hundreds of MB.
+- **Inline XBRL** (`ixbrl.parse`): every `ix:nonFraction` with its context and unit, the shown
+  number in its format times `10**scale`, negated on `sign="-"`, written in xBRL-JSON's shape so
+  the ESEF converter (`esef_reports.convert`) and the one normaliser read it unchanged — the same
+  reader serves an ESEF package downloaded by hand.
+- **Annual only**: the fourth quarter's report is the annual report (`<year>Q4`), read once; its
+  comparatives give the year before. The form (`ci` a general company, `fh`/`bd`/`ins` the
+  financial ones, `m1`/`m2` the layout) is tried in turn and the one that answered kept first. A
+  year no form answers is stamped `none` once the next year is due (31 March plus a day);
+  `PASS_REQUEST_CAP` 150, 1.5 s apart.
+- **Checked against the reports** (FY2024, TWD): Hon Hai revenue 6,859,615,493 thousand, profit
+  to owners 152,705,066 thousand, diluted EPS 10.79; MediaTek diluted EPS 66.78 — as stored.
+- **Prices**: Taiwan sits in EMIM, whose basket prices are not kept (too few SEC companies to
+  check its currency), and neither is held, so their pages show figures without multiples.
+
 ### Not yet
 
 | order | market | the regulator's source | notes |
 |---|---|---|---|
 | next | Japan | EDINET (the FSA), free key | XBRL for every listed company, J-GAAP or IFRS; needs a J-GAAP concept map |
-| next | Taiwan | MOPS (the TWSE's filing system) | XBRL, no official API; TSMC already has a page through its 20-F |
+
 | later | China A/H, India, Middle East | CNINFO/HKEX, NSE/BSE/MCA21, Tadawul | no usable free structured source today; their US ADR filers only |
 | through the SEC | SAP, Novartis (and Toyota, MUFG, BHP) | their 20-F (*Scope*, 2026-11-19) | annual only, priced by the ordinary share |
 | later | Germany (Siemens, Allianz, E.ON, Infineon) | ESMA's European Single Access Point: phase 1 (Transparency Directive reports, ESEF among them) is due for public roll-out from Q3 2027 (ESMA's 2027 work programme) | today only the Unternehmensregister's manual download (XHTML/ZIP, no API) or each company's IR site; ESEF is inline XBRL, which `esef_client` does not parse (it reads the index's xBRL-JSON) |
