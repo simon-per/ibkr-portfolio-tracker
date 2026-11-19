@@ -309,6 +309,9 @@ class CompanyReport(Base):
     # Lines the report marks non-standard (no standard concept), skipped and counted.
     non_standard: Mapped[int] = mapped_column(Integer, nullable=False, server_default="0")
     read_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+    # Which concept set the read kept (`esef_sync.READER`; NULL: the first): a report read
+    # before the normaliser took more IFRS concepts is read once more.
+    reader: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
 
     def __repr__(self) -> str:
         return f"<CompanyReport {self.company_id} {self.report_id} {self.status}>"

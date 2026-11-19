@@ -324,6 +324,7 @@ class CompanyFinancialsRepository:
         facts: Sequence[dict] = (),
         tagged: Optional[Dict[str, str]] = None,
         non_standard: int = 0,
+        reader: Optional[int] = None,
     ) -> None:
         """What one report held (`read`), or that it held nothing (`none`)."""
         await self.session.merge(
@@ -338,6 +339,7 @@ class CompanyFinancialsRepository:
                 tagged=dict(tagged or {}),
                 non_standard=non_standard,
                 read_at=read_at,
+                reader=reader,
             )
         )
 

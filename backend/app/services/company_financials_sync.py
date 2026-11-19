@@ -95,7 +95,7 @@ from app.repositories.etf_basket_repository import EtfBasketRepository
 from app.repositories.security_repository import held
 from app.repositories.sync_run_repository import SyncRunRepository
 from app.services.company_classification import classify, statement_model
-from app.services.company_financials_normaliser import normalise
+from app.services.company_financials_normaliser import QUARTER_WITNESSES, normalise
 from app.services.company_vendor_fill import fill as vendor_fill
 from app.services.edgar_client import (
     ANNUAL_FORM_PREFIXES,
@@ -187,6 +187,10 @@ FILING_READS_PER_COMPANY = 24
 #: due 40-45 days after its quarter and a 10-K 60-90 days after the year, so the newest
 #: period end is at most about 135 days old (a year's end, until the next first quarter).
 FIGURES_STALE_AFTER = timedelta(days=150)
+#: An annual-only filer's (a 20-F or 40-F) newest figures are a year's: its next report is due
+#: four months after the next year end, so a year and five months (2026-11-19: the seven 20-F
+#: filers read that day were all named stale under the quarterly bound).
+ANNUAL_FIGURES_STALE_AFTER = timedelta(days=365 + 150)
 #: The weekday check watches a company for its next 10-Q or 10-K from this long after its
 #: newest stored period end — the quarter (about 91 days) plus the two weeks the quickest
 #: filers take — until `FILING_WATCH_UNTIL`; past that only the weekly pass asks, so a
@@ -326,11 +330,13 @@ def annual_current(row: Any, today: date) -> bool:
 def form_due(row: Any, now: datetime) -> bool:
     """Whether a ticker's annual report is asked (`_check_forms`): never asked; or asked
     before its period was kept, or the next report is due (`ANNUAL_REPORT_DUE`), and not
-    within `CIK_RECHECK_AFTER`. A filer that lists none (`-`) is not asked again."""
-    if row.annual_form == "-":
-        return False
+    within `CIK_RECHECK_AFTER`. A filer that lists none (`-`) is asked again yearly."""
     if row.annual_form is None:
         return True
+    if row.annual_form == "-":
+        # None listed: asked again yearly, and once when recorded before the 40-F counted
+        # (RBC, TD and Thomson Reuters were "-" until 2026-11-19).
+        return row.form_checked_at is None or row.form_checked_at <= now - ANNUAL_REPORT_DUE
     if row.form_checked_at is not None and row.form_checked_at > now - CIK_RECHECK_AFTER:
         return False
     end = row.annual_period_end
@@ -1310,7 +1316,11 @@ class CompanyFinancialsSync:
             label = target.symbols[0]
             if ttm_dividend_gap(rows):
                 summary["ttm_dividend_gaps"].append(label)
-            if today - max(r["period_end"] for r in rows) > FIGURES_STALE_AFTER:
+            quarterly = any(
+                r["fiscal_period"] != "FY" and r["metric"] in QUARTER_WITNESSES for r in rows
+            )
+            bound = FIGURES_STALE_AFTER if quarterly else ANNUAL_FIGURES_STALE_AFTER
+            if today - max(r["period_end"] for r in rows) > bound:
                 summary["stale_figures"].append(label)
 
     async def _new_findings(self, summary: Dict[str, Any]) -> List[str]:

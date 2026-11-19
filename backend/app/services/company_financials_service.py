@@ -84,7 +84,11 @@ from app.repositories.sync_run_repository import utc_iso
 from app.services.company_classification import Classification, classify, gics_sector
 from app.services.sector_taxonomy import UNKNOWN
 from app.services.company_identity import IdentityMember
-from app.services.company_financials_normaliser import ANNUAL, SPLIT_RATIOS
+from app.services.company_financials_normaliser import (
+    ANNUAL,
+    QUARTER_WITNESSES,
+    SPLIT_RATIOS,
+)
 
 PERIODS = ("quarterly", "ttm", "annual")
 # 3Y (owner, 2026-11-07): twelve quarters, the shortest span a fundamentals trend reads in.
@@ -626,12 +630,6 @@ def _with_roe(points: List[Point], rows: Sequence[CompanyFinancial], period: str
         before = _value_near(equity, _years_before(p.period_end, 1))
         mean = (now + before) / 2 if now and before and now > 0 and before > 0 else None
         p.series["roe"] = _ratio(income.get(p.period_end), mean)
-
-
-#: What makes a filer a quarterly reporter: a quarter's own statement figure. A dividend per
-#: share declared each quarter does not — TSMC's 20-F tags its quarterly dividends, and TSMC
-#: files no quarterly statements this reads (2026-11-17: its key figures were blank).
-QUARTER_WITNESSES = ("revenue", "net_income", "eps_diluted", "operating_cash_flow")
 
 
 def _reports_quarters(quarterly: Sequence[Point]) -> bool:

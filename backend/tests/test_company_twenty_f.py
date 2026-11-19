@@ -328,3 +328,38 @@ def test_continuing_eps_is_the_eps_only_without_discontinued_operations():
     }
     assert eps == {date(2024, 12, 31): 0.589}
     assert not any(r["metric"] == "discontinued_income" for r in normalise(doc).rows)
+
+
+def test_none_listed_is_asked_again_once_then_yearly():
+    """RBC's, TD's and Thomson Reuters' lists said "-" while the 40-F did not count."""
+    from types import SimpleNamespace
+
+    from app.services.company_financials_sync import form_due
+
+    now = utcnow()
+    assert form_due(SimpleNamespace(annual_form="-", form_checked_at=None), now)
+    lately = SimpleNamespace(annual_form="-", form_checked_at=now - timedelta(days=30))
+    assert not form_due(lately, now)
+    long_ago = SimpleNamespace(annual_form="-", form_checked_at=now - timedelta(days=401))
+    assert form_due(long_ago, now)
+
+
+@pytest.mark.asyncio
+async def test_an_annual_only_filers_year_is_not_stale_within_a_year_and_five_months(db):
+    from app.services.company_financials_sync import Target
+
+    today = utc_today()
+    for cik, ends, period in (
+        (1, [today - timedelta(days=300)], "FY"),  # a 20-F filer's year: current
+        (2, [today - timedelta(days=300)], "Q3"),  # a quarterly filer's: stale
+    ):
+        db.add(SecCompany(cik=cik, ticker=f"T{cik}"))
+        for end in ends:
+            db.add(CompanyFinancial(cik=cik, period_end=end, fiscal_year=end.year,
+                                    fiscal_period=period, metric="net_income", value=1.0,
+                                    unit="USD", source_concept="NetIncomeLoss", filed=end,
+                                    fetched_at=utcnow()))
+    await db.commit()
+    summary = {"ttm_dividend_gaps": [], "stale_figures": []}
+    await CompanyFinancialsSync(db)._findings([Target(1, ["A"]), Target(2, ["Q"])], summary)
+    assert summary["stale_figures"] == ["Q"]

@@ -9,6 +9,7 @@ from urllib.parse import parse_qs, urlparse
 
 import httpx
 import pytest
+from sqlalchemy import select
 
 from app.models.company_financials import Company, CompanyReport
 from app.models.isin_identity import IsinIdentity
@@ -429,6 +430,28 @@ async def test_a_filing_too_large_to_read_is_skipped_once_and_named(
         r.status for r in (await db.execute(CompanyReport.__table__.select())).all()
     }
     assert statuses == {"read"}
+    fake.requests.clear()
+    await sync.refresh()
+    assert fake.requests == []
+
+
+@pytest.mark.asyncio
+async def test_a_report_read_under_an_older_concept_set_is_read_once_more(db, dated):
+    """2026-11-19: the normaliser took more IFRS concepts (continuing EPS, net interest
+    income), which a stored read never kept; each such report is read once more."""
+    await _hold(db, 1, "SU", ISIN, LEI)
+    fake = Index()
+    sync = EuropeFinancialsSync(db, transport=fake.transport, sleep=_none)
+    await sync.refresh()
+    for report in (await db.execute(select(CompanyReport))).scalars():
+        report.reader = None  # read before the reader was recorded
+    await db.commit()
+    fake.requests.clear()
+    summary = await sync.refresh()
+    assert summary["filings_read"] == 2
+    assert {r.reader for r in (await db.execute(select(CompanyReport))).scalars()} == {
+        esef_sync.READER
+    }
     fake.requests.clear()
     await sync.refresh()
     assert fake.requests == []

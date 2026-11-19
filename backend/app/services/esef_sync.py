@@ -68,6 +68,16 @@ SKIPPED = "skipped"
 DONE = (READ, SKIPPED)
 #: Where a `skipped` report records the cap it was refused at.
 REFUSED_OVER = "refused_over"
+#: The IFRS concept set a read keeps (`regulator_facts.CONCEPT_KIND`, from the normaliser's
+#: twins): 1 until 2026-11-19 (NULL), 2 with continuing EPS and operating cash flow, net
+#: interest income and discontinued profit (Shell's EPS, National Grid's cash flow, HSBC's
+#: and Santander's top line). A report read under an older set is read once more.
+READER = 2
+
+
+def stale_read(report) -> bool:
+    """A report read before the concept set it would keep today."""
+    return report.status == READ and (report.reader or 1) < READER
 
 
 def retry_larger(report) -> bool:
@@ -78,8 +88,13 @@ def retry_larger(report) -> bool:
 
 
 def handled(report) -> bool:
-    """Read, or skipped at today's cap: never asked again."""
-    return report is not None and report.status in DONE and not retry_larger(report)
+    """Read under today's concept set, or skipped at today's cap: never asked again."""
+    return (
+        report is not None
+        and report.status in DONE
+        and not retry_larger(report)
+        and not stale_read(report)
+    )
 
 
 def is_european(isin: str) -> bool:
@@ -209,9 +224,9 @@ class EuropeFinancialsSync:
             and facts_backoff_until(company) > now
         ):
             return False
-        if any(retry_larger(r) for r in reports.values()):
+        if any(retry_larger(r) or stale_read(r) for r in reports.values()):
             # A filing refused under a smaller cap: the cap grew, read it (once: refused
-            # again, it records today's cap).
+            # again, it records today's cap). Or one read before today's concept set.
             return True
         checked = company.profile_checked_at
         if checked is None:
@@ -300,6 +315,7 @@ class EuropeFinancialsSync:
                         facts=converted.facts,
                         tagged=converted.tagged,
                         non_standard=converted.non_standard,
+                        reader=READER,
                     )
                     await self.db.commit()
                     summary["filings_read"] += 1
