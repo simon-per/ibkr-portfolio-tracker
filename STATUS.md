@@ -29,6 +29,20 @@ code trace; all of them shipped that evening (waves 1–3, the product issues #7
 
 ## Needs a human
 
+- **The Company tab's last blank pages need a source only you can open** (2026-11-19, measured
+  on production: of the 206 companies the app names, 190 have a page and 186 of those are fully
+  backfilled — last FY present, core lines in it, no gap in ten years; the four short are
+  Berkshire's EPS (two listed classes), Iberdrola's (no total EPS tagged), Prysmian's and Terna's
+  FY2025 (not in the ESEF index)). **Japan** (Hitachi, Fujitsu, NEC, Tokyo Electron): EDINET's API
+  answers 401 without a free subscription key — register at the FSA's EDINET API page and put it
+  in the VPS `.env` (no code reads one yet: the EDINET pass is the next build, needing a J-GAAP
+  map). **Germany** (Siemens, Allianz, E.ON, Infineon): their ESEF reports sit on the
+  Unternehmensregister, manual download only (XHTML/ZIP; `ixbrl.parse` reads them) or a
+  free-tier vendor account (financialfilings.com, 500 credits a month) — or wait for ESMA's
+  single access point (phase 1 from Q3 2027). **No free structured source at all**: Roche,
+  Nestlé, ABB (Swiss; ABB's 20-F stops at FY2023), Tencent, China Construction Bank, Commonwealth
+  Bank, Hydro One, Serabi.
+
 - **Confirm the Alpha Vantage key's tier.** The Company tab's statement fill and the price
   fallback now share one budget of 25 calls a UTC day (`alpha_vantage.DAILY_LIMIT`, the free
   tier's; docs/flex-and-sync.md). Read the first `company_vendor_fill` rows in
@@ -122,8 +136,15 @@ Only what is still unverified.
   (annual only, Toyota in IFRS from FY2020), SAP's ESEF list is no longer asked, Shell, AstraZeneca,
   Santander and TotalEnergies keep their ESEF pages, and the Monday company-prices and profile runs
   ask Yahoo about none of the seven. Their multiples appear once a basket refresh has recorded
-  their ordinary share's price (`constituent_prices`). Siemens, Allianz, E.ON, Infineon and the
-  Swiss stay without pages.
+  their ordinary share's price (`constituent_prices`). **Deployed and backfilled by hand
+  2026-11-19** (`e57f2e2`, `cd67866`, `86e461d`; three EDGAR/ESEF/OpenDART runs over SSH): the
+  seven 20-F pages and RBC's and TD's (40-F) are live, 53 European reports re-read for the new
+  IFRS lines; the twelve companies the fixes touch (PCAR, V, XOM, ACN, CAT, DIS, UNP, ZS, DXCM,
+  IBM, INTU, CDNS) made due and rewritten (Visa's EPS, PCAR's cash, Exxon's history back to
+  FY2007, the three dividend gaps closed); Thomson Reuters' stale 40-F miss cleared and fetched;
+  the Taiwan pass (`--source twse`) run: Hon Hai and MediaTek, 2019–2025. Still to see: **Sunday's
+  05:00 passes** rewrite the rest under the new rules with nothing new to warn about, and **the
+  next basket refresh** records the 20-F filers' ordinary-share prices (their multiples).
 
 - **The Company tab beyond today's SEC scope, steps 0+1 (deployed 2026-11-17 as `81b081b`):**
   migrations `c4e6a8b0d2f4` (`companies`, `company_financials.company_id`; tested up/down/up on a
