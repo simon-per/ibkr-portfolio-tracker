@@ -1313,7 +1313,7 @@ class CompanyFinancialsSync:
         carried = companyfacts_accns(companyfacts)
         pending = gaps(rows)
         if extensions:
-            pending += extension_gaps(rows)
+            pending += extension_gaps(rows, utc_today())
         if segments:
             pending += segment_gaps(rows, utc_today())
         pending.sort(key=lambda gap: gap[0], reverse=True)

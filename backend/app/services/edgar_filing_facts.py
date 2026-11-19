@@ -392,38 +392,78 @@ def covers(
     )
 
 
+#: How far back a debt companyfacts cannot show is looked for in segment columns, or a
+#: quarter's own 10-Q for the company's own debt concept: the tab's default ten-year range.
+SEGMENT_LOOKBACK = timedelta(days=3653)
+
+
 #: The years from which a fiscal year's missing capex or debt sends the pass to its 10-K
 #: for the company's own concepts: XBRL's first years (2009) on.
 EXTENSION_SINCE = date(2009, 1, 1)
 
 
-def extension_gaps(rows: Sequence[Dict[str, Any]]) -> List[Tuple[date, str]]:
+#: The provenance tags the app itself writes before a `:` in `source_concept` (a segment sum,
+#: the vendor fill, the other regulators, the standard taxonomies). Any other prefix is the
+#: company's own concept, read by its label (`cdns:CarryingValueOfDebtOutstanding`).
+APP_SOURCE_PREFIXES = frozenset(
+    {"segments", "alpha_vantage", "dart", "esef", "us-gaap", "ifrs-full", "dei", "srt"}
+)
+DEBT_METRICS = ("debt_total", "debt_current", "debt_noncurrent")
+
+
+def own_concept(source: Any) -> bool:
+    """Whether a row's `source_concept` is the company's own concept."""
+    prefix, sep, _ = str(source or "").partition(":")
+    return bool(sep) and prefix not in APP_SOURCE_PREFIXES
+
+
+def extension_gaps(
+    rows: Sequence[Dict[str, Any]], today: Optional[date] = None
+) -> List[Tuple[date, str]]:
     """
     Fiscal year ends missing capex, or debt (neither the total nor both halves), newest
     first, as (year end, family): the years whose 10-K may state the figure under the
-    company's own concept (`EXTENSION_LABELS`). Years only: one 10-K holds a year's flows
-    and its balance sheet, and three years of the first; a quarter's is not asked.
+    company's own concept (`EXTENSION_LABELS`). One 10-K holds a year's flows and its
+    balance sheet. **A quarter's debt** is asked of its 10-Q only for a company whose debt
+    some year already came from its own concept (CDNS: `cdns:CarryingValueOfDebtOutstanding`
+    in every 10-K, its quarters blank), within `SEGMENT_LOOKBACK` of `today`: elsewhere a
+    10-Q holds nothing a 10-K did not show, and 511 quarters at 61 companies would be read
+    for nothing (measured 2026-11-19).
     """
     have: Dict[date, set] = defaultdict(set)
+    quarters: Dict[date, set] = defaultdict(set)
     for row in rows:
         if row["fiscal_period"] == "FY":
             have[row["period_end"]].add(row["metric"])
+        else:
+            quarters[row["period_end"]].add(row["metric"])
     out = []
+
+    def no_debt(metrics: set) -> bool:
+        return "debt_total" not in metrics and not (
+            {"debt_current", "debt_noncurrent"} <= metrics
+        )
+
     for end, metrics in have.items():
         if end < EXTENSION_SINCE:
             continue
         if "capex" not in metrics:
             out.append((end, "extension:capex"))
-        if "debt_total" not in metrics and not (
-            {"debt_current", "debt_noncurrent"} <= metrics
-        ):
+        if no_debt(metrics):
             out.append((end, "extension:debt"))
+    if today is not None and any(
+        r["metric"] in DEBT_METRICS and own_concept(r.get("source_concept")) for r in rows
+    ):
+        for end, metrics in quarters.items():
+            if (
+                end not in have
+                and end >= EXTENSION_SINCE
+                and today - end <= SEGMENT_LOOKBACK
+                and no_debt(metrics)
+            ):
+                out.append((end, "extension:debt"))
     return sorted(out, key=lambda gap: gap[0], reverse=True)
 
-
-#: How far back a debt companyfacts cannot show is looked for in segment columns: the
-#: tab's default ten-year range.
-SEGMENT_LOOKBACK = timedelta(days=3653)
 
 
 def debt_blind(rows: Sequence[Dict[str, Any]]) -> bool:

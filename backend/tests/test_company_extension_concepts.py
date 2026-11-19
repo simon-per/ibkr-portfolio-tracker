@@ -210,6 +210,45 @@ def test_a_year_missing_capex_or_debt_is_an_extension_gap():
                                     (date(2017, 12, 31), "extension:capex")]
 
 
+
+def test_a_quarters_debt_is_asked_of_its_10q_only_where_the_years_came_from_its_own_concept():
+    """CDNS's debt is `cdns:CarryingValueOfDebtOutstanding` in every 10-K and its quarters
+    were blank: a company whose debt some year came from its own concept asks each quarter
+    without debt of its 10-Q (ten years back). Anyone else's quarters are not asked."""
+    today = date(2026, 11, 19)
+
+    def row(end, period, metric, source):
+        return {"period_end": end, "fiscal_period": period, "metric": metric,
+                "value": 1.0, "source_concept": source}
+
+    rows = [row(date(2025, 12, 31), "FY", "debt_total", "cdns:CarryingValueOfDebtOutstanding"),
+            row(date(2025, 12, 31), "FY", "capex", "PaymentsToAcquirePropertyPlantAndEquipment"),
+            row(date(2026, 9, 30), "Q3", "revenue", "Revenues"),
+            row(date(2026, 6, 30), "Q2", "revenue", "Revenues"),
+            row(date(2026, 6, 30), "Q2", "debt_total", "cdns:CarryingValueOfDebtOutstanding"),
+            row(date(2014, 3, 31), "Q1", "revenue", "Revenues")]  # past the ten years
+    assert extension_gaps(rows, today) == [(date(2026, 9, 30), "extension:debt")]
+    standard = [{**r, "source_concept": "LongTermDebt"} if r["metric"] == "debt_total" else r
+                for r in rows]
+    assert extension_gaps(standard, today) == []
+    segments = [{**r, "source_concept": "segments:StatementBusinessSegmentsAxis"}
+                if r["metric"] == "debt_total" else r for r in rows]
+    assert extension_gaps(segments, today) == []
+
+
+def test_a_10qs_own_debt_concept_fills_its_quarter():
+    doc = _companyfacts()
+    doc["facts"]["us-gaap"]["Revenues"]["units"]["USD"].append(
+        _f("2018-07-01", "2018-09-30", 2.5e9, "2018-10-25", form="10-Q"))
+    result = normalise(doc, [
+        _own("2018-12-31", 2.4e9, metric="debt_total", concept="abc:Debt"),
+        {**_own("2018-09-30", 2.3e9, metric="debt_total", concept="abc:Debt"),
+         "form": "10-Q", "filed": "2018-10-25", "accn": "a-q3"},
+    ])
+    quarters = {r["period_end"].isoformat(): r["value"] for r in result.rows
+                if r["metric"] == "debt_total" and r["fiscal_period"] == "Q3"}
+    assert quarters == {"2018-09-30": 2.3e9}
+
 # ── the pass: a year's own 10-K, with its label linkbase, once ───────────────
 
 

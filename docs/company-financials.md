@@ -1104,8 +1104,14 @@ more request beside the instance) names each concept in words.
   linkbase too (`READER` 3: a filing read before is read once more for this gap, never again).
   Only a us-gaap filer that is no bank, broker or insurer (`edgar_client.FINANCIAL_SIC`,
   6000–6411): an IFRS filer's lines are standard ones, and a bank's capex and debt are not the
-  industrial figures. Years only: one 10-K holds a year's flows and its balance sheet; a quarter's
-  10-Q is not asked, and a Q4 then comes from the year less three quarters as before.
+  industrial figures. One 10-K holds a year's flows and its balance sheet, and a Q4 then comes from
+  the year less three quarters as before. **A quarter's debt asks its own 10-Q** (2026-11-19) only
+  for a company whose debt some year already came from its own concept (`own_concept`: a
+  `source_concept` prefix that is none of the app's own tags, `APP_SOURCE_PREFIXES`), within
+  `SEGMENT_LOOKBACK` (ten years): CDNS, whose 10-Ks tag `cdns:CarryingValueOfDebtOutstanding` and
+  whose quarters were blank, about 40 10-Qs (three requests each) once, over two or three Sundays
+  at the per-company cap. Asking every company's debt-less quarters would read 511 10-Qs at 61
+  companies (measured over the 166 filers), nearly all holding nothing a 10-K did not.
 - **Which concepts** (`EXTENSION_LABELS`, `extension_metrics`): the company's own concept (not
   us-gaap, dei, srt) whose **standard label** fits one metric's pattern and not its exclusions —
   capex ("Purchases of property and equipment…", "Capital expenditures"; not businesses, proceeds,
