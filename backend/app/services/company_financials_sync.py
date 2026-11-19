@@ -259,6 +259,9 @@ LEGAL_FORMS = frozenset(
 )
 _CLASS = re.compile(r"\b(?:class|cl)\s+[a-z]\b")
 _PARENS = re.compile(r"\([^)]*\)")
+#: EDGAR's jurisdiction tag at the end of a conformed name (`THOMSON REUTERS CORP /CAN/`,
+#: `/DE/`, `/NEW/`): no part of the company's name (2026-11-19).
+_EDGAR_TAG = re.compile(r"\s*/[a-z]{2,4}/?\s*$", re.IGNORECASE)
 #: A basket name this long may be cut short (`JOHNSON CONTROLS INTERNATION`).
 TRUNCATED_NAME_LENGTH = 24
 
@@ -266,10 +269,11 @@ TRUNCATED_NAME_LENGTH = 24
 def name_tokens(name: str) -> List[str]:
     """
     A company name for comparison: accents and case dropped, dots of abbreviations closed
-    (S.A. is SA), `&` as `and`, parentheticals and share classes (`Class A`, `CL A`) removed,
+    (S.A. is SA), `&` as `and`, EDGAR's jurisdiction tag (`/CAN/`), parentheticals and share
+    classes (`Class A`, `CL A`) removed,
     then legal forms dropped from the end (`Corp plc`, `public limited company`, `AG`).
     """
-    text = unicodedata.normalize("NFKD", name or "")
+    text = unicodedata.normalize("NFKD", _EDGAR_TAG.sub("", name or ""))
     text = "".join(ch for ch in text if not unicodedata.combining(ch)).lower()
     text = _PARENS.sub(" ", text).replace(".", "").replace("&", " and ")
     text = re.sub(r"[^a-z0-9]+", " ", text)

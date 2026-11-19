@@ -53,6 +53,8 @@ OTHER_FUND = "IE00B5BMR087"
         ("nVent Electric plc", "nVent Electric plc"),
         ("BANCO SANTANDER", "BANCO SANTANDER, S.A."),
         ("Nestlé S.A.", "NESTLE SA"),
+        ("THOMSON REUTERS CORP", "THOMSON REUTERS CORP /CAN/"),
+        ("TOYOTA MOTOR CORP", "TOYOTA MOTOR CORP/"),
     ],
 )
 def test_names_that_agree(ours, sec):
