@@ -235,6 +235,11 @@ it safe (`tests/test_company_twenty_f.py`):
   under a non-US ISIN): its closes are the held listing's or the baskets' (*Prices without Yahoo*),
   and neither the weekly closes nor the profile rotation asks Yahoo about it. ASML, NU and TSMC,
   found by their US listing, are unchanged.
+- **A list that named none** (`-`) is asked again once a year, and once at once when it was
+  recorded before the 40-F counted (RBC, TD and Thomson Reuters, 2026-11-19).
+- **Stale only after a year and five months** (`ANNUAL_FIGURES_STALE_AFTER`): an annual-only
+  filer's newest figures are a year's, so the pass's stale-figures check gives it that long; a
+  quarterly filer (`QUARTER_WITNESSES`, one definition in the normaliser) keeps 150 days.
 - **Only while it still files**: the newest annual report must end within `ANNUAL_CURRENT_WITHIN`
   (550 days). The filing list is asked once, kept with the period it ends
   (`sec_tickers.annual_period_end`, `form_checked_at`, migration `g8b0d2f4a6c9`) and asked again
@@ -1474,6 +1479,12 @@ opens in 2027.
   since: Santander's 70.6 MB holds 1,953 facts, mostly text blocks, and parses to 133 MB held, 206 MB
   at the peak, beside the raw bytes, on a VPS with 6 GB free. Its FY2024 reads €12,574M of profit to
   owners and a diluted EPS of 0.768, as reported.
+- **Re-read for a larger concept set** (`company_reports.reader`, `esef_sync.READER`, migration
+  `i0d2f4b6c8e1`): a read keeps only the IFRS concepts the normaliser took that day, so when its
+  twins grow (2026-11-19: continuing EPS, continuing operating cash flow, net interest income,
+  discontinued profit) each report read under the older set is read once more and the company
+  rewritten. Shell's EPS, National Grid's cash flow and HSBC's and Santander's top line came this
+  way.
 - **Facts** (`esef_reports.convert`): **undimensioned only**, as companyfacts — any dimension beyond
   concept, entity, period and unit (a segment, an equity component) is not read; the company's own
   LEI's facts only; `ifrs-full` concepts the normaliser reads, in a unit their kind agrees with
