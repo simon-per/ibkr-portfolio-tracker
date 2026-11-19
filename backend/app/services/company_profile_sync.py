@@ -81,13 +81,16 @@ class CompanyProfileSync:
         own list (`list_companies`), so the chunk asks about exactly what the tab can show.
         A company without an SEC ticker on record has nothing to ask Yahoo by. TSMC stays in:
         2330@TWSE links to its page (`held`) but is not the listing its figures are read by.
-        **Another regulator's company is never asked** (`cik` null; owner, 2026-11-17).
+        **Another regulator's company is never asked** (`cik` null; owner, 2026-11-17), nor
+        an SEC filer priced by its ordinary share (`ordinary_priced_ciks`, 2026-11-19).
         """
         companies = await CompanyFinancialsService(self.db).list_companies()
+        ordinary = await CompanyFinancialsRepository(self.db).ordinary_priced_ciks()
         return [
             c
             for c in companies
             if c["cik"] is not None
+            and c["cik"] not in ordinary
             and c["security_id"] is None
             and not str(c["symbol"]).isdigit()
         ]

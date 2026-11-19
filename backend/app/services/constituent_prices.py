@@ -42,6 +42,7 @@ from app.models.company_financials import (
     SecCompany,
 )
 from app.models.etf_basket import ConstituentPrice
+from app.repositories.company_financials_repository import CompanyFinancialsRepository
 from app.services.company_financials_normaliser import SPLIT_RATIOS
 from app.services.fx_preload import eur_rate_on, preload_eur_rates
 
@@ -68,9 +69,11 @@ async def record_constituent_prices(
     db: AsyncSession, basket, price_currency: Optional[str]
 ) -> Dict[str, Any]:
     """
-    Keep the basket's price of every company of another regulator, once per ISIN and day
-    (`constituent_prices`), when the fund declares its price currency and the declaration
-    holds against the SEC companies' closes. Nothing is written otherwise; the outcome says why.
+    Keep the basket's price of every company of another regulator, and of every SEC filer
+    priced by its ordinary share (a 20-F filer found by its name, `ordinary_priced_ciks`),
+    once per ISIN and day (`constituent_prices`), when the fund declares its price currency
+    and the declaration holds against the SEC companies' closes. Nothing is written
+    otherwise; the outcome says why.
     """
     out: Dict[str, Any] = {"recorded": 0, "verified": None}
     if not price_currency:
@@ -86,6 +89,16 @@ async def record_constituent_prices(
             )
         ).scalars()
     }
+    ordinary = await CompanyFinancialsRepository(db).ordinary_priced_ciks()
+    if ordinary:
+        wanted |= {
+            (isin or "").strip().upper()
+            for isin in (
+                await db.execute(
+                    select(SecCompany.isin).where(SecCompany.cik.in_(sorted(ordinary)))
+                )
+            ).scalars()
+        }
     priced = [
         r
         for r in basket.rows

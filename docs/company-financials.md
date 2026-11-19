@@ -217,10 +217,42 @@ form are kept on the ticker's row (`sec_tickers.title`, `annual_form`, migration
 `d5f7b9c1e3a6`): one ticker-list request when a needed name is missing, one `submissions`
 request per agreeing ticker, once (`name_checks`, `name_matched` in the run's record); the name
 check never takes a CIK another table knows the ticker by (Roche's basket ticker `ROP` is Roper's,
-a Nasdaq-100 company). **Why 10-K only**: a 20-F filer's New York listing is often a depositary
-receipt standing for two shares or half of one, beside an EPS per ordinary share, and nothing in
-companyfacts says which; and a European filer's own regulator is ESEF (*Europe*, below).
-`tests/test_company_name_match.py` pins Roche's ROG not resolving to Rogers Corp.
+a Nasdaq-100 company). `tests/test_company_name_match.py` pins Roche's ROG not resolving to
+Rogers Corp.
+
+**20-F filers too, since 2026-11-19** (owner: "use SEC for SAP etc. where it exists, it can give
+us the best basis as of now"). Until then the name check took 10-K filers only: a 20-F filer's
+New York listing is often a depositary receipt standing for ten shares (Toyota), two (BHP) or half
+of one, beside an EPS per ordinary share, and nothing in companyfacts says which. Three rules make
+it safe (`tests/test_company_twenty_f.py`):
+
+- **Priced by its ordinary share, never at Yahoo** (`repo.ordinary_priced_ciks`: a 20-F filer kept
+  under a non-US ISIN): its closes are the held listing's or the baskets' (*Prices without Yahoo*),
+  and neither the weekly closes nor the profile rotation asks Yahoo about it. ASML, NU and TSMC,
+  found by their US listing, are unchanged.
+- **Only while it still files**: the newest annual report must end within `ANNUAL_CURRENT_WITHIN`
+  (550 days). The filing list is asked once, kept with the period it ends
+  (`sec_tickers.annual_period_end`, `form_checked_at`, migration `g8b0d2f4a6c9`) and asked again
+  when the next report is due (`ANNUAL_REPORT_DUE`, at most monthly). ABB's last 20-F is FY2023,
+  Infineon's FY2009, E.ON's FY2006, Hitachi's FY2010: refused.
+- **Never over another regulator's page** (`repo.isins_paged_elsewhere`): Shell, AstraZeneca,
+  Santander and TotalEnergies keep their ESEF pages, a Korean filer its OpenDART one.
+
+**By name over the whole list** (`_search_names`, `sec_name_matches`): a basket ticker the SEC
+lists under no agreeing name, or not at all (Novartis's `NOVN`, Toyota's `7203`, MUFG's `8306`),
+sends the company's names over every title on the ticker list the pass already read; exactly one
+agreeing filer is the match, kept by ISIN with the filer's first ticker (NVS, TM, MUFG), and the
+company is checked under that ticker as above. None or two is no match, asked again after
+`CIK_RECHECK_AFTER`. No extra request: the same list, the same `names_agree`.
+
+**Measured 2026-11-19** on production (the look-through's top 200, 26 companies without a US ISIN
+or a page): a current 20-F at **SAP, Novartis, Toyota, MUFG, BHP, GlobalFoundries and Tower**;
+stopped filing at ABB, Infineon, E.ON and Hitachi; no SEC filer at Siemens, Allianz, Roche,
+Nestlé, Tencent, Hon Hai, MediaTek, Fujitsu, NEC, Tokyo Electron, Commonwealth Bank, China
+Construction Bank and Serabi; RBC and TD file 40-F (nothing this reads). Read from companyfacts
+that day: SAP 11 years (EUR, revenue 36.8B for FY2025), Novartis 10 (USD), Toyota 6 in IFRS
+(JPY), MUFG 19 (JPY), BHP 10 (USD), Tower 17 and GlobalFoundries 7 (USD); annual only, as for
+every 20-F filer.
 
 **Measured on SEC's real list** (2026-11-17, the look-through's top 200 on a production snapshot):
 51 companies without a US ISIN; 25 tickers the SEC does not list (home-market codes: 000660, IFX,
@@ -261,7 +293,7 @@ the SEC lists no such ticker" needs a row of its own, with its own stamp (the `I
 
 | metric | chain, in order |
 |---|---|
-| revenue | `RevenuesNetOfInterestExpense` → `Revenues` → `RevenueFromContractWithCustomerExcludingAssessedTax` → `…IncludingAssessedTax` (CRWD, ODFL) → `SalesRevenueNet` → `SalesRevenueServicesNet` (ODFL before 2018) → `RegulatedAndUnregulatedOperatingRevenue` (XEL from 2019) |
+| revenue | `RevenuesNetOfInterestExpense` → `Revenues` → `RevenueFromContractWithCustomerExcludingAssessedTax` → `…IncludingAssessedTax` (CRWD, ODFL) → `SalesRevenueNet` → `SalesRevenueServicesNet` (ODFL before 2018) → `RegulatedAndUnregulatedOperatingRevenue` (XEL from 2019) → IFRS `RevenueFromSaleOfGoods` (Novartis; *Annual-only filers*) |
 | net income | `NetIncomeLoss` → `NetIncomeLossAvailableToCommonStockholdersBasic` → `ProfitLoss` |
 | diluted EPS | `EarningsPerShareDiluted` → `EarningsPerShareBasicAndDiluted` (ALNY to 2021) → `IncomeLossFromContinuingOperationsPerDilutedShare` (ABNB; MNST after 2011), then net income / diluted shares (below) |
 | operating cash flow | `NetCashProvidedByUsedInOperatingActivities` → `…ContinuingOperations` |
@@ -892,8 +924,9 @@ The P/E's closes come from Yahoo (`company_price_sync`, CLAUDE.md rule 1; enable
 ### Prices without Yahoo
 
 Another regulator's company (`dart:`, `lei:`) gets no Yahoo request, and until 2026-11-19 no
-price at all: no P/E, market cap or multiple. Its closes now come from what the app already
-fetches (`constituent_prices`, `_other_closes`), in this order:
+price at all: no P/E, market cap or multiple. Neither does an SEC filer priced by its ordinary
+share (a 20-F filer found by its name, *Scope*: SAP, Novartis, Toyota). Their closes now come from
+what the app already fetches (`constituent_prices`, `_other_closes`), in this order:
 
 1. **The held listing of the company's own ISIN**: the portfolio's daily closes
    (`market_prices`), one a week. Only the company's own ISIN: Samsung's preferred share trades
@@ -920,8 +953,9 @@ fetches (`constituent_prices`, `_other_closes`), in this order:
      (`basket_splits`). The closes before it are put on the new basis, as Yahoo adjusts a
      history, and `eps_basis` restates them for a split after the newest filing.
 
-Nothing for a company outside every held iShares basket or with no listing held: German and
-Swiss issuers have no figures to price anyway (*Not yet*). `tests/test_constituent_prices.py`.
+Nothing for a company outside every held iShares basket or with no listing held: its page shows
+no multiple rather than a receipt's.
+`tests/test_constituent_prices.py`, `tests/test_company_twenty_f.py`.
 
 ## The overview
 
@@ -1039,6 +1073,15 @@ All three were misses: the normaliser read 10-K/10-Q facts in us-gaap only.
 - **The 20-F is an annual report**: it joins the one `PERIODIC_FORMS` set, and
   `ANNUAL_FORM_PREFIXES` (`10-K`, `20-F`) is the one test of "this filing states a year", read by
   the normaliser and the filing reads alike.
+- **A filer that switched taxonomies is read in its newer one** (`_taxonomy`, 2026-11-19): with
+  both a us-gaap and an `ifrs-full` block, the one whose periodic reports reach the later period,
+  us-gaap on a tie — as the reporting currency is the newest filing's. Toyota's 20-F moved to IFRS
+  for FY2021; read in us-gaap its figures ended at FY2020, now they run FY2020–FY2025 in IFRS (its
+  US-GAAP decade is not joined on: never both). None of the 166 other filers moved.
+- **Net sales of goods** (`RevenueFromSaleOfGoods`) are an IFRS filer's revenue when it tags no
+  total, last in the chain: Novartis states "net sales to third parties" and 4% of royalties and
+  other revenue apart, and no total. IFRS only — us-gaap's `SalesRevenueGoodsNet` filled HPE's
+  FY2015 with a third of its revenue.
 - **IFRS concepts are read under their US-GAAP twins** (`IFRS_TWINS`), so every chain, ladder and
   vote applies unchanged; only exact equivalents (revenue, profit attributable to owners, diluted EPS,
   operating profit, operating cash flow, capex, diluted shares, dividends, buybacks, cash, equity).
@@ -1416,7 +1459,8 @@ opens in 2027.
   Grid, HSBC, Shell, AstraZeneca (UK). The index's depth varies: most have FY2020/21–FY2025,
   Prysmian only FY2022 and FY2024, Terna none for FY2025 yet; Santander's FY2022 and FY2024 are
   over the size cap and stay blank. **Blank**: every
-  German issuer (SAP, Siemens, Infineon, E.ON, Allianz) — Germany's OAM, the Unternehmensregister,
+  German issuer (SAP, Siemens, Infineon, E.ON, Allianz; SAP has a page through its 20-F since
+  2026-11-19) — Germany's OAM, the Unternehmensregister,
   does not pass its filings to the index and has no API; every **Swiss** one (ABB, Roche, Novartis,
   Nestlé) — SIX issuers are outside ESEF and the index holds none; Serabi (AIM, no ESEF obligation).
   **UK**: the four FTSE companies in scope all filled.
@@ -1437,7 +1481,9 @@ opens in 2027.
 | next | Japan | EDINET (the FSA), free key | XBRL for every listed company, J-GAAP or IFRS; needs a J-GAAP concept map |
 | next | Taiwan | MOPS (the TWSE's filing system) | XBRL, no official API; TSMC already has a page through its 20-F |
 | later | China A/H, India, Middle East | CNINFO/HKEX, NSE/BSE/MCA21, Tadawul | no usable free structured source today; their US ADR filers only |
-| declined | Germany, Switzerland | none free: the ESEF index holds none of them, and SIX/the Bundesanzeiger serve no structured API | a paid vendor (EODHD) declined by the owner 2026-11-19, a private app; their pages stay absent |
+| through the SEC | SAP, Novartis (and Toyota, MUFG, BHP) | their 20-F (*Scope*, 2026-11-19) | annual only, priced by the ordinary share |
+| later | Germany (Siemens, Allianz, E.ON, Infineon) | ESMA's European Single Access Point: phase 1 (Transparency Directive reports, ESEF among them) is due for public roll-out from Q3 2027 (ESMA's 2027 work programme) | today only the Unternehmensregister's manual download (XHTML/ZIP, no API) or each company's IR site; ESEF is inline XBRL, which `esef_client` does not parse (it reads the index's xBRL-JSON) |
+| none | Switzerland (Roche, Nestlé; ABB's last 20-F is FY2023) | outside ESEF; SIX publishes no structured reports | a paid vendor (EODHD) declined by the owner 2026-11-19, a private app; their pages stay absent |
 
 ## Known gaps and out of scope
 

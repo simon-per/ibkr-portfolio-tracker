@@ -915,6 +915,14 @@ class CompanyFinancialsService:
     def __init__(self, db: AsyncSession):
         self.db = db
         self.repo = CompanyFinancialsRepository(db)
+        self._ordinary: Optional[set] = None
+
+    async def _ordinary_priced(self) -> set:
+        """The SEC filers priced by their ordinary share (`repo.ordinary_priced_ciks`),
+        asked once per service."""
+        if self._ordinary is None:
+            self._ordinary = await self.repo.ordinary_priced_ciks()
+        return self._ordinary
 
     async def _held_members(self, ciks) -> Dict[int, List[Security]]:
         """CIK -> every held listing, lowest symbol first (GOOG before GOOGL)."""
@@ -1401,13 +1409,21 @@ class CompanyFinancialsService:
         the Peers card both read them here (`tests/test_company_peers.py`).
 
         **Another regulator's company gets no Yahoo request** (owner, 2026-11-17): its closes
-        are the ones the app already holds (`_other_closes`), else none.
+        are the ones the app already holds (`_other_closes`), else none. So does an SEC
+        filer priced by its ordinary share (a 20-F filer found by its name, 2026-11-19): a
+        New York receipt can stand for ten shares beside an EPS per share.
         """
         rows = await self.repo.rows_of(company)
         coverage = (await self.repo.coverage_of([company])).get(company.key)
         currency = coverage["currency"] if coverage else None
         listing, closes, prices = None, [], []
-        if company.cik is not None:
+        if company.cik is not None and company.cik in await self._ordinary_priced():
+            listing = (await self._held_listings([company.cik])).get(company.cik)
+            if rows and currency is not None:
+                closes, splits = await self._other_closes(company, rows, currency)
+                if closes:
+                    prices = eps_basis(closes, splits, max(r.filed for r in rows))
+        elif company.cik is not None:
             listing = (await self._held_listings([company.cik])).get(company.cik)
             closes = await self._closes(company.cik, rows, currency, listing)
             prices = await self._on_eps_basis(company.cik, rows, closes)

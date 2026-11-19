@@ -111,6 +111,12 @@ METRICS: Dict[str, MetricSpec] = {
             # A utility's top line (XEL from 2019, when it stopped tagging `Revenues`: its
             # revenue had ended there). Last, so no company that tags another concept moves.
             "RegulatedAndUnregulatedOperatingRevenue",
+            # IFRS only (`IFRS_TWINS`; no us-gaap block has the name): net sales of goods,
+            # the top line of a 20-F filer that tags no total (Novartis's "Net sales to third
+            # parties", beside 4% of royalties and other revenue it states apart, 2026-11-19).
+            # Not us-gaap's `SalesRevenueGoodsNet`: it filled HPE's FY2015 with a third of
+            # its revenue. Last, for the same reason.
+            "RevenueFromSaleOfGoods",
         ),
         non_negative=True,
     ),
@@ -610,6 +616,7 @@ def _unit_fits(kind: str, unit: str) -> bool:
 IFRS_TWINS: Dict[str, str] = {
     "Revenue": "Revenues",
     "RevenueFromContractsWithCustomers": "RevenueFromContractWithCustomerExcludingAssessedTax",
+    "RevenueFromSaleOfGoods": "RevenueFromSaleOfGoods",
     "ProfitLossAttributableToOwnersOfParent": "NetIncomeLoss",
     "ProfitLoss": "ProfitLoss",
     "DilutedEarningsLossPerShare": "EarningsPerShareDiluted",
@@ -632,16 +639,34 @@ IFRS_TWINS: Dict[str, str] = {
 
 def _taxonomy(companyfacts: Dict[str, Any], wanted: Dict[str, str]) -> Dict[str, Any]:
     """
-    The us-gaap block, or — for a filer with no us-gaap concept a chain reads — its
-    `ifrs-full` block keyed by the US-GAAP twins (`IFRS_TWINS`). Never both: a filer that
-    switched taxonomies would otherwise count one year twice.
+    The block of the taxonomy the company reports in now: us-gaap, or its `ifrs-full` block
+    keyed by the US-GAAP twins (`IFRS_TWINS`). Never both: a filer that switched taxonomies
+    would otherwise count one year twice. With both, the one whose periodic reports reach
+    the later period, us-gaap on a tie — as the reporting currency is the newest filing's
+    (`_reporting_currency`): Toyota's 20-F moved to IFRS for FY2021, and read in us-gaap its
+    figures ended at FY2020 (2026-11-19).
     """
     facts = (companyfacts or {}).get("facts") or {}
     gaap = facts.get("us-gaap") or {}
-    if any(concept in gaap for concept in wanted):
-        return gaap
     ifrs = facts.get("ifrs-full") or {}
-    return {twin: ifrs[name] for name, twin in IFRS_TWINS.items() if name in ifrs}
+    twins = {twin: ifrs[name] for name, twin in IFRS_TWINS.items() if name in ifrs}
+    if not any(concept in gaap for concept in wanted):
+        return twins
+    if twins and _newest_period(twins, wanted) > _newest_period(gaap, wanted):
+        return twins
+    return gaap
+
+
+def _newest_period(block: Dict[str, Any], wanted: Dict[str, str]) -> date:
+    """The latest period end a periodic report (`FORMS`) states in this block's concepts."""
+    newest = date.min
+    for concept in wanted:
+        for rows in ((block.get(concept) or {}).get("units") or {}).values():
+            for row in rows:
+                end = _date(row.get("end"))
+                if row.get("form") in FORMS and end is not None and end > newest:
+                    newest = end
+    return newest
 
 
 def _reporting_currency(gaap: Dict[str, Any], wanted: Dict[str, str]) -> Optional[str]:

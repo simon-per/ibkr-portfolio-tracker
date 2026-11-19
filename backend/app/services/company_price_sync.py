@@ -109,12 +109,14 @@ class CompanyPriceSync:
 
         listed = await CompanyFinancialsService(self.db).list_companies()
         companies = await self.repo.companies()
+        ordinary = await self.repo.ordinary_priced_ciks()
         wanted = {sec_ticker(s) for s in symbols} if symbols else None
         out = []
         for entry in listed:
             # SEC filers only: another regulator's company is never priced at Yahoo (owner,
-            # 2026-11-17), so its multiples stay absent.
-            if entry["cik"] is None:
+            # 2026-11-17), nor an SEC filer priced by its ordinary share (a 20-F filer found
+            # by its name, 2026-11-19): its closes are the ones the app already holds.
+            if entry["cik"] is None or entry["cik"] in ordinary:
                 continue
             company = companies.get(entry["cik"])
             if company is None or not company.ticker:

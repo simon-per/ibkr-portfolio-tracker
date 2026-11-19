@@ -116,8 +116,14 @@ Only what is still unverified.
   short-term investments of UNP, ZS, DXCM, IBM and INTU (net cash moves for them) and no
   "Short-term investments outside the concept chain" warning; CDNS's 10-Qs read for its quarterly
   debt (about 24 reads that pass, the rest the next); the ESEF pass reads Santander's FY2022 and
-  FY2024 (no `too_large`). Germany and Switzerland stay without pages (owner, 2026-11-19: no paid
-  vendor).
+  FY2024 (no `too_large`). **20-F filers by name** (same branch, migration `g8b0d2f4a6c9`): that
+  pass's record shows `name_searches` (about 15 the first time), `name_found` including NVS, TM and
+  MUFG, and `name_matched` adding SAP, NVS, TM, MUFG, BHP, GFS and TSEM; their pages appear
+  (annual only, Toyota in IFRS from FY2020), SAP's ESEF list is no longer asked, Shell, AstraZeneca,
+  Santander and TotalEnergies keep their ESEF pages, and the Monday company-prices and profile runs
+  ask Yahoo about none of the seven. Their multiples appear once a basket refresh has recorded
+  their ordinary share's price (`constituent_prices`). Siemens, Allianz, E.ON, Infineon and the
+  Swiss stay without pages.
 
 - **The Company tab beyond today's SEC scope, steps 0+1 (deployed 2026-11-17 as `81b081b`):**
   migrations `c4e6a8b0d2f4` (`companies`, `company_financials.company_id`; tested up/down/up on a
@@ -591,9 +597,13 @@ Rough priority. Re-verify each `path:line` in code before fixing; lines move.
    SEC filers** — done 2026-11-17 (the look-through's top 200, Irish 10-K filers found by name, a
    held foreign listing linked through the identity store); **(2) South Korea** via OpenDART —
    built 2026-11-17 (Samsung, SK Hynix); **(3) Europe** via ESEF (filings.xbrl.org, by LEI) —
-   built 2026-11-17 (11 of 21 with an LEI; German and Swiss issuers stay blank: the index holds
-   none, no free regulator API serves them, and the owner declined a paid vendor such as EODHD on
-   2026-11-19 — a private app); next **Japan (EDINET)**, **Taiwan (MOPS)**,
+   built 2026-11-17 (11 of 21 with an LEI); **20-F filers found by name** — built 2026-11-19 (SAP,
+   Novartis, Toyota, MUFG, BHP, GlobalFoundries, Tower; priced by their ordinary share). Still
+   blank: Siemens, Allianz, E.ON, Infineon (their ESEF reports are on the Unternehmensregister,
+   no API, until ESMA's single access point opens, phase 1 from Q3 2027) and Roche, Nestlé, ABB
+   (no structured source; the owner declined a paid vendor such as EODHD on 2026-11-19 — a
+   private app); next **Japan (EDINET)** for what the 20-Fs leave (Tokyo Electron, Hitachi,
+   Fujitsu, NEC), **Taiwan (MOPS)**,
    **the rest** (China A/H, India, the Middle East — no usable free structured source, their US ADR
    filers only). Korean and European companies get no Yahoo request: their price-based multiples
    stay blank. The US classification shipped 2026-11-16; the insurer set waits for an insurer that
@@ -623,8 +633,9 @@ One line each, newest first; drop the oldest.
   Korean and European multiples from prices already held (held listings, iShares rows with a
   checked fund currency), three dividend rules measured over the 166 filers' companyfacts (an
   untagged first quarter, a declared-basis year in progress, payment dates vouched by dividends
-  paid), five filers' short-term investments, Santander's oversized reports, CDNS's quarterly debt.
-  Germany/Switzerland: no paid vendor (owner).
+  paid), five filers' short-term investments, Santander's oversized reports, CDNS's quarterly debt;
+  then 20-F filers found by name (SAP, Novartis, Toyota, MUFG, BHP, GFS, TSEM) priced by their
+  ordinary share, and the reader taking a filer's newer taxonomy (Toyota). No paid vendor (owner).
 
 - **2026-11-17 (the Company tab beyond the SEC, /goal run)** — four commits: one company key for
   every regulator (`companies`, `sec:`/`dart:`/`lei:`), the SEC widening (top 200, Irish 10-K

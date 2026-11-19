@@ -218,12 +218,38 @@ class SecTicker(Base):
     checked_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
     # The SEC's name for the company (`title` of the ticker list), and the form of the
     # newest annual report its filer lists (`10-K`, `20-F`; `-` for none), asked only for a
-    # company found by its name (`company_financials_sync.names_agree`, 2026-11-17).
+    # company found by its name (`company_financials_sync.names_agree`, 2026-11-17); the
+    # period that report ends and when the list was asked (2026-11-19: a 20-F filer is taken
+    # only while it still files, `ANNUAL_CURRENT_WITHIN`).
     title: Mapped[Optional[str]] = mapped_column(String(200), nullable=True)
     annual_form: Mapped[Optional[str]] = mapped_column(String(10), nullable=True)
+    annual_period_end: Mapped[Optional[date]] = mapped_column(Date, nullable=True)
+    form_checked_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
 
     def __repr__(self) -> str:
         return f"<SecTicker {self.ticker} cik={self.cik}>"
+
+
+class SecNameMatch(Base):
+    """
+    A company the baskets name without a US ISIN whose basket ticker the SEC lists under no
+    agreeing name (Novartis's NOVN, Toyota's 7203): the one SEC filer whose name agrees with
+    the company's over the whole ticker list (`company_financials_sync.names_agree`), by
+    the company's ISIN. A NULL `cik`: none agreed, or more than one; asked again after
+    `CIK_RECHECK_AFTER`.
+    """
+
+    __tablename__ = "sec_name_matches"
+
+    isin: Mapped[str] = mapped_column(String(12), primary_key=True)
+    cik: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    # The SEC's ticker for that filer (its first on the list) and its name.
+    ticker: Mapped[Optional[str]] = mapped_column(String(20), nullable=True)
+    title: Mapped[Optional[str]] = mapped_column(String(200), nullable=True)
+    checked_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+
+    def __repr__(self) -> str:
+        return f"<SecNameMatch {self.isin} -> {self.ticker} cik={self.cik}>"
 
 
 class SecurityCik(Base):

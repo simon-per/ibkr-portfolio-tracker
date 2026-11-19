@@ -29,6 +29,7 @@ from app.models.company_financials import (
     CompanyYahooProfile,
     SecCompany,
     SecFilingRead,
+    SecNameMatch,
     SecTicker,
     SecurityCik,
     VendorStatement,
@@ -144,11 +145,81 @@ class CompanyFinancialsRepository:
             row.annual_form = None
         row.cik, row.checked_at, row.title = cik, checked_at, title
 
-    async def record_annual_form(self, ticker: str, form: str) -> None:
-        """The form of the newest annual report the ticker's filer lists (`-`: none)."""
+    async def record_annual_form(
+        self,
+        ticker: str,
+        form: str,
+        period_end: Optional[date] = None,
+        checked_at: Optional[datetime] = None,
+    ) -> None:
+        """The form of the newest annual report the ticker's filer lists (`-`: none), the
+        period it ends, and when the list was asked."""
         row = await self.session.get(SecTicker, ticker)
         if row is not None:
             row.annual_form = form
+            row.annual_period_end = period_end
+            row.form_checked_at = checked_at
+
+    # ── sec_name_matches ─────────────────────────────────────────────────────
+
+    async def name_matches(self) -> Dict[str, SecNameMatch]:
+        """ISIN -> the SEC filer found by the company's name (`SecNameMatch`)."""
+        result = await self.session.execute(select(SecNameMatch))
+        return {row.isin: row for row in result.scalars()}
+
+    async def record_name_match(
+        self,
+        isin: str,
+        cik: Optional[int],
+        ticker: Optional[str],
+        title: Optional[str],
+        checked_at: datetime,
+    ) -> None:
+        row = await self.session.get(SecNameMatch, isin)
+        if row is None:
+            row = SecNameMatch(isin=isin, checked_at=checked_at)
+            self.session.add(row)
+        row.cik, row.ticker, row.title, row.checked_at = cik, ticker, title, checked_at
+
+    async def isins_paged_elsewhere(self) -> set:
+        """The ISINs of another regulator's companies with stored figures (an ESEF or
+        OpenDART page): a 20-F filer is not taken over them (`company_financials_sync`)."""
+        result = await self.session.execute(
+            select(Company.isin)
+            .join(CompanyFinancial, CompanyFinancial.company_id == Company.id)
+            .where(Company.isin.is_not(None))
+            .distinct()
+        )
+        return {(i or "").strip().upper() for i in result.scalars()} - {""}
+
+    async def ordinary_priced_ciks(self) -> set:
+        """
+        The SEC filers priced by their ordinary share, never at Yahoo (docs/company-
+        financials.md, *Prices without Yahoo*): a 20-F filer kept under a non-US ISIN — the
+        companies found by their name (SAP, Novartis, Toyota). Its New York listing, where it
+        has one, is a depositary receipt that can stand for ten shares (Toyota's) or two
+        (BHP's) beside an EPS per ordinary share, and nothing in companyfacts says which.
+        """
+        twenty_f = {
+            cik
+            for cik in (
+                await self.session.execute(
+                    select(SecTicker.cik).where(
+                        SecTicker.cik.is_not(None), SecTicker.annual_form.like("20-F%")
+                    )
+                )
+            ).scalars()
+        }
+        if not twenty_f:
+            return set()
+        result = await self.session.execute(
+            select(SecCompany.cik, SecCompany.isin).where(SecCompany.cik.in_(sorted(twenty_f)))
+        )
+        return {
+            cik
+            for cik, isin in result
+            if isin and not isin.strip().upper().startswith("US")
+        }
 
     # ── sec_companies ────────────────────────────────────────────────────────
 

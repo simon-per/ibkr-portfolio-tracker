@@ -1,16 +1,19 @@
 """
 A look-through company without a US ISIN, found at the SEC by the baskets' ticker
 (docs/company-financials.md, *Scope*, 2026-11-17): only when the SEC's name for the ticker
-agrees with the company's under `name_tokens`, and the filer reports on 10-K. Eaton,
+agrees with the company's under `name_tokens`, and the filer files a current 10-K or (since
+2026-11-19, tests/test_company_twenty_f.py) 20-F. Eaton,
 Johnson Controls, Accenture and Medtronic are Irish 10-K filers with no US ISIN; Roche's
 ROG is Rogers Corp's ticker at the SEC, Schneider's SU Suncor's. Offline: a fake SEC.
 """
 
+from datetime import timedelta
 from decimal import Decimal
 
 import httpx
 import pytest
 
+from app.clock import utc_today
 from app.models.company_financials import SecCompany, SecTicker
 from app.models.etf_basket import EtfHolding
 from app.services import company_financials_sync
@@ -32,6 +35,8 @@ from tests.test_company_financials_sync import (
 from app.config import settings
 
 EATON_CIK, ROGERS_CIK, SAP_CIK = 1551182, 84748, 1000184
+# A current annual report's period: within `ANNUAL_CURRENT_WITHIN` of whatever day the suite runs.
+RECENT = (utc_today() - timedelta(days=300)).isoformat()
 OTHER_FUND = "IE00B5BMR087"
 
 
@@ -113,9 +118,9 @@ class Sec:
         if url == TICKERS_URL:
             return httpx.Response(200, json=TICKERS_PLUS)
         if url == SUBMISSIONS_URL.format(cik=EATON_CIK):
-            return httpx.Response(200, json=_filings("10-K", "2025-12-31"))
+            return httpx.Response(200, json=_filings("10-K", RECENT))
         if url == SUBMISSIONS_URL.format(cik=SAP_CIK):
-            return httpx.Response(200, json=_filings("20-F", "2025-12-31"))
+            return httpx.Response(200, json=_filings("20-F", RECENT))
         if url.startswith("https://data.sec.gov/api/xbrl/companyfacts/"):
             return httpx.Response(200, json=FIXTURE)
         return httpx.Response(404)
@@ -161,7 +166,7 @@ async def _baskets(db):
 
 
 @pytest.mark.asyncio
-async def test_a_10k_filer_is_found_by_name_and_nothing_else_is(
+async def test_a_filer_is_found_by_name_and_nothing_else_is(
     db, configured, monkeypatch
 ):
     async def view(self, limit=50):
@@ -185,16 +190,18 @@ async def test_a_10k_filer_is_found_by_name_and_nothing_else_is(
     summary = await sync.refresh()
 
     facts = {u for u in sec.requests if "/companyfacts/" in u}
-    # NVDA (the index's one) and Eaton; never Rogers for Roche, never SAP's 20-F.
-    assert facts == {FACTS_URL.format(cik=c) for c in (1045810, EATON_CIK)}
-    assert summary["name_matched"] == ["ETN"]
+    # NVDA (the index's one), Eaton and SAP (a current 20-F); never Rogers for Roche.
+    assert facts == {FACTS_URL.format(cik=c) for c in (1045810, EATON_CIK, SAP_CIK)}
+    assert summary["name_matched"] == ["ETN", "SAP"]
+    # Roche's name, held against the whole list, finds no filer either.
+    assert summary["name_searches"] == 1 and summary["name_found"] == []
     # One filing list for each name that agreed (Eaton, SAP), none for Rogers.
     assert summary["name_checks"] == 2
     assert SUBMISSIONS_URL.format(cik=ROGERS_CIK) not in sec.requests
     eaton = await db.get(SecCompany, EATON_CIK)
     assert eaton.universe_seen_at is not None and eaton.isin == "IE00B8KQN827"
     assert await db.get(SecCompany, ROGERS_CIK) is None
-    assert await db.get(SecCompany, SAP_CIK) is None
+    assert (await db.get(SecCompany, SAP_CIK)).isin == "DE0007164600"
     rows = {
         t: (r.title, r.annual_form)
         for t, r in [(t, await db.get(SecTicker, t)) for t in ("ETN", "ROG", "SAP")]
@@ -210,7 +217,8 @@ async def test_a_10k_filer_is_found_by_name_and_nothing_else_is(
     summary = await sync.refresh()
     assert TICKERS_URL not in sec.requests
     assert not [u for u in sec.requests if "/submissions/" in u and str(EATON_CIK) in u]
-    assert summary["name_checks"] == 0 and summary["name_matched"] == ["ETN"]
+    assert summary["name_checks"] == 0 and summary["name_matched"] == ["ETN", "SAP"]
+    assert summary["name_searches"] == 0
 
 
 async def _none():

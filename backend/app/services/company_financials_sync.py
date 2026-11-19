@@ -26,7 +26,12 @@ is due, so a report reaches the tab the next morning rather than on Sunday.
   A look-through company **without** a US ISIN (an Irish 10-K filer: Eaton, Accenture) is
   found by the baskets' ticker only when the SEC's name for that ticker agrees with the
   company's (`names_agree`) and the SEC filer reports on 10-K (`annual_form`): Roche's ROG is
-  Rogers Corp's ticker there, Schneider's SU Suncor's (2026-11-17).
+  Rogers Corp's ticker there, Schneider's SU Suncor's (2026-11-17). **Or on 20-F**
+  (2026-11-19, owner: "use SEC for SAP etc. where it exists"), while it still files
+  (`ANNUAL_CURRENT_WITHIN`) and no other regulator's page has the company: priced by its
+  ordinary share, never at Yahoo (`repo.ordinary_priced_ciks`). A basket ticker the SEC
+  lists under no agreeing name sends the company's name over the whole ticker list
+  (`_search_names`, `SecNameMatch`): Novartis's NOVN finds NVS, Toyota's 7203 TM.
 
 A foreign private issuer's annual 20-F counts as an annual report (review item R6): ASML's in
 US GAAP, NU's and TSMC's in IFRS (`normaliser.IFRS_TWINS`), annual figures only. A filer
@@ -67,8 +72,8 @@ import re
 import unicodedata
 import xml.etree.ElementTree as ET
 from collections import Counter, defaultdict
-from dataclasses import dataclass, field
-from datetime import datetime, timedelta
+from dataclasses import dataclass, field, replace
+from datetime import date, datetime, timedelta
 from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
 
 import httpx
@@ -155,11 +160,19 @@ UNIVERSE_SIZE = 100
 #: companies' EDGAR and Yahoo requests a week; 100 -> 200 on 2026-11-17, owner's approval
 #: for about thirty more companies' weekly closes and profile rotation).
 NAMED_LOOKTHROUGH = 200
-#: The annual report a company found by its name must file: a 10-K. A 20-F filer listed in
-#: New York through depositary receipts quotes a receipt that can stand for two shares, or
-#: half of one, beside an EPS per ordinary share, and its home regulator's report is the
-#: other markets' passes' (docs/company-financials.md, *Scope*).
-NAME_MATCH_FORMS = ("10-K",)
+#: The annual report a company found by its name must file: a 10-K, or a 20-F (2026-11-19).
+#: A 20-F filer listed in New York through depositary receipts quotes a receipt that can
+#: stand for ten shares (Toyota) or two (BHP) beside an EPS per ordinary share, so it is
+#: priced by its ordinary share (`repo.ordinary_priced_ciks`); and where another regulator
+#: already gives it a page (Shell, Santander: ESEF) that page stays (`_resolve`).
+NAME_MATCH_FORMS = ("10-K", "20-F")
+#: A filer whose newest annual report ends longer ago than this has stopped filing at the
+#: SEC (ABB's last 20-F is FY2023, Infineon's FY2009): a year, the four months a 20-F may
+#: take, and slack. Its page would set today's price beside old figures.
+ANNUAL_CURRENT_WITHIN = timedelta(days=550)
+#: Past this since the recorded annual report's end, the next one is due: its filing list is
+#: asked again, at most once in `CIK_RECHECK_AFTER` (`form_due`).
+ANNUAL_REPORT_DUE = timedelta(days=400)
 #: Filing instances read for one company in one pass (two requests each). The first fill
 #: reads MA's six years of dividend gaps in about ten, BKR's nine in about twenty; a company
 #: that keeps tagging only on a dimension member needs one a quarter after that.
@@ -216,9 +229,12 @@ class Constituent:
     capped: bool = True
     # A company without a US ISIN, found by the baskets' ticker: it resolves only when the
     # SEC's name for the ticker agrees with one of `names` (`names_agree`) and the filer
-    # reports on 10-K (`NAME_MATCH_FORMS`).
+    # files a current 10-K or 20-F (`NAME_MATCH_FORMS`, `annual_current`).
     name_check: bool = False
     names: Tuple[str, ...] = ()
+    # Every ISIN the company is known by (a name-checked one's): another regulator's page
+    # for any of them keeps a 20-F filer out.
+    isins: Tuple[str, ...] = ()
 
 
 #: Legal forms and share-class words, dropped from the end of a name before two names are
@@ -266,22 +282,67 @@ def names_agree(names: Sequence[str], title: Optional[str]) -> bool:
     sec = name_tokens(title)
     if not sec:
         return False
-    for name in names:
-        ours = name_tokens(name)
-        if not ours:
-            continue
-        if ours == sec:
-            return True
-        short, long_ = (ours, sec) if len(ours) <= len(sec) else (sec, ours)
-        raw = name if short is ours else title
-        if (
-            len(raw.strip()) >= TRUNCATED_NAME_LENGTH
-            and len(short) >= 2
-            and short[:-1] == long_[: len(short) - 1]
-            and long_[len(short) - 1].startswith(short[-1])
-        ):
-            return True
-    return False
+    return any(tokens_agree(name, name_tokens(name), title, sec) for name in names)
+
+
+def tokens_agree(name: str, ours: List[str], title: str, sec: List[str]) -> bool:
+    """`names_agree` for one name, over tokens already taken (`name_tokens`), so a name can
+    be held against the whole ticker list (`_search_names`)."""
+    if not ours or not sec:
+        return False
+    if ours == sec:
+        return True
+    short, long_ = (ours, sec) if len(ours) <= len(sec) else (sec, ours)
+    raw = name if short is ours else title
+    return (
+        len(raw.strip()) >= TRUNCATED_NAME_LENGTH
+        and len(short) >= 2
+        and short[:-1] == long_[: len(short) - 1]
+        and long_[len(short) - 1].startswith(short[-1])
+    )
+
+
+def annual_current(row: Any, today: date) -> bool:
+    """
+    Whether a ticker's filer files the annual report a company found by its name must
+    (`NAME_MATCH_FORMS`) and still files it (`ANNUAL_CURRENT_WITHIN`). A 10-K recorded
+    before the period was kept (2026-11-19) stands until its list is asked again.
+    """
+    form = row.annual_form or ""
+    if not form.startswith(NAME_MATCH_FORMS):
+        return False
+    end = row.annual_period_end
+    if end is None:
+        return form.startswith("10-K")
+    return today - end <= ANNUAL_CURRENT_WITHIN
+
+
+def form_due(row: Any, now: datetime) -> bool:
+    """Whether a ticker's annual report is asked (`_check_forms`): never asked; or asked
+    before its period was kept, or the next report is due (`ANNUAL_REPORT_DUE`), and not
+    within `CIK_RECHECK_AFTER`. A filer that lists none (`-`) is not asked again."""
+    if row.annual_form == "-":
+        return False
+    if row.annual_form is None:
+        return True
+    if row.form_checked_at is not None and row.form_checked_at > now - CIK_RECHECK_AFTER:
+        return False
+    end = row.annual_period_end
+    return end is None or now.date() - end > ANNUAL_REPORT_DUE
+
+
+def apply_name_matches(
+    constituents: Sequence[Constituent], matches: Dict[str, Any]
+) -> List[Constituent]:
+    """A company found by its name takes the SEC's ticker of the filer its name found over
+    the whole list (`SecNameMatch`), when its basket ticker found none: NOVN is NVS."""
+    out: List[Constituent] = []
+    for c in constituents:
+        match = matches.get(c.isin) if c.name_check and c.isin else None
+        if match is not None and match.cik is not None and match.ticker:
+            c = replace(c, ticker=match.ticker)
+        out.append(c)
+    return out
 
 
 @dataclass
@@ -443,8 +504,10 @@ class CompanyFinancialsSync:
                     capped=False,
                     name_check=True,
                     names=tuple([name, *line_names]),
+                    isins=tuple(isins),
                 )
             )
+        out = apply_name_matches(out, await self.repo.name_matches())
         items = (await self.db.execute(select(WatchlistItem))).scalars()
         for item in items:
             symbol = (item.yahoo_ticker or "").strip().upper()
@@ -520,6 +583,9 @@ class CompanyFinancialsSync:
                 )
             }.values()
         )
+        matches = await self.repo.name_matches()
+        searches = self._searches_due(constituents, rows, matches, now, force)
+        elsewhere = await self.repo.isins_paged_elsewhere()
         summary: Dict[str, Any] = {
             "status": "success",
             "configured": configured,
@@ -543,6 +609,8 @@ class CompanyFinancialsSync:
             "stale_figures": [],
             "name_checks": 0,
             "name_matched": [],
+            "name_searches": 0,
+            "name_found": [],
         }
         warnings: List[str] = []
         if missing_baskets:
@@ -552,7 +620,7 @@ class CompanyFinancialsSync:
             )
 
         if dry_run:
-            resolved = self._resolve(constituents, known, rows)
+            resolved = self._resolve(constituents, known, rows, now.date(), elsewhere)
             targets = self._targets(securities, stamps, resolved)
             due = await self._due(targets, now, force)
             summary["universe"] = sum(1 for _, cik in resolved if cik is not None)
@@ -580,7 +648,7 @@ class CompanyFinancialsSync:
             # was refused before the targets were known.
             targets: List[Target] = []
             try:
-                if need_cik or unknown:
+                if need_cik or unknown or searches:
                     try:
                         listed = await client.company_ticker_list()
                         for security in need_cik:
@@ -598,6 +666,17 @@ class CompanyFinancialsSync:
                             if cik is not None:
                                 known[constituent.ticker] = cik
                         await self.db.commit()
+                        searches = self._searches_due(
+                            constituents, await self.repo.ticker_rows(), matches, now, force
+                        )
+                        await self._search_names(listed, searches, now, summary)
+                        await self.db.commit()
+                        constituents = apply_name_matches(
+                            constituents, await self.repo.name_matches()
+                        )
+                        for row in (await self.repo.ticker_rows()).values():
+                            if row.cik is not None:
+                                known.setdefault(row.ticker, row.cik)
                     except EdgarError as e:
                         summary["errors"] += 1
                         warnings.append(
@@ -607,8 +686,8 @@ class CompanyFinancialsSync:
                         )
                     stamps = await self.repo.cik_rows(s.id for s in securities)
                 rows = await self.repo.ticker_rows()
-                await self._check_forms(client, constituents, rows, summary)
-                resolved = self._resolve(constituents, known, rows)
+                await self._check_forms(client, constituents, rows, summary, now)
+                resolved = self._resolve(constituents, known, rows, now.date(), elsewhere)
                 summary["name_matched"] = sorted(
                     c.ticker for c, cik in resolved if c.name_check and cik is not None
                 )
@@ -700,7 +779,13 @@ class CompanyFinancialsSync:
         constituents, _ = await self.universe()
         stamps = await self.repo.cik_rows(s.id for s in securities)
         known, _ = await self._known_tickers()
-        resolved = self._resolve(constituents, known, await self.repo.ticker_rows())
+        resolved = self._resolve(
+            constituents,
+            known,
+            await self.repo.ticker_rows(),
+            now.date(),
+            await self.repo.isins_paged_elsewhere(),
+        )
         due = await self._filing_due(self._targets(securities, stamps, resolved), now)
         summary: Dict[str, Any] = {
             "status": "success",
@@ -862,13 +947,19 @@ class CompanyFinancialsSync:
 
     @staticmethod
     def _resolve(
-        constituents: Sequence[Constituent], known: Dict[str, int], rows: Dict[str, Any]
+        constituents: Sequence[Constituent],
+        known: Dict[str, int],
+        rows: Dict[str, Any],
+        today: date,
+        elsewhere: set,
     ) -> List[Tuple[Constituent, Optional[int]]]:
         """
         Each constituent and its CIK, or None. A company found by its name
         (`Constituent.name_check`) takes the SEC's answer for its ticker only when the SEC's
-        name agrees (`names_agree`) and its annual report is a 10-K (`NAME_MATCH_FORMS`);
-        never a CIK another table knows the ticker by.
+        name agrees (`names_agree`) and its filer files a current 10-K or 20-F
+        (`annual_current`); a 20-F filer not when another regulator's page has any of its
+        ISINs (`elsewhere`: Shell's and Santander's ESEF reports stay their pages). Never a
+        CIK another table knows the ticker by.
         """
         out: List[Tuple[Constituent, Optional[int]]] = []
         for c in constituents:
@@ -880,10 +971,86 @@ class CompanyFinancialsSync:
                 row is not None
                 and row.cik is not None
                 and names_agree(c.names or (c.name,), row.title)
-                and (row.annual_form or "").startswith(NAME_MATCH_FORMS)
+                and annual_current(row, today)
+                and not (
+                    (row.annual_form or "").startswith("20-F")
+                    and elsewhere & set(c.isins or (c.isin,))
+                )
             )
             out.append((c, row.cik if ok else None))
         return out
+
+    @staticmethod
+    def _searches_due(
+        constituents: Sequence[Constituent],
+        rows: Dict[str, Any],
+        matches: Dict[str, Any],
+        now: datetime,
+        force: bool,
+    ) -> List[Constituent]:
+        """
+        The companies found by their name whose basket ticker the SEC lists under no
+        agreeing name (or not at all), not searched for within `CIK_RECHECK_AFTER`.
+        """
+        out: List[Constituent] = []
+        for c in constituents:
+            if not c.name_check or not c.isin:
+                continue
+            row = rows.get(c.ticker)
+            if (
+                row is not None
+                and row.cik is not None
+                and names_agree(c.names or (c.name,), row.title)
+            ):
+                continue
+            match = matches.get(c.isin)
+            if (
+                match is not None
+                and not force
+                and match.checked_at > now - CIK_RECHECK_AFTER
+            ):
+                continue
+            out.append(c)
+        return out
+
+    async def _search_names(
+        self,
+        listed: Dict[str, Any],
+        searches: Sequence[Constituent],
+        now: datetime,
+        summary: Dict[str, Any],
+    ) -> None:
+        """
+        Each company's names over the whole ticker list (`names_agree`); exactly one agreeing
+        filer is its match, kept by ISIN (`SecNameMatch`) with the filer's first ticker on
+        the list (the SEC orders it by size: a filer's main listing). None, or two filers,
+        is no match. No request: the list is the one this pass already read.
+        """
+        if not searches:
+            return
+        filers: Dict[int, Tuple[str, Optional[str]]] = {}
+        for ticker, entry in listed.items():
+            filers.setdefault(entry.cik, (ticker, entry.title))
+        titled = [
+            (cik, t, title, name_tokens(title))
+            for cik, (t, title) in filers.items()
+            if title
+        ]
+        for c in searches:
+            summary["name_searches"] += 1
+            ours = [(n, name_tokens(n)) for n in c.names or (c.name,)]
+            hits = [
+                (cik, t, title)
+                for cik, t, title, sec in titled
+                if any(tokens_agree(n, tokens, title, sec) for n, tokens in ours)
+            ]
+            if len(hits) == 1:
+                cik, ticker, title = hits[0]
+                await self.repo.record_ticker(ticker, cik, now, title)
+                await self.repo.record_name_match(c.isin, cik, ticker, title, now)
+                summary["name_found"].append(ticker)
+            else:
+                await self.repo.record_name_match(c.isin, None, None, None, now)
 
     async def _check_forms(
         self,
@@ -891,11 +1058,13 @@ class CompanyFinancialsSync:
         constituents: Sequence[Constituent],
         rows: Dict[str, Any],
         summary: Dict[str, Any],
+        now: datetime,
     ) -> None:
         """
         For a company found by its name whose SEC name agrees, the form of its newest
-        annual report (the `submissions` document, one small request), asked once and kept
-        on its ticker's row (`sec_tickers.annual_form`; `-` when it lists none).
+        annual report and the period it ends (the `submissions` document, one small
+        request), kept on its ticker's row (`sec_tickers.annual_form`; `-` when it lists
+        none) and asked again only when the next one is due (`form_due`).
         """
         for c in constituents:
             row = rows.get(c.ticker)
@@ -903,7 +1072,7 @@ class CompanyFinancialsSync:
                 not c.name_check
                 or row is None
                 or row.cik is None
-                or row.annual_form is not None
+                or not form_due(row, now)
                 or not names_agree(c.names or (c.name,), row.title)
             ):
                 continue
@@ -914,10 +1083,15 @@ class CompanyFinancialsSync:
                 continue
             summary["name_checks"] += 1
             annual = next(
-                (f.form for f in filings or [] if f.form.startswith(ANNUAL_FORM_PREFIXES)),
-                "-",
+                (f for f in filings or [] if f.form.startswith(ANNUAL_FORM_PREFIXES)),
+                None,
             )
-            await self.repo.record_annual_form(c.ticker, annual)
+            if annual is None:
+                await self.repo.record_annual_form(c.ticker, "-", None, now)
+            else:
+                await self.repo.record_annual_form(
+                    c.ticker, annual.form, annual.period_end, now
+                )
         await self.db.commit()
 
     def _targets(
