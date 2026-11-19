@@ -1125,6 +1125,27 @@ All three were misses: the normaliser read 10-K/10-Q facts in us-gaap only.
   year end it asks such a filer's filing list daily and finds that year already stored — about 75
   small requests a filer a year, accepted rather than a second cadence for three companies.
 
+## Successor filers
+
+ExxonMobil Holdings Corp (CIK 2115436) became the registrant over Exxon Mobil Corp (CIK 34088) in
+2026 and took the XOM ticker; its companyfacts held two 10-Qs and no fiscal year, so the page had
+no history (2026-11-19). `CompanyFinancialsSync._with_predecessor`:
+
+- **Found once**: a company whose companyfacts holds no annual report (`has_annual_report`: no
+  10-K, 20-F or 40-F fact) asks its filing list, at most every `PREDECESSOR_RECHECK_AFTER` (30
+  days), for a periodic report under another CIK's accession prefix; that filer is the
+  predecessor when its own filing list holds the same report (filed jointly: XOM's Q2 2026 10-Q,
+  `0000034088-26-000093`) and its companyfacts an annual report. Companyfacts carries a joint
+  report's facts under one registrant only, so the lists are compared, not the facts. A filing
+  agent's prefix lists no report of the company; at most `PREDECESSOR_CANDIDATES` (3) are asked.
+- **Kept** on `sec_companies.predecessor_cik` (migration `h9c1e3a5b7d0`), and its companyfacts
+  read beside the company's on every fetch (`merge_facts`: one document, concept by concept), so
+  the successor's first 10-K does not cut the history off. A failed read of either keeps the
+  stored rows. Measured on the two documents: FY2007–FY2025 under the new CIK, none of the old
+  CIK's 1,229 rows moved, Q2 and Q3 2026 the new filer's.
+- A spin-off (Honeywell Aerospace) or a new listing (SpaceX) has no predecessor: its quarters are
+  its history. `tests/test_company_successor.py`.
+
 ## The source waterfall
 
 Owner, 2026-11-16: the Company tab closes its own gaps, source by source, **SEC first and Alpha

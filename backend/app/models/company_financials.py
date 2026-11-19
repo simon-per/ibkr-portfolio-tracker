@@ -129,6 +129,14 @@ class SecCompany(Base):
     # longer on the shared doubling while it fills nothing.
     vendor_checked_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
     vendor_miss_count: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    # The filer this one succeeded (`company_financials_sync._with_predecessor`): a new
+    # holding company over the old registrant, whose history it continues (ExxonMobil
+    # Holdings over Exxon Mobil Corp, 2026). Found by a periodic report the two filed
+    # jointly; asked while the company has no annual report of its own, at most monthly.
+    predecessor_cik: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    predecessor_checked_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime, nullable=True
+    )
 
     @property
     def key(self) -> str:

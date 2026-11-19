@@ -167,6 +167,11 @@ NAMED_LOOKTHROUGH = 200
 #: priced by its ordinary share (`repo.ordinary_priced_ciks`); and where another regulator
 #: already gives it a page (Shell, Santander: ESEF) that page stays (`_resolve`).
 NAME_MATCH_FORMS = ("10-K",) + FOREIGN_ANNUAL_PREFIXES
+#: A successor without an annual report is asked for its predecessor at most this often,
+#: through at most this many other filers' CIKs its periodic reports carry
+#: (`_find_predecessor`).
+PREDECESSOR_RECHECK_AFTER = timedelta(days=30)
+PREDECESSOR_CANDIDATES = 3
 #: A filer whose newest annual report ends longer ago than this has stopped filing at the
 #: SEC (ABB's last 20-F is FY2023, Infineon's FY2009): a year, the four months a 20-F may
 #: take, and slack. Its page would set today's price beside old figures.
@@ -344,6 +349,38 @@ def apply_name_matches(
             c = replace(c, ticker=match.ticker)
         out.append(c)
     return out
+
+
+def has_annual_report(companyfacts: Optional[Dict[str, Any]]) -> bool:
+    """Whether a companyfacts document holds any fact an annual report (10-K, 20-F, 40-F)
+    states, in us-gaap or ifrs-full."""
+    facts = (companyfacts or {}).get("facts") or {}
+    for taxonomy in ("us-gaap", "ifrs-full"):
+        for body in (facts.get(taxonomy) or {}).values():
+            for rows in (body.get("units") or {}).values():
+                if any(str(r.get("form", "")).startswith(ANNUAL_FORM_PREFIXES) for r in rows):
+                    return True
+    return False
+
+
+def merge_facts(newer: Dict[str, Any], older: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    A successor's companyfacts with its predecessor's facts beneath, concept by concept and
+    unit by unit: one document the normaliser reads as one company. A fact both carry (a
+    report they filed jointly) is the same fact twice, and the normaliser keeps one per
+    period and filing. The successor's name and CIK stand.
+    """
+    merged: Dict[str, Any] = {k: v for k, v in newer.items() if k != "facts"}
+    facts: Dict[str, Any] = {}
+    for doc in (older, newer):
+        for taxonomy, concepts in ((doc or {}).get("facts") or {}).items():
+            into = facts.setdefault(taxonomy, {})
+            for concept, body in (concepts or {}).items():
+                target = into.setdefault(concept, {**body, "units": {}})
+                for unit, rows in (body.get("units") or {}).items():
+                    target["units"].setdefault(unit, []).extend(rows or [])
+    merged["facts"] = facts
+    return merged
 
 
 @dataclass
@@ -946,6 +983,68 @@ class CompanyFinancialsSync:
                 known.setdefault(company.ticker, company.cik)
         return known, asked
 
+    async def _with_predecessor(
+        self,
+        client: EdgarClient,
+        cik: int,
+        facts: Optional[Dict[str, Any]],
+        summary: Dict[str, Any],
+    ) -> Optional[Dict[str, Any]]:
+        """
+        A successor's companyfacts with its predecessor's history beneath (`merge_facts`).
+        A filer without an annual report of its own is asked once a month for the filer it
+        succeeded (`_find_predecessor`); once found, the predecessor's companyfacts is read
+        beside it on every fetch, so its first 10-K does not cut the history off. A failed
+        read of either is the company's failure: its stored rows stand.
+        """
+        if facts is None:
+            return facts
+        company = (await self.repo.companies([cik])).get(cik)
+        if company is None:
+            return facts
+        predecessor = company.predecessor_cik
+        if predecessor is None:
+            checked = company.predecessor_checked_at
+            if has_annual_report(facts) or (
+                checked is not None and checked > utcnow() - PREDECESSOR_RECHECK_AFTER
+            ):
+                return facts
+            predecessor = await self._find_predecessor(client, cik, summary)
+            company.predecessor_cik = predecessor
+            company.predecessor_checked_at = utcnow()
+            await self.db.commit()
+            if predecessor is None:
+                return facts
+        older = await client.company_facts(predecessor)
+        return merge_facts(facts, older) if older else facts
+
+    async def _find_predecessor(
+        self, client: EdgarClient, cik: int, summary: Dict[str, Any]
+    ) -> Optional[int]:
+        """
+        The filer whose CIK leads the accession number of a periodic report this company's
+        filing list holds, when that filer's own filing list holds the same report (one the
+        two filed jointly: ExxonMobil Holdings' Q2 2026 10-Q, `0000034088-26-000093`, is
+        Exxon Mobil Corp's too) and its companyfacts an annual report. A filing agent's
+        prefix (Donnelley's) lists no such report as its own. Companyfacts carries a joint
+        report's facts under one registrant only, so the lists are what is compared. At most
+        `PREDECESSOR_CANDIDATES` asked.
+        """
+        filings = await client.periodic_filings(cik) or []
+        joint: Dict[int, set] = defaultdict(set)
+        for filing in filings:
+            prefix = (filing.accn or "").split("-")[0]
+            if prefix.isdigit() and int(prefix) != cik:
+                joint[int(prefix)].add(filing.accn)
+        for candidate in sorted(joint)[:PREDECESSOR_CANDIDATES]:
+            listed = await client.periodic_filings(candidate) or []
+            if not {f.accn for f in listed} & joint[candidate]:
+                continue
+            if has_annual_report(await client.company_facts(candidate)):
+                summary.setdefault("predecessors", []).append(f"{cik}<-{candidate}")
+                return candidate
+        return None
+
     @staticmethod
     def _resolve(
         constituents: Sequence[Constituent],
@@ -1253,6 +1352,7 @@ class CompanyFinancialsSync:
     ) -> str:
         try:
             facts = await client.company_facts(cik)
+            facts = await self._with_predecessor(client, cik, facts, summary)
         except EdgarError as e:
             summary["errors"] += 1
             logger.warning(f"companyfacts for CIK {cik} failed: {e}")
