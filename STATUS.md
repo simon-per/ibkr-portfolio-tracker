@@ -110,12 +110,13 @@ Only what is still unverified.
   production snapshot) and `d5f7b9c1e3a6` (`sec_tickers.title`, `annual_form`). Right after the
   deploy: `/api/company-financials/companies` carries `key` (`sec:<cik>`) on every row and TSMC's
   `security_ids` holds the 2330 listing (a Positions row of 2330 opens TSMC); `#company/<cik>`
-  links still open. The **Sunday 2026-11-22 05:00 pass** (or a narrowed manual run, not
-  `--force`): one ticker-list request, `name_checks` about 20 (once), `name_matched` including
-  ACN, ETN, JCI, NVT, and `universe` up by about 33 (the look-through's rows 101–200 and the four
-  Irish 10-K filers). Then `company_prices_refresh` asks Yahoo for about 33 more companies' weekly
-  closes and the 05:00 profile chunk's rotation is that much longer — the budget the owner
-  approved; record the real counts (`companies_due`, `fetched` on the price pass) here.
+  links still open. **Backfilled by hand 2026-11-19** (`fetch_company_financials`, not `--force`):
+  80 CIK lookups, 35 of 35 new companies fetched (49,906 rows, 171 filings, 0 failed) — the four
+  Irish 10-K filers matched by name (JCI, ETN, ACN, NVT) and the look-through's rows 101–200; the
+  tab lists 179 companies (166 SEC, 2 Korean, 11 European). **Still to see:** the Sunday 2026-11-22
+  `company_prices_refresh` asks Yahoo for those 35 companies' weekly closes (their P/E and
+  multiples are blank until then) — the budget the owner approved; record `companies_due` and
+  `fetched` here.
 - **Fixes #82–#92 (deployed 2026-11-18 as `dbc66ef`, `/health` checked):** verified live the same
   evening — TSMC's key figures (FY2025) and no Quarterly view or fake latest quarter; HSBC's and
   Santander's currencies; Samsung's sector peers; the look-through fundamentals card in 1.5 s
