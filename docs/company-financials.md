@@ -480,6 +480,30 @@ transition reports; an 8-K's or a proxy's stray fact does not count.
   mean, or nothing: they stay as the ladder rules leave them. Closed IBKR's years to 2025,
   BKNG, CEG's fourth quarters and AMAT's 2012 and 2014–2017 (offline over the 102 companies:
   gaps 134 → 91, no other metric's row moved).
+- **The first quarter nothing tags** (`_first_quarter`, 2026-11-19): the rung differences
+  never reach a ladder's first quarter when it has no three-month rung, so it is the half-year
+  less the reported second quarter (as the half-year's filing knew it). CAT declares two
+  dividends in June and two in December, its Q1 10-Q tags none, and 2.92 at six months beside
+  the second quarter's 2.92 is a first quarter of 0. Never a share count or an EPS (a loss
+  quarter's EPS is over a smaller count: one reported −2.92 differenced to −2.39). It fills a gap
+  only: a later concept of the chain that reported the quarter wins, and a derived first quarter
+  in a year whose four quarters miss the year it reports by more than `FIRST_QUARTER_BALANCE`
+  (0.5%) goes (`_drop_unbalanced_first_quarters`). Measured over the 166 SEC filers'
+  companyfacts: 404 quarters filled and balanced (most of them 2008–2009 first quarters before
+  XBRL, and recent ones of filers whose Q1 10-Q tagged a different start), 7 unbalanced dropped,
+  no row removed, one moved by a rounding (9,434M to 9,435M).
+- **A dividend ladder that added up last year reads the same way in the year in progress**
+  (`adding_up`, `NEXT_LADDER_DAYS`): CAT's 2026 is 3.14 at six and nine months with no 10-K yet to
+  show the nine months is no rate, and its equal rungs are a third quarter of 0, as in 2025. A
+  flat-rate tagger (IBKR before 2020) has no year that adds up to lend.
+- **A year tagged only on its payment dates** (`_dividend_payments`): ACN's FY2026 10-K tags 1.63
+  on each of four payment dates and no year; DIS tags every dividend that way (0.75 in January and
+  July). A fiscal year with no dividend per share is the sum of one concept's dates inside it, and
+  each quarter the dates in it (0 for a quarter without one), when the dates come from a filing
+  after the year end, the year's dividends paid over its diluted count is within
+  `PAYMENTS_TOLERANCE` (10%) of the sum — so no payment is missing — and every quarter the year
+  already holds equals its dates. One concept only: a declaration date and a payment date of one
+  dividend are not two dividends. `tests/test_company_dividend_gaps.py`.
 - **One end date per period.** Ends within a week are one period (NVDA tagged one 2010 rung as
   ending a day before its quarter).
 

@@ -480,6 +480,18 @@ DIVIDEND_TOTALS = ("DividendsCommonStockCash", "DividendsCommonStock", "Dividend
 #: A year's dividend figures are one rate when the largest is within this of the smallest
 #: (BKNG's 9.60 over its 25:1 split is 0.384 beside the restated 0.38); a raise is more.
 FLAT_RATE_TOLERANCE = 0.02
+#: A fiscal year's dividends per share tagged only on the payment dates (ACN's FY2026 10-K,
+#: DIS's every filing) are its dividends when their sum is within this of the year's
+#: dividends paid over its diluted shares (`_dividend_payments`): the count moves within a
+#: year and the paid total can carry a few odd payments.
+PAYMENTS_TOLERANCE = 0.10
+#: Two fiscal-year ladders this many days apart are consecutive years (`_quarters_and_years`).
+NEXT_LADDER_DAYS = (350, 380)
+#: A first quarter derived as the half-year less the second (`_first_quarter`) carries this
+#: in its concept, and stays only where its year's quarters add up to the year within
+#: `FIRST_QUARTER_BALANCE` (`_drop_unbalanced_first_quarters`).
+FIRST_QUARTER_SUFFIX = " less Q2"
+FIRST_QUARTER_BALANCE = 0.005
 #: ... and its quarters' declared totals each within this of their mean. Coarse on purpose:
 #: IBKR tags 7M or 8M a quarter in millions, while an annual declarer's quarters (WMT) or a
 #: semi-annual one's (INTC) are four times or twice the mean, or nothing.
@@ -1829,6 +1841,11 @@ def _quarters_and_years(
                 del direct[end]
     derived: Dict[date, Obs] = {}
     starts: List[date] = []
+    # A dividend ladder that adds up — its largest rung half again its smallest — shows its
+    # company tags the declared basis; the year after reads the same way while it is in
+    # progress (CAT declares two dividends in June and two in December: 3.14 at six and nine
+    # months of 2026, no year yet to show the nine months is no rate).
+    adding_up = {s for s, r in ladders.items() if kind == PER_SHARE and _adds_up(r)}
     for start, rungs in ladders.items():
         rungs.sort(key=lambda o: o.end)
         if any(_days(start, o.end) > QUARTER_DAYS[1] for o in rungs):
@@ -1865,7 +1882,10 @@ def _quarters_and_years(
                     and any(r.end < rung.end and r.value > year.value for r in rungs)
                 ):
                     del years[rung.end]
-        cumulative = kind == PER_SHARE and _shows_zero(rungs, direct, start)
+        cumulative = kind == PER_SHARE and (
+            _shows_zero(rungs, direct, start)
+            or any(_between((start - s).days, NEXT_LADDER_DAYS) for s in adding_up)
+        )
         for i, (shorter, longer) in enumerate(zip(rungs, rungs[1:])):
             if not _between((longer.end - shorter.end).days, QUARTER_DAYS):
                 continue
@@ -1881,9 +1901,97 @@ def _quarters_and_years(
             derived[longer.end] = (
                 candidate if held is None else _preferred(held, candidate)
             )
+        first = _first_quarter(kind, non_negative, start, rungs, direct, cumulative)
+        if first is not None and first.end not in derived:
+            derived[first.end] = first
     quarters = dict(derived)
     quarters.update(direct)  # a reported quarter beats a derived one
     return quarters, years, starts
+
+
+def _adds_up(rungs: Sequence[Obs]) -> bool:
+    """A ladder's largest positive rung at least `NOT_CUMULATIVE_RATIO` its smallest."""
+    positive = [r.value for r in rungs if r.value > 0]
+    return bool(positive) and max(positive) >= min(positive) * NOT_CUMULATIVE_RATIO
+
+
+def _first_quarter(
+    kind: str,
+    non_negative: bool,
+    start: date,
+    rungs: Sequence[Obs],
+    direct: Dict[date, Obs],
+    cumulative: bool,
+) -> Optional[Obs]:
+    """
+    A ladder's first quarter that nothing tags — the rung differences never reach it — as
+    its half-year less the reported second quarter: CAT declares no dividend in its first
+    quarter, so its Q1 10-Q tags none, and its 2.92 at six months beside the second quarter's
+    2.92 is a first quarter of 0. A zero only where the ladder shows one (`_not_a_figure`).
+    Never an average (a share count) or an earnings per share, whose half-year is not the
+    sum of its quarters (a loss quarter's EPS is over a smaller count).
+    """
+    if kind == SHARES or (kind == PER_SHARE and not non_negative):
+        return None
+    half = next((r for r in rungs if _days(start, r.end) > QUARTER_DAYS[1]), None)
+    second = direct.get(half.end) if half is not None else None
+    if second is None or second.derived or second.start is None:
+        return None
+    second = _as_of(second, half.filed)
+    end = second.start - timedelta(days=1)
+    if not _between(_days(start, end), QUARTER_DAYS):
+        return None
+    week = timedelta(days=7)
+    if any(abs(e - end) <= week for e in direct) or any(
+        abs(r.end - end) <= week for r in rungs
+    ):
+        return None
+    value = half.value - second.value
+    if _not_a_figure(kind, non_negative, value, cumulative):
+        return None
+    return Obs(
+        value=value,
+        filed=max(half.filed, second.filed),
+        start=start,
+        end=end,
+        unit=half.unit,
+        concept=f"{half.concept}{FIRST_QUARTER_SUFFIX}",
+        error=half.error + second.error,
+        derived=True,
+    )
+
+
+def _drop_unbalanced_first_quarters(values, keys, calendar) -> None:
+    """
+    A first quarter `_first_quarter` derived, in a year whose four quarters do not add up to
+    the year it reports (within `FIRST_QUARTER_BALANCE`): absent. Measured over the 166 SEC
+    filers on 2026-11-19, 404 such quarters balanced and 7 did not, all but one before 2015
+    (a half-year restated beside a second quarter that was not).
+    """
+    for metric, spec in METRICS.items():
+        if spec.timing != FLOW or spec.kind == SHARES:
+            continue
+        own = values[metric]
+        for year in calendar:
+            annual = own.get((ANNUAL, year.end))
+            in_year = sorted(
+                (k[1], o)
+                for k, o in own.items()
+                if k[0] == "Q" and year.start < k[1] <= year.end
+            )
+            first = in_year[0][1] if in_year else None
+            if (
+                annual is None
+                or first is None
+                or not first.concept.endswith(FIRST_QUARTER_SUFFIX)
+                or len(in_year) != 4
+            ):
+                continue
+            total = sum(o.value for _, o in in_year)
+            if abs(total - annual.value) > max(
+                FIRST_QUARTER_BALANCE * abs(annual.value), annual.error + 1e-9
+            ):
+                del own[("Q", in_year[0][0])]
 
 
 def _canonical_ends(*by_end: Iterable[Dict[date, Obs]]) -> Dict[date, date]:
@@ -2112,6 +2220,82 @@ def _flat_rate_years(values, keys, calendar, latest, totals, mapping) -> None:
             break
 
 
+def _dividend_payments(values, keys, calendar, latest) -> None:
+    """
+    A fiscal year with no dividend per share whose 10-K tags one on each payment date
+    (instants: ACN's FY2026 10-K, 1.63 on four dates and no year; DIS's every filing, 0.75 in
+    January and July): the year is their sum, each quarter the payments dated in it (0 for a
+    quarter without one), when the year's dividends paid over its diluted shares is within
+    `PAYMENTS_TOLERANCE` of the sum — so no payment is missing — and every quarter the year
+    already holds is what its payments give. One concept's dates only: a declaration date and
+    a payment date of one dividend are not two dividends.
+    """
+    dps = values["dividends_per_share"]
+    for year in calendar:
+        key = (ANNUAL, year.end)
+        if key in dps:
+            continue
+        payments: List[Obs] = []
+        for concept in METRICS["dividends_per_share"].concepts:
+            payments = [
+                o
+                for (s, e), o in latest.get(concept, {}).items()
+                if s is None and year.start <= e <= year.end and o.value > 0
+            ]
+            if payments:
+                break
+        if not payments or not all(o.annual_form and o.filed > year.end for o in payments):
+            continue
+        total = sum(o.value for o in payments)
+        paid = values["dividends_paid"].get(key)
+        shares = values["diluted_shares"].get(key)
+        if paid is None or shares is None or shares.value <= 0 or paid.value <= 0:
+            continue
+        if abs(paid.value / shares.value / total - 1) > PAYMENTS_TOLERANCE:
+            continue
+        ends = sorted(
+            e
+            for (grain, e), label in keys.items()
+            if grain == "Q" and label[0] == year.name and year.start < e <= year.end
+        )
+        if ends and ends[-1] != year.end:
+            ends.append(year.end)
+        if len(ends) != 4:
+            continue
+        each, previous = {}, year.start - timedelta(days=1)
+        for end in ends:
+            each[end] = sum(o.value for o in payments if previous < o.end <= end)
+            previous = end
+        held = {end: dps[("Q", end)] for end in ends if ("Q", end) in dps}
+        if any(abs(o.value - each[end]) > max(o.error, 0.005) for end, o in held.items()):
+            continue
+        filed = max(o.filed for o in payments)
+        source = payments[0]
+        for i, end in enumerate(ends):
+            if end in held:
+                continue
+            keys.setdefault(("Q", end), (year.name, QUARTERS[i]))
+            dps[("Q", end)] = Obs(
+                value=each[end],
+                filed=filed,
+                start=None,
+                end=end,
+                unit=source.unit,
+                concept=f"{source.concept} on its payment dates",
+                derived=True,
+            )
+        keys.setdefault(key, (year.name, ANNUAL))
+        dps[key] = Obs(
+            value=total,
+            filed=filed,
+            start=None,
+            end=year.end,
+            unit=source.unit,
+            concept=f"{source.concept} on its payment dates",
+            derived=True,
+        )
+
+
 def _fill_rate(dps, keys, calendar, year, facts, quarters, whole_year: bool) -> None:
     """`_flat_rate_years`' writes: the rate in each quarter it is shown in, and a filed year
     that carried it as the four quarters."""
@@ -2277,8 +2461,25 @@ def normalise(
                 if end in source:
                     values[metric][key] = source[end]
                     break
+            # A first quarter derived in one concept (`_first_quarter`) yields to one a later
+            # concept of the chain reported: the derivation fills a gap, never a figure.
+            held = values[metric].get(key)
+            if held is not None and held.concept.endswith(FIRST_QUARTER_SUFFIX):
+                reported = next(
+                    (
+                        source[end]
+                        for concept in spec.concepts
+                        if (source := quarters.get(concept, {})) and end in source
+                        and not source[end].derived
+                    ),
+                    None,
+                )
+                if reported is not None:
+                    values[metric][key] = reported
 
     _flat_rate_years(values, keys, calendar, latest, totals, mapping)
+    _dividend_payments(values, keys, calendar, latest)
+    _drop_unbalanced_first_quarters(values, keys, calendar)
     _total_only_when_current(values)
     result.bridged = _bridge(values, keys, companyfacts, mapping)
     result.extended = _extend(values, keys, own_concepts, mapping, reporting)

@@ -56,6 +56,7 @@ def _no_layer_reads(monkeypatch):
     """This module's passes count every URL; the company's own concepts and segment
     columns (which the fixture's missing capex and debt would send the pass to read) are
     `test_company_extension_concepts`' and `test_company_segment_debt`'."""
+
     async def no(self, cik, facts):
         return False
 
@@ -242,7 +243,9 @@ async def test_one_request_per_company_and_rows_under_every_listing(db, configur
     nvda = await _count(db, CompanyFinancial, CompanyFinancial.cik == NVDA_CIK)
     assert nvda > 400
     # GOOG and GOOGL: one set of rows, under the company.
-    assert await _count(db, CompanyFinancial, CompanyFinancial.cik == ALPHABET_CIK) == nvda
+    assert (
+        await _count(db, CompanyFinancial, CompanyFinancial.cik == ALPHABET_CIK) == nvda
+    )
     assert await _count(db, CompanyFinancial, CompanyFinancial.cik == ASML_CIK) == 0
     assert summary["fetched"] == 2 and summary["no_data"] == 1
 
@@ -338,7 +341,9 @@ async def test_a_failing_company_keeps_its_rows_stamps_nothing_and_is_warned(
     assert all(s <= MIN_INTERVAL_S for s in sleeps if s < 1)
     assert summary["errors"] == 1
     assert any("could not be fetched" in w for w in summary["warnings"])
-    assert await _count(db, CompanyFinancial, CompanyFinancial.cik == NVDA_CIK) == before
+    assert (
+        await _count(db, CompanyFinancial, CompanyFinancial.cik == NVDA_CIK) == before
+    )
     stamps = await db.get(SecCompany, NVDA_CIK)
     assert stamps.facts_miss_count is None
 
@@ -416,7 +421,9 @@ async def test_the_industry_and_year_end_are_stored_and_asked_monthly(db, config
 
     # A month later it is.
     for row in companies.values():
-        row.submissions_checked_at = utcnow() - PROFILE_RECHECK_AFTER - timedelta(hours=1)
+        row.submissions_checked_at = (
+            utcnow() - PROFILE_RECHECK_AFTER - timedelta(hours=1)
+        )
     await db.commit()
     dry = await _sync(db, Edgar()).refresh(dry_run=True)
     assert dry["profiles_due"] == 3
@@ -499,9 +506,15 @@ async def test_the_nasdaq_100_is_fetched_from_the_stored_basket_without_a_securi
     # Nothing nobody holds enters `securities`: every Yahoo loop reads that table.
     assert await _count(db, Security) == 1
     apple = await db.get(SecCompany, APPLE_CIK)
-    assert (apple.ticker, apple.isin, apple.name) == ("AAPL", "US0378331005", "AAPL Inc")
+    assert (apple.ticker, apple.isin, apple.name) == (
+        "AAPL",
+        "US0378331005",
+        "AAPL Inc",
+    )
     assert apple.universe_seen_at is not None
-    assert (await db.get(SecCompany, NVDA_CIK)).universe_seen_at == apple.universe_seen_at
+    assert (
+        await db.get(SecCompany, NVDA_CIK)
+    ).universe_seen_at == apple.universe_seen_at
 
 
 @pytest.mark.asyncio
@@ -645,12 +658,25 @@ async def test_the_scheduled_job_without_a_user_agent_records_its_warning(
 
 # ── Filing instances: the dividend per share companyfacts leaves out ─────────
 
-INSTANCE = (Path(__file__).parent / "fixtures" / "edgar_dimensioned_dividends.xbrl").read_bytes()
-Q1_10Q, Q2_10Q, FY_10K = "0000320193-21-000010", "0000320193-21-000020", "0000320193-21-000005"
+INSTANCE = (
+    Path(__file__).parent / "fixtures" / "edgar_dimensioned_dividends.xbrl"
+).read_bytes()
+Q1_10Q, Q2_10Q, FY_10K = (
+    "0000320193-21-000010",
+    "0000320193-21-000020",
+    "0000320193-21-000005",
+)
 
 
 def _paid(start, end, val, accn, filed, form="10-Q"):
-    return {"start": start, "end": end, "val": val, "accn": accn, "filed": filed, "form": form}
+    return {
+        "start": start,
+        "end": end,
+        "val": val,
+        "accn": accn,
+        "filed": filed,
+        "form": form,
+    }
 
 
 # A company paying a dividend each quarter whose 2021 dividend per share companyfacts lacks,
@@ -663,7 +689,14 @@ DIMENSION_ONLY = {
             "PaymentsOfDividendsCommonStock": {
                 "units": {
                     "USD": [
-                        _paid("2020-01-01", "2020-12-31", 1.6e9, FY_10K, "2021-02-12", "10-K"),
+                        _paid(
+                            "2020-01-01",
+                            "2020-12-31",
+                            1.6e9,
+                            FY_10K,
+                            "2021-02-12",
+                            "10-K",
+                        ),
                         _paid("2021-01-01", "2021-03-31", 4e8, Q1_10Q, "2021-04-29"),
                         _paid("2021-01-01", "2021-06-30", 8e8, Q2_10Q, "2021-07-29"),
                         _paid("2021-04-01", "2021-06-30", 4e8, Q2_10Q, "2021-07-29"),
@@ -673,7 +706,14 @@ DIMENSION_ONLY = {
             "CommonStockDividendsPerShareDeclared": {
                 "units": {
                     "USD/shares": [
-                        _paid("2020-01-01", "2020-12-31", 1.60, FY_10K, "2021-02-12", "10-K"),
+                        _paid(
+                            "2020-01-01",
+                            "2020-12-31",
+                            1.60,
+                            FY_10K,
+                            "2021-02-12",
+                            "10-K",
+                        ),
                     ]
                 }
             },
@@ -716,9 +756,25 @@ COMPARATIVE_ONLY = {
             "PaymentsOfDividendsCommonStock": {
                 "units": {
                     "USD": [
-                        _paid("2020-01-01", "2020-12-31", 1.6e9, FY20_10K, "2021-02-12", "10-K"),
-                        _paid("2021-01-01", "2021-12-31", 1.7e9, FY21_10K, "2022-02-11", "10-K"),
-                        _paid("2020-04-01", "2020-06-30", 3.9e8, Q2_2020_10Q, "2020-07-30"),
+                        _paid(
+                            "2020-01-01",
+                            "2020-12-31",
+                            1.6e9,
+                            FY20_10K,
+                            "2021-02-12",
+                            "10-K",
+                        ),
+                        _paid(
+                            "2021-01-01",
+                            "2021-12-31",
+                            1.7e9,
+                            FY21_10K,
+                            "2022-02-11",
+                            "10-K",
+                        ),
+                        _paid(
+                            "2020-04-01", "2020-06-30", 3.9e8, Q2_2020_10Q, "2020-07-30"
+                        ),
                         _paid("2021-04-01", "2021-06-30", 4e8, Q2_10Q, "2021-07-29"),
                     ]
                 }
@@ -793,29 +849,23 @@ async def test_a_dividend_gap_reads_its_filing_once_and_fills_the_quarter(
     assert await _dps_rows(db) == {
         ("2020-06-30", "Q2"): 0.20,
         ("2020-12-31", "FY"): 1.60,
+        ("2021-03-31", "Q1"): 0.22,  # the six months less the second
         ("2021-06-30", "Q2"): 0.22,
     }
     read = (await db.execute(select(SecFilingRead))).scalar_one()
-    assert (read.accn, read.form, read.filed.isoformat()) == (Q2_10Q, "10-Q", "2021-07-29")
+    assert (read.accn, read.form, read.filed.isoformat()) == (
+        Q2_10Q,
+        "10-Q",
+        "2021-07-29",
+    )
     assert {(f["start"], f["end"], f["val"]) for f in read.facts} == {
         ("2020-04-01", "2020-06-30", 0.20),
         ("2021-01-01", "2021-06-30", 0.44),
         ("2021-04-01", "2021-06-30", 0.22),
     }
 
-    # The next pass asks for the first quarter's filing, never the second's again.
-    edgar = _filings_edgar()
-    summary = await _sync(db, edgar).refresh(force=True)
-    assert edgar.filing_urls() == [filing_url(APPLE_CIK, Q1_10Q, "index.json")]
-    assert summary["filings_read"] == 1
-    assert await _count(db, SecFilingRead) == 2
-    assert await _dps_rows(db) == {
-        ("2020-06-30", "Q2"): 0.20,
-        ("2020-12-31", "FY"): 1.60,
-        ("2021-06-30", "Q2"): 0.22,
-    }
-
-    # And then none: every gap's filing has been read.
+    # The next pass asks for no filing: the first quarter is the six months less the second
+    # (`_first_quarter`, 2026-11-19), so no gap is left — and the second's never again.
     edgar = _filings_edgar()
     summary = await _sync(db, edgar).refresh(force=True)
     assert edgar.filing_urls() == [] and summary["filings_read"] == 0
@@ -839,6 +889,7 @@ async def test_a_gap_its_own_filing_lacks_is_read_from_the_filing_a_year_later(
     ]
     assert await _dps_rows(db) == {
         ("2020-06-30", "Q2"): 0.20,  # the 2021 10-Q's comparative
+        ("2021-03-31", "Q1"): 0.22,  # the six months less the second
         ("2021-06-30", "Q2"): 0.22,  # companyfacts' own, never replaced
     }
 
@@ -846,7 +897,9 @@ async def test_a_gap_its_own_filing_lacks_is_read_from_the_filing_a_year_later(
 # BKR from 2023: net income every quarter, its diluted EPS only on the Class A, so
 # companyfacts has none. The second quarter's 10-Q was read for a dividend before the reader
 # looked for EPS.
-EPS_INSTANCE = (Path(__file__).parent / "fixtures" / "edgar_class_eps.xbrl").read_bytes()
+EPS_INSTANCE = (
+    Path(__file__).parent / "fixtures" / "edgar_class_eps.xbrl"
+).read_bytes()
 CLASS_A_EPS = {
     "cik": APPLE_CIK,
     "entityName": "Example",
@@ -885,8 +938,17 @@ def _eps_edgar():
 async def _read_before_eps(db, accn, filed, facts=()):
     """A read stored by the reader that looked for the dividend alone."""
     db.add(SecCompany(cik=APPLE_CIK, ticker="AAPL"))
-    db.add(SecFilingRead(cik=APPLE_CIK, accn=accn, form="10-Q", filed=filed,
-                         facts=list(facts), read_at=utcnow(), reader=1))
+    db.add(
+        SecFilingRead(
+            cik=APPLE_CIK,
+            accn=accn,
+            form="10-Q",
+            filed=filed,
+            facts=list(facts),
+            read_at=utcnow(),
+            reader=1,
+        )
+    )
     await db.commit()
 
 
@@ -904,13 +966,17 @@ async def test_an_eps_gap_reads_a_filing_read_before_eps_once_more(db, configure
         filing_url(APPLE_CIK, Q1_10Q, "index.json"),  # 404: holds nothing
     ]
     eps = (
-        await db.execute(
-            select(CompanyFinancial).where(
-                CompanyFinancial.cik == APPLE_CIK,
-                CompanyFinancial.metric == "eps_diluted",
+        (
+            await db.execute(
+                select(CompanyFinancial).where(
+                    CompanyFinancial.cik == APPLE_CIK,
+                    CompanyFinancial.metric == "eps_diluted",
+                )
             )
         )
-    ).scalars().all()
+        .scalars()
+        .all()
+    )
     # The second quarter's from the Class A; the first stays absent (six months less the
     # second quarter is not derived).
     assert {(r.period_end.isoformat(), r.value) for r in eps} == {("2021-06-30", 0.41)}
@@ -920,7 +986,9 @@ async def test_an_eps_gap_reads_a_filing_read_before_eps_once_more(db, configure
         Q2_10Q: READER,
     }
     assert {f["concept"] for f in reads[Q2_10Q].facts} == {
-        "EarningsPerShareDiluted", "CommonStockDividendsPerShareDeclared"}
+        "EarningsPerShareDiluted",
+        "CommonStockDividendsPerShareDeclared",
+    }
 
     # Never again: the first quarter's filing held nothing, the second's was read for EPS.
     edgar = _eps_edgar()
@@ -952,7 +1020,9 @@ async def test_the_pass_names_a_broken_ttm_and_stale_figures_and_warns_once(
     has recorded it."""
     await _hold(db, 1, "AAPL")
     await db.commit()
-    summary = await _sync(db, EdgarWithFilings({APPLE_CIK: DIMENSION_ONLY}, {})).refresh()
+    summary = await _sync(
+        db, EdgarWithFilings({APPLE_CIK: DIMENSION_ONLY}, {})
+    ).refresh()
     assert summary["ttm_dividend_gaps"] == ["AAPL"]
     assert summary["stale_figures"] == ["AAPL"]
     assert any("No TTM dividend per share for AAPL" in w for w in summary["warnings"])
@@ -973,15 +1043,17 @@ async def test_the_pass_names_a_broken_ttm_and_stale_figures_and_warns_once(
         )
     )
     await db.commit()
-    summary = await _sync(db, EdgarWithFilings({APPLE_CIK: DIMENSION_ONLY}, {})).refresh(
-        force=True
-    )
+    summary = await _sync(
+        db, EdgarWithFilings({APPLE_CIK: DIMENSION_ONLY}, {})
+    ).refresh(force=True)
     assert summary["ttm_dividend_gaps"] == ["AAPL"]  # still listed in the record
     assert not [w for w in summary.get("warnings", []) if "AAPL" in w]
 
 
 @pytest.mark.asyncio
-async def test_a_company_the_weekday_check_fetched_stays_in_sundays_lists(db, configured):
+async def test_a_company_the_weekday_check_fetched_stays_in_sundays_lists(
+    db, configured
+):
     """
     CO2/DR3: the weekday check fetches a company midweek (its `_one` stamps `fetched_at`),
     so Sunday's pass finds it not due. Its lists still name it — they read the stored rows
@@ -997,7 +1069,9 @@ async def test_a_company_the_weekday_check_fetched_stays_in_sundays_lists(db, co
     company = await db.get(SecCompany, APPLE_CIK)
     company.fetched_at = utcnow() - timedelta(days=2)  # the weekday check's `_one`
     await db.commit()
-    sunday = await _sync(db, EdgarWithFilings({APPLE_CIK: DIMENSION_ONLY}, {})).refresh()
+    sunday = await _sync(
+        db, EdgarWithFilings({APPLE_CIK: DIMENSION_ONLY}, {})
+    ).refresh()
     assert sunday["companies_due"] == 0
     assert sunday["ttm_dividend_gaps"] == ["AAPL"]
     assert sunday["stale_figures"] == ["AAPL"]
@@ -1048,4 +1122,4 @@ async def test_a_refused_filing_read_stops_the_pass_after_writing_the_figures(
     # The filing list asked before it is the skipped-filing check: the fixture is stale.
     urls = edgar.urls()
     refused_at = urls.index(filing_url(APPLE_CIK, Q2_10Q, "index.json"))
-    assert not [u for u in urls[refused_at + 1:] if "/submissions/" in u]
+    assert not [u for u in urls[refused_at + 1 :] if "/submissions/" in u]
