@@ -217,7 +217,12 @@ METRICS: Dict[str, MetricSpec] = {
             "ShortTermInvestments",
             "MarketableSecuritiesCurrent",
             "AvailableForSaleSecuritiesDebtSecuritiesCurrent",
+            # Its successor in the taxonomy (2020 on): ZS's 2.5B of short-term investments
+            # moved to it in 2022, DXCM's, IBM's and INTU's sit only in it (2026-11-19).
+            "DebtSecuritiesAvailableForSaleExcludingAccruedInterestCurrent",
             "AvailableForSaleSecuritiesCurrent",
+            # UNP's balance-sheet "Short-term investments" (875M beside 2.2B of cash, Q3 2026).
+            "HeldToMaturitySecuritiesCurrent",
             # The total of the available-for-sale debt securities, current or not: KLAC's
             # balance-sheet "Marketable securities" (3.2B beside 1.5B of cash, read on the
             # server 2026-11-08, review item CO8). Counted only for a period with nothing
@@ -401,10 +406,11 @@ REGULATOR_INTERIM = "interim report"
 FORMS = PERIODIC_FORMS | {REGULATOR_ANNUAL, REGULATOR_INTERIM}
 # A concept named like a current investment (`_unchained_investments`): marketable or
 # held-to-maturity securities, available-for-sale or debt securities, or investments,
-# classified current. Restricted balances are not liquid.
+# classified current. Restricted balances are not liquid, and the interest accrued on the
+# securities is a receivable, not an investment (GE's 500M beside its insurance portfolio).
 INVESTMENT_LIKE = re.compile(
-    r"^(?!Restricted)\w*(MarketableSecurities|Investments|AvailableForSale|HeldToMaturity"
-    r"|DebtSecurities)\w*Current$"
+    r"^(?!Restricted)(?!\w*(?<!Excluding)AccruedInterest)\w*(MarketableSecurities"
+    r"|Investments|AvailableForSale|HeldToMaturity|DebtSecurities)\w*Current$"
 )
 
 # 12 to 14 weeks, or a retailer's 16- and 17-week fourth quarter: COST's 112 days had no Q4

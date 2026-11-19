@@ -272,7 +272,7 @@ the SEC lists no such ticker" needs a row of its own, with its own stamp (the `I
 | dividends per share | `CommonStockDividendsPerShareDeclared` → `CommonStockDividendsPerShareCashPaid` |
 | cash | `CashAndCashEquivalentsAtCarryingValue` → `CashCashEquivalentsRestrictedCashAndRestrictedCashEquivalents` → `…AtCarryingValueIncludingDiscontinuedOperations` (MDLZ 2016–2018) |
 | cash and short-term investments | `CashCashEquivalentsAndShortTermInvestments` (MSFT, GOOGL, ADBE) |
-| short-term investments | `ShortTermInvestments` → `MarketableSecuritiesCurrent` → `AvailableForSaleSecuritiesDebtSecuritiesCurrent` → `AvailableForSaleSecuritiesCurrent` |
+| short-term investments | `ShortTermInvestments` → `MarketableSecuritiesCurrent` → `AvailableForSaleSecuritiesDebtSecuritiesCurrent` → `DebtSecuritiesAvailableForSaleExcludingAccruedInterestCurrent` → `AvailableForSaleSecuritiesCurrent` → `HeldToMaturitySecuritiesCurrent` → the AFS total (below) |
 | gross profit | `GrossProfit` |
 | cost of revenue | `CostOfRevenue` → `CostOfGoodsAndServicesSold` → `CostOfGoodsSold` |
 | buybacks | `PaymentsForRepurchaseOfCommonStock` |
@@ -328,6 +328,14 @@ derived inside one concept before the chains merge (one exception, Q4 below).
   for a period with no non-current investments tagged beside it (`_total_only_when_current`, which
   reads `noncurrent_investments` for that test alone and never stores it): a total with nothing
   non-current beside it is all current, while beside one it would count long-dated securities as liquid.
+  **Whitelisted 2026-11-19** from the warning over the 166 SEC filers:
+  `DebtSecuritiesAvailableForSaleExcludingAccruedInterestCurrent`, the 2020 successor of the
+  available-for-sale current line (ZS's 2.5B moved to it in 2022; DXCM, IBM and INTU), and
+  `HeldToMaturitySecuritiesCurrent` (UNP's "Short-term investments", 875M beside 2.2B of cash).
+  126 rows added at six companies, none moved. GE's was a false alarm: the interest accrued on its
+  insurance portfolio's securities (`…AccruedInterestAfterAllowanceForCreditLossCurrent`) is a
+  receivable, and `INVESTMENT_LIKE` no longer matches accrued interest (unless "Excluding" it). GE's
+  36B of `LongTermInvestments` back its run-off insurance liabilities and are no cash.
 - **The chains were widened from a measurement, not a guess** (2026-11-15, after the owner
   reported figures missing on the Company tab). Every quarter of the last ten years that a served
   figure lacked, across the 132 companies on production, was matched against the concepts the

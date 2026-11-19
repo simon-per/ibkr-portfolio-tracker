@@ -153,3 +153,34 @@ async def test_the_pass_records_what_a_proven_concept_filled(db, configured):  #
     bridged = summary["bridged"]
     assert len(bridged) == 1 and bridged[0].startswith("NVDA revenue <- SalesRevenueGoodsNet (")
     assert not any("SalesRevenueGoodsNet" in w for w in summary.get("warnings", []))
+
+
+@pytest.mark.parametrize(
+    "concept",
+    [
+        # DXCM, ZS, IBM, INTU: the 2020 successor of the available-for-sale current line.
+        "DebtSecuritiesAvailableForSaleExcludingAccruedInterestCurrent",
+        # UNP's balance-sheet "Short-term investments".
+        "HeldToMaturitySecuritiesCurrent",
+    ],
+)
+def test_the_chain_reads_the_investments_these_filers_tag(concept):
+    """Named by the warning on production (2026-11-19) and read in the filings: each holds
+    the balance sheet's current investments, so net cash counts them."""
+    result = normalise(facts({
+        concept: {"units": {"USD": [f("2026-06-30", 2.5e9, "k26", "2026-08-01")]}},
+    }))
+    assert _investments(result) == {"2026-06-30": 2.5e9}
+    assert result.unchained_investments == []
+
+
+def test_interest_accrued_on_the_securities_is_no_investment():
+    """GE tags the interest accrued on its insurance portfolio's securities as a current
+    asset: a receivable, so neither read nor named."""
+    result = normalise(facts({
+        "DebtSecuritiesAvailableForSaleAccruedInterestAfterAllowanceForCreditLossCurrent": {
+            "units": {"USD": [f("2026-06-30", 0.5e9, "k26", "2026-08-01")]}
+        },
+    }))
+    assert _investments(result) == {}
+    assert result.unchained_investments == []
