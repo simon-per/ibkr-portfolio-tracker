@@ -15,8 +15,9 @@ successor (`NEXT_DUE_AFTER` past its end), at most every `LIST_RECHECK_AFTER`. A
 index holds no filing for backs off by the shared miss back-off (`miss_backoff`), and is not
 listed on the tab until it has one (`universe_seen_at`). A filing with no xBRL-JSON (the
 index failed to process it) is skipped and counted, asked again with the list; one larger
-than the client reads (`esef_client.TooLarge`) is stamped `skipped`, never asked again, and
-named in a warning.
+than the client reads (`esef_client.TooLarge`) is stamped `skipped` with the cap it was
+refused at, named in a warning, and asked again only once the cap is larger
+(`retry_larger`: Santander's FY2022 and FY2024, refused at 60 MB, read at 150 MB).
 
 **Bounded**: `FILINGS_PER_COMPANY` reads a company a pass, `PASS_REQUEST_CAP` requests a pass.
 No key; touches neither Yahoo nor IBKR nor EDGAR.
@@ -37,6 +38,7 @@ from app.repositories.company_financials_repository import (
     facts_backoff_until,
 )
 from app.services.company_markets import NamedCompany, named_companies, sec_isins
+from app.services import esef_client
 from app.services.esef_client import EsefClient, EsefError, Filing, TooLarge
 from app.services.esef_reports import convert
 from app.services.region_taxonomy import EUROPE, region_of_isin
@@ -64,6 +66,20 @@ READ = "read"
 #: A filing never read (over the client's size cap): stamped so it is not asked again.
 SKIPPED = "skipped"
 DONE = (READ, SKIPPED)
+#: Where a `skipped` report records the cap it was refused at.
+REFUSED_OVER = "refused_over"
+
+
+def retry_larger(report) -> bool:
+    """A report skipped as too large under a smaller cap than today's: read it once more."""
+    if report.status != SKIPPED:
+        return False
+    return int((report.tagged or {}).get(REFUSED_OVER) or 0) < esef_client.MAX_REPORT_BYTES
+
+
+def handled(report) -> bool:
+    """Read, or skipped at today's cap: never asked again."""
+    return report is not None and report.status in DONE and not retry_larger(report)
 
 
 def is_european(isin: str) -> bool:
@@ -193,6 +209,10 @@ class EuropeFinancialsSync:
             and facts_backoff_until(company) > now
         ):
             return False
+        if any(retry_larger(r) for r in reports.values()):
+            # A filing refused under a smaller cap: the cap grew, read it (once: refused
+            # again, it records today's cap).
+            return True
         checked = company.profile_checked_at
         if checked is None:
             # Never a list handled to its end (a pass stopped part-way): ask it again.
@@ -239,8 +259,7 @@ class EuropeFinancialsSync:
                 await self.db.commit()
                 asked = 0
                 for end, filing in sorted(filings.items(), reverse=True):
-                    stamp = reports.get(filing.fxo_id)
-                    if stamp is not None and stamp.status in DONE:
+                    if handled(reports.get(filing.fxo_id)):
                         continue
                     if filing.json_url is None:
                         summary["filings_unprocessed"] += 1
@@ -262,6 +281,7 @@ class EuropeFinancialsSync:
                             period_end=end,
                             accn=filing.fxo_id,
                             filed=filing.added,
+                            tagged={REFUSED_OVER: str(esef_client.MAX_REPORT_BYTES)},
                         )
                         await self.db.commit()
                         summary["too_large"].append(filing.fxo_id)

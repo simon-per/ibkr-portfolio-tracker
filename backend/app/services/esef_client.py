@@ -35,7 +35,11 @@ MIN_INTERVAL_S = 1.0
 RETRY_DELAYS_S = (5.0, 30.0)
 PAGE_SIZE = 100
 MAX_PAGES = 5
-MAX_REPORT_BYTES = 60_000_000
+# Santander's reports run 57-71 MB, mostly text blocks (1,953 facts in its 70.6 MB FY2022):
+# parsed, 133 MB held and 206 MB at the peak beside the raw bytes (measured 2026-11-19), on
+# a VPS with 6 GB free. A filing refused at a smaller cap is read once more at this one
+# (`esef_sync.retry_larger`).
+MAX_REPORT_BYTES = 150_000_000
 #: A filings page (about 1 kB a filing).
 MAX_LIST_BYTES = 5_000_000
 USER_AGENT = (

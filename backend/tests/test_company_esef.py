@@ -411,16 +411,33 @@ async def test_a_filing_too_large_to_read_is_skipped_once_and_named(
     summary = await sync.refresh()
     assert len(summary["too_large"]) == 2 and summary["errors"] == 0
     assert sum("larger than the reader takes" in w for w in summary["warnings"]) == 2
-    statuses = {r.status for r in (await db.execute(CompanyReport.__table__.select())).all()}
+    statuses = {
+        r.status for r in (await db.execute(CompanyReport.__table__.select())).all()
+    }
     assert statuses == {"skipped"}
 
     fake.requests.clear()
     summary = await sync.refresh()
     assert fake.requests == [] and summary["too_large"] == []
 
+    # The cap grew (Santander's 60 MB to 150 MB): each skipped filing is read once more, the
+    # list asked again for it although it is not due.
+    monkeypatch.setattr(esef_client, "MAX_REPORT_BYTES", 10_000_000)
+    summary = await sync.refresh()
+    assert summary["filings_read"] == 2 and summary["too_large"] == []
+    statuses = {
+        r.status for r in (await db.execute(CompanyReport.__table__.select())).all()
+    }
+    assert statuses == {"read"}
+    fake.requests.clear()
+    await sync.refresh()
+    assert fake.requests == []
+
 
 @pytest.mark.asyncio
-async def test_a_pass_stopped_part_way_asks_the_list_again_and_reads_the_rest(db, dated):
+async def test_a_pass_stopped_part_way_asks_the_list_again_and_reads_the_rest(
+    db, dated
+):
     await _hold(db, 1, "SU", ISIN, LEI)
 
     class Flaky(Index):
@@ -442,7 +459,9 @@ async def test_a_pass_stopped_part_way_asks_the_list_again_and_reads_the_rest(db
     assert summary["errors"] == 0 and summary["filings_read"] == 1
     assert "/se/2024.json" not in fake.requests  # read once
     svc = CompanyFinancialsService(db)
-    page = await svc.get_financials(await svc.company_by_key(f"lei:{LEI}"), "annual", "max")
+    page = await svc.get_financials(
+        await svc.company_by_key(f"lei:{LEI}"), "annual", "max"
+    )
     labels = {p["label"] for p in page["series"]["revenue"]["points"]}
     assert {"FY2022", "FY2023", "FY2024"} <= labels
 

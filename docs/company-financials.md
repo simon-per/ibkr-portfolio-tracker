@@ -1385,8 +1385,12 @@ opens in 2027.
   asked until one pass has handled every filing in it, then again once the newest year's successor
   is due (`NEXT_DUE_AFTER`, a year and 90 days past its end), at most weekly. A filing the index
   failed to process (no xBRL-JSON) is counted and asked with the list; one larger than
-  `MAX_REPORT_BYTES` (60 MB — Santander's 2022 and 2024 reports are larger) is stamped `skipped`, never asked
-  again, and named in a warning.
+  `MAX_REPORT_BYTES` is stamped `skipped` with the cap it was refused at and named in a warning, and
+  asked again only once the cap is larger (`retry_larger`, which makes the list due). The cap was
+  60 MB until 2026-11-19 and refused Santander's FY2022 (70.6 MB) and FY2024 (60.04 MB); it is 150 MB
+  since: Santander's 70.6 MB holds 1,953 facts, mostly text blocks, and parses to 133 MB held, 206 MB
+  at the peak, beside the raw bytes, on a VPS with 6 GB free. Its FY2024 reads €12,574M of profit to
+  owners and a diluted EPS of 0.768, as reported.
 - **Facts** (`esef_reports.convert`): **undimensioned only**, as companyfacts — any dimension beyond
   concept, entity, period and unit (a segment, an equity component) is not read; the company's own
   LEI's facts only; `ifrs-full` concepts the normaliser reads, in a unit their kind agrees with
