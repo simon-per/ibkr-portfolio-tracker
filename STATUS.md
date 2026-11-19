@@ -7,7 +7,7 @@
 > [docs/troubleshooting.md](docs/troubleshooting.md); local-dev traps in
 > [docs/local-development.md](docs/local-development.md).
 
-**Last updated: 2026-11-18.** The **Company tab** (one company's SEC EDGAR fundamentals history,
+**Last updated: 2026-11-19.** The **Company tab** (one company's SEC EDGAR fundamentals history,
 docs/company-financials.md) is deployed and filled for the held filers **and the Nasdaq-100**
 (102 companies with figures, keyed by CIK), with key figures, valuation multiples (weekly Yahoo closes), ROE and net cash, gross margin, operating income,
 buybacks & dividends, cash & debt and 3/5/10Y CAGRs (docs/shipped-log.md 2026-10-25). PR #80 (Swiss residency)
@@ -105,6 +105,20 @@ code trace; all of them shipped that evening (waves 1–3, the product issues #7
 
 Only what is still unverified.
 
+- **Closing the Company tab's gaps (2026-11-19, branch `close-gaps`):** migration `f7a9c1e3b5d8`
+  (`constituent_prices`, empty on arrival). **The 18:00 basket refresh** after the deploy: its
+  result carries `constituent_prices` for IWDA (`verified` true, `matches` well over 5, a
+  `median_ratio` near 1, `recorded` about 11) and no "basket prices kept for no company" warning;
+  then the European pages (`lei:` keys) show a price line, P/E and the multiples their figures
+  allow, Samsung's and SK Hynix's from the held listings' closes. **The Sunday 2026-11-22 05:00
+  passes:** the EDGAR pass rewrites every SEC company with the new dividend rules (CAT's, ACN's
+  and DIS's trailing dividend per share and yield appear; CAT's quarters read 0 in Q1 and Q3), the
+  short-term investments of UNP, ZS, DXCM, IBM and INTU (net cash moves for them) and no
+  "Short-term investments outside the concept chain" warning; CDNS's 10-Qs read for its quarterly
+  debt (about 24 reads that pass, the rest the next); the ESEF pass reads Santander's FY2022 and
+  FY2024 (no `too_large`). Germany and Switzerland stay without pages (owner, 2026-11-19: no paid
+  vendor).
+
 - **The Company tab beyond today's SEC scope, steps 0+1 (deployed 2026-11-17 as `81b081b`):**
   migrations `c4e6a8b0d2f4` (`companies`, `company_financials.company_id`; tested up/down/up on a
   production snapshot) and `d5f7b9c1e3a6` (`sec_tickers.title`, `annual_form`). Right after the
@@ -133,8 +147,9 @@ Only what is still unverified.
   companies with filings, about 51 reports and 74 requests, two `too_large` warnings (Santander's
   FY2022 and FY2024). Then `/api/company-financials/companies` lists `dart:00126380`,
   `dart:00164779` (Samsung's two held listings and SK Hynix's open their pages) and eleven `lei:`
-  companies, each page in KRW/EUR/USD/GBP with P/E, market cap and multiples blank and no Yahoo
-  request for any of them (`company_prices_refresh` asks no more than step 1 added). To fill
+  companies, each page in KRW/EUR/USD/GBP and no Yahoo request for any of them
+  (`company_prices_refresh` asks no more than step 1 added; their prices are the held listings'
+  and the baskets', above). To fill
   sooner: `fetch_company_markets --source dart` / `--source esef` (never `fetch_company_financials
   --force`).
 
@@ -577,16 +592,17 @@ Rough priority. Re-verify each `path:line` in code before fixing; lines move.
    held foreign listing linked through the identity store); **(2) South Korea** via OpenDART —
    built 2026-11-17 (Samsung, SK Hynix); **(3) Europe** via ESEF (filings.xbrl.org, by LEI) —
    built 2026-11-17 (11 of 21 with an LEI; German and Swiss issuers stay blank: the index holds
-   none, and no free regulator API serves them — a paid fill-only vendor such as EODHD would be the
-   owner's call); next **Japan (EDINET)**, **Taiwan (MOPS)**,
+   none, no free regulator API serves them, and the owner declined a paid vendor such as EODHD on
+   2026-11-19 — a private app); next **Japan (EDINET)**, **Taiwan (MOPS)**,
    **the rest** (China A/H, India, the Middle East — no usable free structured source, their US ADR
    filers only). Korean and European companies get no Yahoo request: their price-based multiples
    stay blank. The US classification shipped 2026-11-16; the insurer set waits for an insurer that
-   tags its premiums undimensioned (BRK does not). Sources and caveats per market:
+   tags its premiums undimensioned (BRK does not). Korean and European multiples come from prices
+   the app already holds (2026-11-19, *Prices without Yahoo*). Sources and caveats per market:
    docs/company-financials.md, *Markets beyond the SEC*.
-7a. **The Company tab after the waterfall** (2026-11-16): read a quarter's own 10-Q for the
-    company's own debt concepts (years only today, so CDNS's quarters stay without debt), and
-    PCAR's quarters (its 10-Qs state no segment total in a concept `SEGMENT_DEBT` reads); and whatever the first
+7a. **The Company tab after the waterfall** (2026-11-16): PCAR's quarterly debt (its 10-Qs state
+    no segment total in a concept `SEGMENT_DEBT` reads; CDNS's quarters are asked of its 10-Qs
+    since 2026-11-19); and whatever the first
     `company_vendor_fill` runs leave in `unproven` (docs/company-financials.md, *Known gaps*).
 9. **Dividends: a forecast check** (owner asked 2026-11-08 what is best; proposal given, not
     built): log each projected payment as it stood ~30 days before its pay date and score it
@@ -602,6 +618,13 @@ Rough priority. Re-verify each `path:line` in code before fixing; lines move.
 ## Recent sessions (last 5)
 
 One line each, newest first; drop the oldest.
+
+- **2026-11-19 (closing the Company tab's gaps)** — the SEC widening backfilled by hand; then
+  Korean and European multiples from prices already held (held listings, iShares rows with a
+  checked fund currency), three dividend rules measured over the 166 filers' companyfacts (an
+  untagged first quarter, a declared-basis year in progress, payment dates vouched by dividends
+  paid), five filers' short-term investments, Santander's oversized reports, CDNS's quarterly debt.
+  Germany/Switzerland: no paid vendor (owner).
 
 - **2026-11-17 (the Company tab beyond the SEC, /goal run)** — four commits: one company key for
   every regulator (`companies`, `sec:`/`dart:`/`lei:`), the SEC widening (top 200, Irish 10-K
@@ -626,7 +649,3 @@ One line each, newest first; drop the oldest.
   switchable base; the daily FX job's hard-coded `("CHF", "USD")` became `eur_to_base_pairs()`,
   and the job now backfills every base's EUR→base history to the first lot (`ensure_base_history`).
   The owner kept the benchmark's baseline FX gap (*Worth doing next* #5) out of scope.
-
-- **2026-11-11 (EPS-gap fill)** — a forced EDGAR fetch failed on a ticker named twice (two
-  INSERTs; fixed, `496fbec`), then read the EPS-gap filings; AEP's and EXC's Q2 2026 10-Qs,
-  missing from companyfacts, read by hand. SEC stays the only source.
