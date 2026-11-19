@@ -89,6 +89,9 @@ NONCURRENT_INVESTMENTS = "noncurrent_investments"
 # The basic count, read only to stand in for the diluted one in a loss period
 # (`_basic_in_a_loss`); never stored as a figure.
 BASIC_SHARES = "basic_shares"
+# Profit from discontinued operations, read only to tell whether a period's continuing EPS
+# is its EPS (`_continuing_eps_alone`); never stored as a figure.
+DISCONTINUED = "discontinued_income"
 
 # Verified across the book's SEC filers (2026-10-25). Order is preference.
 #
@@ -208,6 +211,9 @@ METRICS: Dict[str, MetricSpec] = {
             "CashCashEquivalentsRestrictedCashAndRestrictedCashEquivalents",
             # The balance sheet's cash while a business was held for sale (MDLZ 2016-2018).
             "CashAndCashEquivalentsAtCarryingValueIncludingDiscontinuedOperations",
+            # The cash-flow statement's total where the balance sheet splits cash by segment
+            # (PCAR since 2019: truck and financial services; 2026-11-19). Last.
+            "CashCashEquivalentsRestrictedCashAndRestrictedCashEquivalentsIncludingDisposalGroupAndDiscontinuedOperations",
         ),
     ),
     # Cash and short-term investments as one line (MSFT, GOOGL, ADBE), and the investments
@@ -234,6 +240,15 @@ METRICS: Dict[str, MetricSpec] = {
             # server 2026-11-08, review item CO8). Counted only for a period with nothing
             # non-current tagged beside it (`NONCURRENT_INVESTMENTS`, `_total_only_when_current`).
             AFS_TOTAL,
+        ),
+    ),
+    # Only read to tell whether continuing EPS is the EPS (`_continuing_eps_alone`).
+    DISCONTINUED: MetricSpec(
+        MONETARY,
+        FLOW,
+        (
+            "IncomeLossFromDiscontinuedOperationsNetOfTax",
+            "IncomeLossFromDiscontinuedOperationsNetOfTaxAttributableToReportingEntity",
         ),
     ),
     # Only read where the diluted count is missing in a loss period; never stored.
@@ -620,10 +635,23 @@ IFRS_TWINS: Dict[str, str] = {
     "ProfitLossAttributableToOwnersOfParent": "NetIncomeLoss",
     "ProfitLoss": "ProfitLoss",
     "DilutedEarningsLossPerShare": "EarningsPerShareDiluted",
+    # One figure for both (2026-11-19, ESEF), and the continuing figure, which is the EPS only
+    # in a period without discontinued operations (`_continuing_eps_alone`: Shell's is its
+    # EPS, Iberdrola's 2025 0.843 beside 0.054 discontinued is not).
+    "BasicAndDilutedEarningsLossPerShare": "EarningsPerShareBasicAndDiluted",
+    "DilutedEarningsLossPerShareFromContinuingOperations": CONTINUING_EPS,
+    "ProfitLossFromDiscontinuedOperations": "IncomeLossFromDiscontinuedOperationsNetOfTax",
     "ProfitLossFromOperatingActivities": "OperatingIncomeLoss",
     "GrossProfit": "GrossProfit",
     "CostOfSales": "CostOfRevenue",
     "CashFlowsFromUsedInOperatingActivities": "NetCashProvidedByUsedInOperatingActivities",
+    # National Grid tags only its continuing operations' (2026-11-19), as us-gaap's chain
+    # already reads one.
+    "CashFlowsFromUsedInOperatingActivitiesContinuingOperations": (
+        "NetCashProvidedByUsedInOperatingActivitiesContinuingOperations"
+    ),
+    # A bank's net interest income (HSBC, Santander: an IFRS bank tags no revenue total).
+    "InterestRevenueExpense": "InterestIncomeExpenseNet",
     "PurchaseOfPropertyPlantAndEquipmentClassifiedAsInvestingActivities": (
         "PaymentsToAcquirePropertyPlantAndEquipment"
     ),
@@ -1389,6 +1417,22 @@ def _basic_in_a_loss(values: Dict[str, Dict[Tuple[str, date], Obs]]) -> None:
             diluted[key] = obs
 
 
+def _continuing_eps_alone(values: Dict[str, Dict[Tuple[str, date], Obs]]) -> None:
+    """
+    Continuing operations' EPS stands for the EPS (`CONTINUING_EPS`, last in its chain) only
+    in a period with no profit from discontinued operations tagged: there it is the EPS
+    (ABNB, Shell); beside a discontinued profit it leaves that profit out (Iberdrola's 2025:
+    0.843 continuing, 0.054 discontinued) and stays absent. The discontinued figures are
+    dropped here, read for this test alone (2026-11-19).
+    """
+    discontinued = values.pop(DISCONTINUED, {})
+    eps = values.get("eps_diluted", {})
+    for key, obs in list(eps.items()):
+        other = discontinued.get(key)
+        if obs.concept == CONTINUING_EPS and other is not None and other.value:
+            del eps[key]
+
+
 def _total_only_when_current(values: Dict[str, Dict[Tuple[str, date], Obs]]) -> None:
     """
     `AFS_TOTAL` stands for the short-term investments only where the company tagged no
@@ -1500,6 +1544,10 @@ INTEREST_SHARE = 0.002
 # Interest for a period ending this close to a balance-sheet date speaks for it: a 10-Q's
 # quarter, or the year a 10-K reports (PCAR states interest paid only annually).
 INTEREST_WINDOW_DAYS = 200
+# For a company that states interest only for whole years (PCAR), a year's interest speaks
+# until the next 10-K is due: its PCAR Q3 2026 read debt-free 273 days after FY2025, beside
+# its finance arm's borrowings (2026-11-19).
+YEARLY_INTEREST_WINDOW_DAYS = 365 + 120
 DEBT_GAP_DAYS = 400
 #: The source recorded for both halves of a debt-free balance sheet (`_no_debt_at_all`).
 NO_DEBT_LINE = "no debt on the balance sheet"
@@ -1567,6 +1615,7 @@ def _no_debt_at_all(
                 size[(row.get("accn"), mapping.get(end, end))] = float(row["val"])
     # Interest paid in any filing, annualised, by period end.
     interest: List[Tuple[date, float]] = []
+    spans: List[int] = []
     for concept, body in gaap.items():
         if not INTEREST.search(concept) or NOT_INTEREST.search(concept):
             continue
@@ -1580,6 +1629,7 @@ def _no_debt_at_all(
                 if _days(start, end) < QUARTER_DAYS[0]:
                     continue
                 interest.append((end, abs(float(val)) * 365 / _days(start, end)))
+                spans.append(_days(start, end))
     by_date = {at: total for (_, at), total in size.items()}
     material = [
         end for end, paid in interest
@@ -1598,18 +1648,23 @@ def _no_debt_at_all(
     # nothing nearer says it borrows. After it (VRTX repaid its notes by 2014) the
     # balance sheet speaks for itself again.
     blind_until = max(material) if material and not ever_debt else None
+    window = (
+        YEARLY_INTEREST_WINDOW_DAYS
+        if spans and all(_between(days, YEAR_DAYS) for days in spans)
+        else INTEREST_WINDOW_DAYS
+    )
     zeros: Dict[Tuple[str, date], Obs] = {}
     for key, cash in values["cash"].items():
         filing = newest.get(key[1])
         if filing is None or (filing[1], key[1]) in shown:
             continue
-        if blind_until is not None and key[1] <= blind_until + timedelta(days=INTEREST_WINDOW_DAYS):
+        if blind_until is not None and key[1] <= blind_until + timedelta(days=window):
             continue
         where = (filing[1], key[1])
         total = size.get(where)
         if total is None or any(
             paid > INTEREST_SHARE * total
-            for end, paid in interest if abs((end - key[1]).days) <= INTEREST_WINDOW_DAYS
+            for end, paid in interest if abs((end - key[1]).days) <= window
         ):
             continue
         if any(key in values[m] for m in halves):
@@ -2512,6 +2567,7 @@ def normalise(
     _dividend_payments(values, keys, calendar, latest)
     _drop_unbalanced_first_quarters(values, keys, calendar)
     _total_only_when_current(values)
+    _continuing_eps_alone(values)
     result.bridged = _bridge(values, keys, companyfacts, mapping)
     result.extended = _extend(values, keys, own_concepts, mapping, reporting)
     result.segments = _segments(values, keys, segment_facts, mapping, reporting)

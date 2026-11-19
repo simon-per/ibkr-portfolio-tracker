@@ -322,3 +322,50 @@ def test_one_set_of_periodic_forms():
                 if {"10-Q", "10-K"} <= values:
                     owners.append(f"{path.relative_to(app_dir).as_posix()}:{node.lineno}")
     assert owners == [owners[0]] and owners[0].startswith("services/edgar_client.py"), owners
+
+
+def _classes_instance(listed):
+    """Diluted EPS on Class A (2.69) and Class B (4.31) for one quarter; the cover page names a
+    trading symbol on each class in `listed`."""
+    members = {"A": "us-gaap:CommonClassAMember", "B": "us-gaap:CommonClassBMember"}
+
+    def ctx(cid, member, period):
+        dims = (
+            "<xbrli:segment><xbrldi:explicitMember dimension=\"us-gaap:StatementClassOfStockAxis\">"
+            f"{member}</xbrldi:explicitMember></xbrli:segment>"
+            if member
+            else ""
+        )
+        return (
+            f'<xbrli:context id="{cid}"><xbrli:entity><xbrli:identifier scheme="x">1</xbrli:identifier>'
+            f"{dims}</xbrli:entity><xbrli:period>{period}</xbrli:period></xbrli:context>"
+        )
+
+    q = "<xbrli:startDate>2025-04-01</xbrli:startDate><xbrli:endDate>2025-06-30</xbrli:endDate>"
+    body = [
+        ctx("qa", members["A"], q),
+        ctx("qb", members["B"], q),
+        '<xbrli:unit id="ps"><xbrli:divide><xbrli:unitNumerator><xbrli:measure>iso4217:USD</xbrli:measure>'
+        "</xbrli:unitNumerator><xbrli:unitDenominator><xbrli:measure>xbrli:shares</xbrli:measure>"
+        "</xbrli:unitDenominator></xbrli:divide></xbrli:unit>",
+        '<us-gaap:EarningsPerShareDiluted contextRef="qa" unitRef="ps" decimals="2">2.69</us-gaap:EarningsPerShareDiluted>',
+        '<us-gaap:EarningsPerShareDiluted contextRef="qb" unitRef="ps" decimals="2">4.31</us-gaap:EarningsPerShareDiluted>',
+    ]
+    for i, cls in enumerate(listed):
+        body.insert(0, ctx(f"s{i}", members[cls], q))
+        body.append(f'<dei:TradingSymbol contextRef="s{i}">{cls}SYM</dei:TradingSymbol>')
+    return (
+        '<?xml version="1.0"?><xbrli:xbrl xmlns:xbrli="http://www.xbrl.org/2003/instance" '
+        'xmlns:xbrldi="http://xbrl.org/2006/xbrldi" xmlns:iso4217="http://www.xbrl.org/2003/iso4217" '
+        'xmlns:us-gaap="http://fasb.org/us-gaap/2025" xmlns:dei="http://xbrl.sec.gov/dei/2025">'
+        + "".join(body)
+        + "</xbrli:xbrl>"
+    ).encode()
+
+
+def test_the_one_listed_class_gives_the_eps_where_classes_differ():
+    """Visa (2026-11-19): its Class A alone has a trading symbol, so its EPS is the one every
+    price is of. Berkshire lists both classes: no one EPS. No class listed: none either."""
+    assert parse_instance(_classes_instance(["A"])) == [_eps("2025-04-01", "2025-06-30", 2.69)]
+    assert parse_instance(_classes_instance(["A", "B"])) == []
+    assert parse_instance(_classes_instance([])) == []

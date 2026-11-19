@@ -298,18 +298,23 @@ _FISCAL_YEAR_END = re.compile(r"(0[1-9]|1[0-2])(0[1-9]|[12]\d|3[01])")
 #: The filings whose facts count — the one set (review item DR6): the normaliser keeps a
 #: companyfacts row by it, the filing reads find their filings by it, and the weekday check
 #: reads a submissions document's newest report by it. 10-K/10-Q and their amendments and
-#: transition reports, and a foreign private issuer's annual 20-F (review item R6,
-#: 2026-11-08: ASML files it in US GAAP, NU and TSMC in IFRS); an 8-K's, a 6-K's or a
-#: proxy's stray fact does not count. Until 2026-11-07 the check had its own
-#: `{10-Q, 10-K}`, so a transition report (10-KT/10-QT) moved the figures and never the check.
+#: transition reports, a foreign private issuer's annual 20-F (review item R6,
+#: 2026-11-08: ASML files it in US GAAP, NU and TSMC in IFRS), and a Canadian issuer's
+#: annual 40-F (2026-11-19: RBC, TD and Thomson Reuters tag it in IFRS, Shopify in US GAAP
+#: until FY2021); an 8-K's, a 6-K's or a proxy's stray fact does not count. Until 2026-11-07
+#: the check had its own `{10-Q, 10-K}`, so a transition report (10-KT/10-QT) moved the
+#: figures and never the check.
 PERIODIC_FORMS = frozenset(
     {
         "10-K", "10-K/A", "10-Q", "10-Q/A", "10-KT", "10-KT/A", "10-QT", "10-QT/A",
-        "20-F", "20-F/A",
+        "20-F", "20-F/A", "40-F", "40-F/A",
     }
 )
 #: The annual reports among them: a year's figures come only from these.
-ANNUAL_FORM_PREFIXES = ("10-K", "20-F")
+ANNUAL_FORM_PREFIXES = ("10-K", "20-F", "40-F")
+#: A foreign issuer's annual reports: its New York listing may be a receipt for several
+#: shares, so it is priced by its ordinary share (`ordinary_priced_ciks`).
+FOREIGN_ANNUAL_PREFIXES = ("20-F", "40-F")
 
 
 @dataclass(frozen=True)

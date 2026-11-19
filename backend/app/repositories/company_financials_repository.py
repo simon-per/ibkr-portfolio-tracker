@@ -34,6 +34,7 @@ from app.models.company_financials import (
     SecurityCik,
     VendorStatement,
 )
+from app.services.edgar_client import FOREIGN_ANNUAL_PREFIXES
 from app.services.miss_backoff import miss_backoff_until
 
 
@@ -202,13 +203,14 @@ class CompanyFinancialsRepository:
         """
         twenty_f = {
             cik
-            for cik in (
+            for cik, form in (
                 await self.session.execute(
-                    select(SecTicker.cik).where(
-                        SecTicker.cik.is_not(None), SecTicker.annual_form.like("20-F%")
+                    select(SecTicker.cik, SecTicker.annual_form).where(
+                        SecTicker.cik.is_not(None), SecTicker.annual_form.is_not(None)
                     )
                 )
-            ).scalars()
+            )
+            if form.startswith(FOREIGN_ANNUAL_PREFIXES)
         }
         if not twenty_f:
             return set()

@@ -129,8 +129,13 @@ asked through the same `sources`, and the instance's EPS-chain facts on a share 
 (`EPS_MEMBERS`: `CommonStockMember`, `CommonClassAMember`) are kept — **only when every share
 class the filing tags that period's EPS on gives one value**, the classes not read included.
 Alphabet tags its three classes alike (kept); a company whose classes earn different amounts
-per share (Berkshire's A and B) has no one EPS, whichever class is quoted (left out). The
-diluted count then comes from net income / EPS (*Diluted shares when not reported*).
+per share (Berkshire's A and B) has no one EPS, whichever class is quoted (left out) —
+**unless one class alone is listed** (2026-11-19, `READER` 4): the cover page's
+`dei:TradingSymbol` sits on that class only, so every price is of it and its EPS is the one.
+Visa tags Class A (`V`), B and C apart and lists only A; it had no EPS at all, and now reads
+FY2025's 10.20 and FY2024's 9.73 as reported. Berkshire lists both classes and stays without.
+`tests/test_edgar_filing_facts.py`. The diluted count then comes from net income / EPS
+(*Diluted shares when not reported*).
 
 - **What a read looked for** (`sec_filing_reads.reader`, migration `e7a9c1d3f5b8`): 1 the
   dividend alone, 2 the EPS too (`READER`, `READ_SINCE`). A filing an EPS gap names that was
@@ -158,7 +163,7 @@ diluted count then comes from net income / EPS (*Diluted shares when not reporte
   weekly pass refetches everything once and a CLI run the same week spends nothing.
 - **Misses back off** through `miss_backoff.miss_backoff_until` on
   `sec_companies.facts_checked_at` / `facts_miss_count`: a 404, or a document with no us-gaap
-  10-Q/10-K/20-F figure this reads (a 40-F filer, a fund), is asked again on
+  10-Q/10-K/20-F/40-F figure this reads (a fund), is asked again on
   days 1, 2, 4, … up to every 30. A data answer clears both. `--force` asks anyway.
 - **Refuse whole**: a company's rows are deleted and the new set inserted in one transaction
   (`CompanyFinancialsRepository.replace_rows`), committed per company.
@@ -249,7 +254,7 @@ company is checked under that ticker as above. None or two is no match, asked ag
 or a page): a current 20-F at **SAP, Novartis, Toyota, MUFG, BHP, GlobalFoundries and Tower**;
 stopped filing at ABB, Infineon, E.ON and Hitachi; no SEC filer at Siemens, Allianz, Roche,
 Nestlé, Tencent, Hon Hai, MediaTek, Fujitsu, NEC, Tokyo Electron, Commonwealth Bank, China
-Construction Bank and Serabi; RBC and TD file 40-F (nothing this reads). Read from companyfacts
+Construction Bank and Serabi; RBC, TD and Thomson Reuters file 40-F (read since the same day). Read from companyfacts
 that day: SAP 11 years (EUR, revenue 36.8B for FY2025), Novartis 10 (USD), Toyota 6 in IFRS
 (JPY), MUFG 19 (JPY), BHP 10 (USD), Tower 17 and GlobalFoundries 7 (USD); annual only, as for
 every 20-F filer.
@@ -295,14 +300,14 @@ the SEC lists no such ticker" needs a row of its own, with its own stamp (the `I
 |---|---|
 | revenue | `RevenuesNetOfInterestExpense` → `Revenues` → `RevenueFromContractWithCustomerExcludingAssessedTax` → `…IncludingAssessedTax` (CRWD, ODFL) → `SalesRevenueNet` → `SalesRevenueServicesNet` (ODFL before 2018) → `RegulatedAndUnregulatedOperatingRevenue` (XEL from 2019) → IFRS `RevenueFromSaleOfGoods` (Novartis; *Annual-only filers*) |
 | net income | `NetIncomeLoss` → `NetIncomeLossAvailableToCommonStockholdersBasic` → `ProfitLoss` |
-| diluted EPS | `EarningsPerShareDiluted` → `EarningsPerShareBasicAndDiluted` (ALNY to 2021) → `IncomeLossFromContinuingOperationsPerDilutedShare` (ABNB; MNST after 2011), then net income / diluted shares (below) |
-| operating cash flow | `NetCashProvidedByUsedInOperatingActivities` → `…ContinuingOperations` |
+| diluted EPS | `EarningsPerShareDiluted` → `EarningsPerShareBasicAndDiluted` (ALNY to 2021) → `IncomeLossFromContinuingOperationsPerDilutedShare` (ABNB; MNST after 2011; Shell's IFRS line) — **only in a period with no profit from discontinued operations tagged** (`_continuing_eps_alone`, 2026-11-19: Iberdrola's 2025 continuing 0.843 beside 0.054 discontinued is no EPS; Dell's FY2022 and Exelon's 2022 now read their totals) — then net income / diluted shares (below) |
+| operating cash flow | `NetCashProvidedByUsedInOperatingActivities` → `…ContinuingOperations` (National Grid's IFRS line) |
 | capex | `PaymentsToAcquirePropertyPlantAndEquipment` → `PaymentsToAcquireProductiveAssets` → `PaymentsForCapitalImprovements` → `PaymentsToAcquireOtherPropertyPlantAndEquipment` (LLY) → `PaymentsToAcquireOtherProductiveAssets` (VZ, ROP from 2019) → `PaymentsToAcquireOilAndGasPropertyAndEquipment` → `PaymentsToAcquireOilAndGasProperty` (FANG) |
 | SBC | `ShareBasedCompensation` → `AllocatedShareBasedCompensationExpense` |
 | diluted shares | `WeightedAverageNumberOfDilutedSharesOutstanding` → `WeightedAverageNumberOfShareOutstandingBasicAndDiluted` (ZS, WDAY, PANW, DDOG); in a loss period the reported basic count (below); then net income / EPS |
 | operating income | `OperatingIncomeLoss` |
 | dividends per share | `CommonStockDividendsPerShareDeclared` → `CommonStockDividendsPerShareCashPaid` |
-| cash | `CashAndCashEquivalentsAtCarryingValue` → `CashCashEquivalentsRestrictedCashAndRestrictedCashEquivalents` → `…AtCarryingValueIncludingDiscontinuedOperations` (MDLZ 2016–2018) |
+| cash | `CashAndCashEquivalentsAtCarryingValue` → `CashCashEquivalentsRestrictedCashAndRestrictedCashEquivalents` → `…AtCarryingValueIncludingDiscontinuedOperations` (MDLZ 2016–2018) → `CashCashEquivalentsRestrictedCashAndRestrictedCashEquivalentsIncludingDisposalGroupAndDiscontinuedOperations` (PCAR since 2019, whose balance sheet splits cash by segment; SiTime before 2022) |
 | cash and short-term investments | `CashCashEquivalentsAndShortTermInvestments` (MSFT, GOOGL, ADBE) |
 | short-term investments | `ShortTermInvestments` → `MarketableSecuritiesCurrent` → `AvailableForSaleSecuritiesDebtSecuritiesCurrent` → `DebtSecuritiesAvailableForSaleExcludingAccruedInterestCurrent` → `AvailableForSaleSecuritiesCurrent` → `HeldToMaturitySecuritiesCurrent` → the AFS total (below) |
 | gross profit | `GrossProfit` |
@@ -426,7 +431,11 @@ derived inside one concept before the chains merge (one exception, Q4 below).
   are not borrowings), and three witnesses agree:
   - **interest**: no material interest (`INTEREST_SHARE`, 0.2% of the balance sheet a year,
     annualised from periods of a quarter or more — MPWR tags stub periods) for a period ending within
-    `INTEREST_WINDOW_DAYS` (200) of the date, in any filing — PCAR states interest only yearly;
+    `INTEREST_WINDOW_DAYS` (200) of the date, in any filing; for a company that states interest only
+    for whole years, `YEARLY_INTEREST_WINDOW_DAYS` (485: until the next 10-K is due). PCAR's Q3 2026
+    read debt-free 273 days after its FY2025 interest once its cash was read (2026-11-19); the same
+    window removed CAT's wrong zeros (Q3 2026, FY2007) and NBIS's FY2019, and Moderna's quarters
+    that flickered between zero and unknown now stay unknown, as its material interest says;
   - **a borrower companyfacts is blind to** — material interest and no debt figure ever (BRK and PCAR
     report debt per segment, which companyfacts leaves out; banks) — gets no zero up to its last
     material interest (BRK tags interest only from 2025);
@@ -1082,6 +1091,10 @@ All three were misses: the normaliser read 10-K/10-Q facts in us-gaap only.
   total, last in the chain: Novartis states "net sales to third parties" and 4% of royalties and
   other revenue apart, and no total. IFRS only — us-gaap's `SalesRevenueGoodsNet` filled HPE's
   FY2015 with a third of its revenue.
+- **The 40-F is an annual report too** (2026-11-19): RBC, TD and Thomson Reuters tag theirs in
+  IFRS (CAD and USD, from FY2016/2017), Shopify in US GAAP until FY2021 — its 2013–2021 history,
+  now on the post-2022-split basis like its later years. `ANNUAL_FORMS` in
+  `company_classification` is derived from `PERIODIC_FORMS` now, not a third spelling.
 - **IFRS concepts are read under their US-GAAP twins** (`IFRS_TWINS`), so every chain, ladder and
   vote applies unchanged; only exact equivalents (revenue, profit attributable to owners, diluted EPS,
   operating profit, operating cash flow, capex, diluted shares, dividends, buybacks, cash, equity).
@@ -1552,8 +1565,10 @@ separately, or filed only under a company's own extension concept, which company
 - **KDP before 2018** mixes Dr Pepper Snapple's and Keurig's filings (the 2018 reverse merger moved
   the fiscal year): its 2016-2017 share counts jump. Accepted; the figures since 2018 are one company's.
 - **New filers**: HONA and SPCX have too few quarters for a TTM.
-- Non-US listings; a 40-F filer; a 20-F filer's quarters (its 6-Ks carry no XBRL figures this
-  reads); IFRS concepts without an exact US-GAAP twin (`Borrowings`, so no net cash for NU or TSMC).
+- Non-US listings; a 20-F or 40-F filer's quarters (RBC's and TD's 6-Ks carry IFRS figures, read
+  nowhere yet); IFRS concepts without an exact US-GAAP twin (`Borrowings`, so no net cash for NU or
+  TSMC). An IFRS bank tags no revenue total: its top line is net interest income
+  (`InterestRevenueExpense`, as a US bank's `InterestIncomeExpenseNet`).
 - EBITDA (D&A tagged unevenly, above), so no EV/EBITDA; return on invested capital (it needs a
   tax rate and invested capital, neither tagged consistently).
 - **Market cap of a multi-class company** (GOOGL, META): its count is tagged per class, which

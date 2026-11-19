@@ -75,8 +75,14 @@ CLASS_AXIS = "StatementClassOfStockAxis"
 #: The share classes whose diluted EPS is read. A period is kept only when every class the
 #: filing tags its EPS on gives one value — the classes not read count too: Alphabet tags
 #: its three classes alike, while a company whose classes earn different amounts per share
-#: (Berkshire's A and B) has no one EPS to read, whichever class it is quoted by.
+#: (Berkshire's A and B) has no one EPS to read, whichever class it is quoted by. **Unless
+#: one class alone is listed** (2026-11-19): the cover page names a trading symbol on that
+#: class only (`dei:TradingSymbol`), so it is the class every price is of — Visa's Class A
+#: (`V`), beside Class B and C shares that convert into it and trade nowhere; Visa had no
+#: EPS at all. Berkshire lists both classes and stays without one.
 EPS_MEMBERS = frozenset({(CLASS_AXIS, "CommonStockMember"), (CLASS_AXIS, "CommonClassAMember")})
+#: The cover page's trading symbol (`dei:TradingSymbol`), by local name in any dei year.
+DEI = re.compile(r"^\{http://xbrl\.sec\.gov/dei/[^}]+\}TradingSymbol$")
 
 #: A company's own concepts (`nvda:PurchasesOfPropertyAndEquipmentAndIntangibleAssets`),
 #: which companyfacts never carries, named by their standard label in the filing's label
@@ -141,12 +147,13 @@ GAP_CONCEPTS: Dict[str, Any] = {
 }
 #: What a stored read looked for (`sec_filing_reads.reader`): 1 the dividend per share
 #: alone (2026-11-07), 2 the diluted EPS too (2026-11-08), 3 the company's own concepts
-#: by their labels too (2026-11-16). A filing read before a gap's kind was looked for is
-#: read once more for that gap, and never again after.
-READER = 3
+#: by their labels too (2026-11-16), 4 the EPS of the one listed share class (2026-11-19).
+#: A filing read before a gap's kind was looked for is read once more for that gap, and
+#: never again after.
+READER = 4
 READ_SINCE = {
     "dividends_per_share": 1,
-    "eps_diluted": 2,
+    "eps_diluted": 4,
     **{family: 3 for family in EXTENSION_FAMILIES},
     SEGMENT_FAMILY: 3,
 }
@@ -614,6 +621,8 @@ def parse_instance(
     ifrs: List[Tuple[str, str, Optional[str], str]] = []
     own: List[Tuple[str, str, Optional[str], str, str]] = []
     segmented: List[Tuple[str, str, Optional[str], str]] = []
+    # The contexts the cover page names a trading symbol on (`DEI`).
+    symbol_contexts: List[str] = []
     prefixes: Dict[str, str] = {}
     depth = 0
     events = ("start-ns", "start", "end")
@@ -679,6 +688,9 @@ def parse_instance(
                 segmented.append(
                     (name, elem.get("contextRef") or "", elem.get("unitRef"), elem.text.strip())
                 )
+        elif DEI.match(tag):
+            if (elem.text or "").strip():
+                symbol_contexts.append(elem.get("contextRef") or "")
         elif extensions and tag.startswith("{") and not _STANDARD_NS.search(tag):
             # The company's own concept: by the id its schema gives it, `<prefix>_<Name>`.
             uri, _, name = tag[1:].partition("}")
@@ -721,8 +733,10 @@ def parse_instance(
 
     by_period: Dict[Tuple[str, str, Optional[str], str], set] = defaultdict(set)
     plain: Dict[Tuple[str, str, Optional[str], str], set] = defaultdict(set)
-    # An EPS period's values on every share class, read or not.
+    # An EPS period's values on every share class, read or not, and on the listed one.
     classes: Dict[Tuple[str, str, Optional[str], str], set] = defaultdict(set)
+    on_listed: Dict[Tuple[str, str, Optional[str], str], set] = defaultdict(set)
+    listed = _listed_class(symbol_contexts, contexts)
     for concept, ctx_ref, unit_ref, text in candidates:
         context, unit = contexts.get(ctx_ref), units.get(unit_ref)
         if context is None or unit is None:
@@ -752,10 +766,15 @@ def parse_instance(
             continue
         if on_class:
             classes[(concept, unit, start, end)].add(val)
+            if dims[0] == listed:
+                on_listed[(concept, unit, start, end)].add(val)
         if target is not None:
             target[(concept, unit, start, end)].add(val)
     for key in by_period.keys() & classes.keys():
         by_period[key] = classes[key]  # another class's value leaves the period out
+    for key, vals in on_listed.items():
+        if len(classes[key]) > 1 and len(vals) == 1:
+            by_period[key] = vals  # unless one class alone is listed: its EPS
     merged = {k: v for k, v in by_period.items() if k not in plain}
     merged.update(plain)
     out = [
@@ -770,6 +789,23 @@ def parse_instance(
         + _own_facts(own, contexts, units, extensions or {})
         + _segment_facts(segmented, contexts, units)
     )
+
+
+def _listed_class(symbol_contexts: Sequence[str], contexts: Dict[str, Tuple[Any, ...]]):
+    """The one share class (`(CLASS_AXIS, member)`) the cover page names a trading symbol
+    on, or None: none named on a class (one class, its symbol undimensioned), or several
+    (Berkshire's A and B)."""
+    named = set()
+    for ref in symbol_contexts:
+        context = contexts.get(ref)
+        if context is None:
+            continue
+        dims = context[2]
+        if len(dims) == 1 and dims[0][0] == CLASS_AXIS and dims[0][1]:
+            named.add(dims[0])
+        elif not dims:
+            return None
+    return next(iter(named)) if len(named) == 1 else None
 
 
 def _segment_facts(segmented, contexts, units) -> List[Dict[str, Any]]:

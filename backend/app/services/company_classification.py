@@ -46,6 +46,7 @@ from collections import Counter
 from dataclasses import dataclass, field
 from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
 
+from app.services.edgar_client import ANNUAL_FORM_PREFIXES, PERIODIC_FORMS
 from app.services.sector_taxonomy import UNKNOWN, normalise as normalise_sector
 
 INDUSTRIAL = "industrial"
@@ -102,7 +103,10 @@ STATEMENT_CONCEPTS: Dict[str, Tuple[Tuple[str, ...], int]] = {
         2,
     ),
 }
-ANNUAL_FORMS = ("10-K", "10-K/A", "20-F", "20-F/A", "10-KT")
+#: The annual reports among the periodic forms (`edgar_client`'s one set).
+ANNUAL_FORMS = tuple(
+    sorted(f for f in PERIODIC_FORMS if f.startswith(ANNUAL_FORM_PREFIXES))
+)
 
 
 def statement_model(companyfacts: Dict[str, Any]) -> Optional[str]:

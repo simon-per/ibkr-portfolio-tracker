@@ -279,3 +279,52 @@ def test_net_sales_of_goods_are_an_ifrs_filers_revenue_without_a_total():
         revenue(doc({"Revenue": {"units": {"USD": [_fy("2025-12-31", 56.6e9)]}}}))
         == 56.6e9
     )
+
+
+def test_a_40f_is_an_annual_report():
+    """RBC, TD and Thomson Reuters file a 40-F in IFRS (2026-11-19); until then they read as
+    holding nothing."""
+    doc = {
+        "cik": 1000275,
+        "entityName": "ROYAL BANK OF CANADA",
+        "facts": {
+            "ifrs-full": {
+                "ProfitLossAttributableToOwnersOfParent": {
+                    "units": {"CAD": [_fy("2025-10-31", 20.4e9, form="40-F")]}
+                },
+                "InterestRevenueExpense": {
+                    "units": {"CAD": [_fy("2025-10-31", 31.0e9, form="40-F")]}
+                },
+            }
+        },
+    }
+    rows = {r["metric"]: r["value"] for r in normalise(doc).rows if r["fiscal_period"] == "FY"}
+    assert rows["net_income"] == 20.4e9
+    # An IFRS bank's net interest income, as a US bank's.
+    assert rows["net_interest_income"] == 31.0e9
+
+
+def test_continuing_eps_is_the_eps_only_without_discontinued_operations():
+    """Shell tags only its continuing EPS and has no discontinued operations: that is its EPS.
+    Iberdrola's 2025 had 0.054 per share discontinued beside 0.843: no EPS rather than a part."""
+    doc = {
+        "cik": 1,
+        "entityName": "Example",
+        "facts": {
+            "ifrs-full": {
+                "DilutedEarningsLossPerShareFromContinuingOperations": {
+                    "units": {
+                        "EUR/shares": [_fy("2024-12-31", 0.589), _fy("2025-12-31", 0.843)]
+                    }
+                },
+                "ProfitLossFromDiscontinuedOperations": {
+                    "units": {"EUR": [_fy("2024-12-31", 0.0), _fy("2025-12-31", 0.35e9)]}
+                },
+            }
+        },
+    }
+    eps = {
+        r["period_end"]: r["value"] for r in normalise(doc).rows if r["metric"] == "eps_diluted"
+    }
+    assert eps == {date(2024, 12, 31): 0.589}
+    assert not any(r["metric"] == "discontinued_income" for r in normalise(doc).rows)

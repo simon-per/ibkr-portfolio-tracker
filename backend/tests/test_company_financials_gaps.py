@@ -412,3 +412,14 @@ def test_a_cash_flow_statements_closing_cash_is_no_balance_sheet():
     only a filing whose balance sheet is at that date may say there is no debt."""
     doc = _doc(CashAndCashEquivalentsAtCarryingValue={"USD": [_instant("2024-06-30", 5e9)]})
     assert _value(normalise(doc), "debt_current", Q2) is None
+
+
+def test_a_years_interest_speaks_until_the_next_annual_report():
+    """PCAR states interest only for whole years: its FY interest still says it borrows nine
+    months on, where a quarter's would have lapsed (its Q3 2026 read debt-free, 2026-11-19)."""
+    yearly = _balance(InterestExpense={"USD": [
+        _f("2022-10-01", "2023-09-30", 0.2e9, "2023-11-15", form="10-K", accn="10k")]})
+    assert _value(normalise(yearly), "debt_current", Q2) is None
+    quarterly = _balance(InterestExpense={"USD": [
+        _f("2023-07-01", "2023-09-30", 0.05e9, "2023-11-15", accn="10q3")]})
+    assert _value(normalise(quarterly), "debt_current", Q2)["value"] == 0

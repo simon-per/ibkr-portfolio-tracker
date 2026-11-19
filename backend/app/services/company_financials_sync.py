@@ -100,6 +100,7 @@ from app.services.company_vendor_fill import fill as vendor_fill
 from app.services.edgar_client import (
     ANNUAL_FORM_PREFIXES,
     FINANCIAL_SIC,
+    FOREIGN_ANNUAL_PREFIXES,
     EdgarClient,
     EdgarError,
     EdgarRefused,
@@ -165,7 +166,7 @@ NAMED_LOOKTHROUGH = 200
 #: stand for ten shares (Toyota) or two (BHP) beside an EPS per ordinary share, so it is
 #: priced by its ordinary share (`repo.ordinary_priced_ciks`); and where another regulator
 #: already gives it a page (Shell, Santander: ESEF) that page stays (`_resolve`).
-NAME_MATCH_FORMS = ("10-K", "20-F")
+NAME_MATCH_FORMS = ("10-K",) + FOREIGN_ANNUAL_PREFIXES
 #: A filer whose newest annual report ends longer ago than this has stopped filing at the
 #: SEC (ABB's last 20-F is FY2023, Infineon's FY2009): a year, the four months a 20-F may
 #: take, and slack. Its page would set today's price beside old figures.
@@ -973,7 +974,7 @@ class CompanyFinancialsSync:
                 and names_agree(c.names or (c.name,), row.title)
                 and annual_current(row, today)
                 and not (
-                    (row.annual_form or "").startswith("20-F")
+                    (row.annual_form or "").startswith(FOREIGN_ANNUAL_PREFIXES)
                     and elsewhere & set(c.isins or (c.isin,))
                 )
             )
