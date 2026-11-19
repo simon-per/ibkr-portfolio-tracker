@@ -142,6 +142,12 @@ class ConstituentRow:
     # permanently unfoldable. Empty whenever `isin` is set, so there is one answer per row.
     identifier: Optional[str] = None
 
+    # The row's price and the fund's units of it, where the issuer publishes them (iShares'
+    # `unitPrice`, `unitsHeld`): the price is in the FUND's base currency, not the listing's
+    # (`constituent_prices`). Read for another regulator's company's multiples only.
+    price: Optional[Decimal] = None
+    units_held: Optional[Decimal] = None
+
 
 @dataclass
 class ParsedBasket:
@@ -591,6 +597,9 @@ def parse_dws(body: bytes, fund_isin: str, fetched_on: date) -> ParsedBasket:
 
 ISHARES_FIELDS = ("isin", "ticker", "issueName", "holdingPercent", "assetClass",
                   "sectorName", "countryOfRisk")
+# Read from the raw `value` arrays (numbers, not the formatted "9,628,407.00"), and held to
+# the same equal-length check as the fields above when present.
+ISHARES_NUMBER_FIELDS = ("unitPrice", "unitsHeld")
 
 
 def parse_ishares(body: bytes, fund_isin: str) -> ParsedBasket:
@@ -627,6 +636,9 @@ def parse_ishares(body: bytes, fund_isin: str) -> ParsedBasket:
     for name in ISHARES_FIELDS:
         value = (points.get(name) or {}).get("formattedValue")
         columns[name] = value if isinstance(value, list) else None
+    for name in ISHARES_NUMBER_FIELDS:
+        value = (points.get(name) or {}).get("value")
+        columns[name] = value if isinstance(value, list) else None
 
     if columns["holdingPercent"] is None or columns["issueName"] is None:
         raise BasketParseError(
@@ -659,6 +671,8 @@ def parse_ishares(body: bytes, fund_isin: str) -> ParsedBasket:
             asset_class=_clean(at("assetClass", index)),
             sector=_clean(at("sectorName", index)),
             country=_clean(at("countryOfRisk", index)),
+            price=_number(at("unitPrice", index)),
+            units_held=_number(at("unitsHeld", index)),
         ))
 
     basket = ParsedBasket(
@@ -670,6 +684,17 @@ def parse_ishares(body: bytes, fund_isin: str) -> ParsedBasket:
     )
     basket.validate()
     return basket
+
+
+def _number(raw) -> Optional[Decimal]:
+    """A raw numeric array element, or None for anything else (a blank, a dash, a bool)."""
+    if isinstance(raw, bool) or not isinstance(raw, (int, float)):
+        return None
+    try:
+        value = Decimal(str(raw))
+    except InvalidOperation:
+        return None
+    return value if value.is_finite() else None
 
 
 def _ishares_as_of(points) -> date:

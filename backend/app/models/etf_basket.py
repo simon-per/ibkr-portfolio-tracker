@@ -17,7 +17,7 @@ from decimal import Decimal
 from typing import Optional
 
 from sqlalchemy import (
-    Boolean, Date, DateTime, Integer, Numeric, String, UniqueConstraint, func,
+    Boolean, Date, DateTime, Float, Integer, Numeric, String, UniqueConstraint, func,
 )
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -205,3 +205,21 @@ class ConstituentIdentifierMiss(Base):
 
     identifier: Mapped[str] = mapped_column(String(20), primary_key=True)
     checked_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+
+
+class ConstituentPrice(Base):
+    """
+    One day's price of one constituent ISIN, as a basket file stated it
+    (`constituent_prices.record_constituent_prices`): kept only for the companies of another
+    regulator, which get no Yahoo request, so their multiples have a price. `currency` is the
+    fund's base currency, not the listing's; `units_held` the fund's units, which show a split.
+    Unlike the baskets, kept as history: the price chart and each period's P/E read it.
+    """
+    __tablename__ = "constituent_prices"
+
+    isin: Mapped[str] = mapped_column(String(12), primary_key=True)
+    date: Mapped[date] = mapped_column(Date, primary_key=True)
+    price: Mapped[float] = mapped_column(Float, nullable=False)
+    currency: Mapped[str] = mapped_column(String(3), nullable=False)
+    fund_isin: Mapped[str] = mapped_column(String(12), nullable=False)
+    units_held: Mapped[Optional[float]] = mapped_column(Float, nullable=True)

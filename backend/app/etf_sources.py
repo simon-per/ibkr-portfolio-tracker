@@ -94,23 +94,27 @@ FUND_SOURCES: Dict[str, FundSource] = {
     # portfolio and return byte-identical baskets — 287737 / 309035 / 332655 all give
     # MSCI World's 1338 rows — so the lowest id is recorded for determinism rather than
     # because the others are wrong.
+    #
+    # `price_currency` is the fund's base currency, the currency of every row's `unitPrice`
+    # (`constituent_prices`; the payload names only the share class's). Checked against the
+    # SEC companies' closes on every recording, so a wrong one keeps nothing.
     "IE00B4L5Y983": FundSource(
         symbol="IWDA",
         name="iShares Core MSCI World UCITS ETF",
         adapter="blackrock",
-        params={"portfolio_id": "287737"},
+        params={"portfolio_id": "287737", "price_currency": "USD"},
     ),
     "IE00B5BMR087": FundSource(
         symbol="SXR8",
         name="iShares Core S&P 500 UCITS ETF",
         adapter="blackrock",
-        params={"portfolio_id": "286083"},
+        params={"portfolio_id": "286083", "price_currency": "USD"},
     ),
     "IE00BKM4GZ66": FundSource(
         symbol="EMIM",
         name="iShares Core MSCI EM IMI UCITS ETF",
         adapter="blackrock",
-        params={"portfolio_id": "264659"},
+        params={"portfolio_id": "264659", "price_currency": "USD"},
     ),
     # Not held — declared as the basket donor for the Swisscanto EM 3a tranche, which
     # tracks plain MSCI Emerging Markets. Portfolio id 251857 is also its product id here,
@@ -120,7 +124,7 @@ FUND_SOURCES: Dict[str, FundSource] = {
         symbol="IEEM",
         name="iShares MSCI EM UCITS ETF USD (Dist)",
         adapter="blackrock",
-        params={"portfolio_id": "251857"},
+        params={"portfolio_id": "251857", "price_currency": "USD"},
     ),
 
     # The first **US-domiciled** iShares line held here, and the only entry on BlackRock's US
@@ -133,7 +137,7 @@ FUND_SOURCES: Dict[str, FundSource] = {
         symbol="IQQ",
         name="iShares Nasdaq 100 ETF",
         adapter="blackrock",
-        params={"portfolio_id": "351653", "site": "us"},
+        params={"portfolio_id": "351653", "site": "us", "price_currency": "USD"},
     ),
 
     # --- Xtrackers / DWS -----------------------------------------------------------

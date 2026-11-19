@@ -595,8 +595,8 @@ the repository's `rows_of` / `coverage_of` / `_replace` pick the column (`_owned
 - **A held listing links through the identity store, never by ticker** (`_linked_listings`, under
   *Service and API*): 2330@TWSE opens TSMC's page.
 - **No Yahoo for another regulator's company** (owner, 2026-11-17): the price pass and the profile
-  chunk take only companies with a CIK, and `_priced` gives one no closes — not even its held
-  listing's daily close — so its P/E, market cap and every multiple stay absent.
+  chunk take only companies with a CIK. Its closes are the ones the app already holds
+  (*Prices without Yahoo*, under *Prices*), so its multiples need no request.
 
 ## Service and API
 
@@ -856,6 +856,40 @@ The P/E's closes come from Yahoo (`company_price_sync`, CLAUDE.md rule 1; enable
       docker exec backend-portfolio-backend-1 python -m app.cli.fetch_company_prices
 
   `--symbol`, `--force` as above; it records a `manual_company_prices_fetch` row.
+
+### Prices without Yahoo
+
+Another regulator's company (`dart:`, `lei:`) gets no Yahoo request, and until 2026-11-19 no
+price at all: no P/E, market cap or multiple. Its closes now come from what the app already
+fetches (`constituent_prices`, `_other_closes`), in this order:
+
+1. **The held listing of the company's own ISIN**: the portfolio's daily closes
+   (`market_prices`), one a week. Only the company's own ISIN: Samsung's preferred share trades
+   at a discount and would understate every multiple. The price sync refetches a listing's
+   history when IBKR books a split, so the history is on today's basis; a split IBKR booked
+   after the newest filing leaves the figures on the old basis, and the page shows no multiple
+   until the next report.
+2. **The iShares basket files** the evening refresh downloads anyway: every row carries
+   `unitPrice` and `unitsHeld`, and `record_constituent_prices` keeps each day's price of every
+   company of another regulator (migration `f7a9c1e3b5d8`). History accumulates from the first
+   refresh after the deploy.
+   - **The price is in the fund's base currency, not the listing's.** On IWDA's file of
+     2026-11-18, units × price equalled each row's market value, Apple's 352.45 sat beside its
+     356.27 USD weekly close, and Toyota's 21.29 is dollars, not yen. The payload names only the
+     share class's currency (GBP), so each fund declares `price_currency`
+     (`app/etf_sources.py`). Every recording checks it: the median ratio of the basket's price to
+     the SEC companies' newest weekly close (within `VERIFY_MATCH_DAYS`) must be within
+     `VERIFY_TOLERANCE` of 1 over at least `VERIFY_MIN_MATCHES` companies. A wrong declaration
+     keeps nothing and warns. A fund with too few SEC companies to compare (EMIM, an
+     emerging-markets fund) keeps nothing, silently.
+   - **Converted** to the reporting currency at each day's ECB rate (`fx_preload`, cache only):
+     Shell's USD figures over a USD price, Schneider's EUR figures over the price × USD→EUR.
+   - **A split** shows as a fund's units multiplying while the price divides by the same ratio
+     (`basket_splits`). The closes before it are put on the new basis, as Yahoo adjusts a
+     history, and `eps_basis` restates them for a split after the newest filing.
+
+Nothing for a company outside every held iShares basket or with no listing held: German and
+Swiss issuers have no figures to price anyway (*Not yet*). `tests/test_constituent_prices.py`.
 
 ## The overview
 
@@ -1214,9 +1248,9 @@ industrial's cash & debt (a bank's deposits and borrowing are its business, not 
 Owner, 2026-11-16: **the company's own regulator first**, every other source fill-only, market by
 market in the order SEC widening (*Scope*), South Korea, Europe; Japan, Taiwan and the rest later.
 Built 2026-11-17. A company of another regulator is a `companies` row keyed `dart:<corp_code>` or
-`lei:<LEI>` (*One key for every regulator's company*) and gets **no Yahoo request** (owner): no
-closes, so its P/E, market cap and every multiple stay blank, and the page shows its figures in its
-reporting currency.
+`lei:<LEI>` (*One key for every regulator's company*) and gets **no Yahoo request** (owner): its
+closes are the held listing's or the iShares baskets' (*Prices without Yahoo*), and the page shows
+its figures in its reporting currency.
 
 **One path for every market** (`company_markets`, `regulator_facts`):
 
@@ -1361,6 +1395,7 @@ opens in 2027.
 | next | Japan | EDINET (the FSA), free key | XBRL for every listed company, J-GAAP or IFRS; needs a J-GAAP concept map |
 | next | Taiwan | MOPS (the TWSE's filing system) | XBRL, no official API; TSMC already has a page through its 20-F |
 | later | China A/H, India, Middle East | CNINFO/HKEX, NSE/BSE/MCA21, Tadawul | no usable free structured source today; their US ADR filers only |
+| declined | Germany, Switzerland | none free: the ESEF index holds none of them, and SIX/the Bundesanzeiger serve no structured API | a paid vendor (EODHD) declined by the owner 2026-11-19, a private app; their pages stay absent |
 
 ## Known gaps and out of scope
 

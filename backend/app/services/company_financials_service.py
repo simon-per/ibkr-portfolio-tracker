@@ -72,12 +72,13 @@ from app.models.company_financials import (
 )
 from app.models.analyst_rating import rating_of
 from app.models.earnings_event import EarningsEvent
-from app.models.etf_basket import EtfHolding
+from app.models.etf_basket import ConstituentPrice, EtfHolding
 from app.models.security import Security
 from app.repositories.analyst_rating_repository import AnalystRatingRepository
 from app.repositories.company_financials_repository import CompanyFinancialsRepository
 from app.repositories.fundamentals_repository import FundamentalsRepository
 from app.repositories.market_price_repository import MarketPriceRepository
+from app.services.constituent_prices import basket_closes, listing_closes
 from app.repositories.security_repository import held
 from app.repositories.sync_run_repository import utc_iso
 from app.services.company_classification import Classification, classify, gics_sector
@@ -1171,6 +1172,38 @@ class CompanyFinancialsService:
                 closes.append((daily.date, float(daily.close_price)))
         return closes
 
+    async def _other_closes(
+        self, company, rows: Sequence[CompanyFinancial], currency: str
+    ) -> Tuple[List[Tuple[date, float]], List[Tuple[date, float]]]:
+        """
+        Another regulator's company's weekly closes in its reporting currency, and the splits
+        they need restating for (`eps_basis`), from what the app already holds
+        (`constituent_prices`, docs/company-financials.md *Prices without Yahoo*): the held
+        listing of the company's own ISIN (never another share class's: Samsung's preferred
+        trades at a discount) from the portfolio's daily closes, unless IBKR booked a split of
+        it after the newest filing (its figures on the old basis, a multiple there is
+        unknown); else the basket files' prices.
+        """
+        isin = (company.isin or "").strip().upper()
+        if not isin:
+            return [], []
+        listing = (
+            await self.db.execute(
+                select(Security)
+                .where(held(), Security.isin == isin)
+                .order_by(Security.symbol, Security.id)
+                .limit(1)
+            )
+        ).scalars().first()
+        if listing is not None:
+            newest_filed = max(r.filed for r in rows)
+            closes = await listing_closes(self.db, listing.id, currency)
+            if closes:
+                if await self._split_since(listing.id, newest_filed):
+                    return [], []
+                return closes, []
+        return await basket_closes(self.db, isin, currency)
+
     async def _split_since(self, security_id: int, since: Optional[date]) -> bool:
         """
         Whether IBKR recorded a price-restating split of this listing after `since` (the
@@ -1367,9 +1400,8 @@ class CompanyFinancialsService:
         `PRICE_MAX_AGE_DAYS`). The one path to a company's key figures: the overview and
         the Peers card both read them here (`tests/test_company_peers.py`).
 
-        **Another regulator's company has no closes** (owner, 2026-11-17): no Yahoo request
-        is made for it, and its held listing's daily close is not put beside its figures, so
-        its P/E, market cap and every multiple stay absent.
+        **Another regulator's company gets no Yahoo request** (owner, 2026-11-17): its closes
+        are the ones the app already holds (`_other_closes`), else none.
         """
         rows = await self.repo.rows_of(company)
         coverage = (await self.repo.coverage_of([company])).get(company.key)
@@ -1379,6 +1411,9 @@ class CompanyFinancialsService:
             listing = (await self._held_listings([company.cik])).get(company.cik)
             closes = await self._closes(company.cik, rows, currency, listing)
             prices = await self._on_eps_basis(company.cik, rows, closes)
+        elif rows and currency is not None:
+            closes, splits = await self._other_closes(company, rows, currency)
+            prices = eps_basis(closes, splits, max(r.filed for r in rows)) if closes else []
         current = None
         if prices and (utc_today() - prices[-1][0]).days <= PRICE_MAX_AGE_DAYS:
             current = prices[-1][1]
@@ -1548,7 +1583,18 @@ class CompanyFinancialsService:
                 .order_by(SecCompany.cik)
             )
         ).all()
-        held = sorted({c["security_id"] for c in listed if c["security_id"] is not None})
+        # Every held listing of a listed company: another regulator's company reads its
+        # held listing's closes too (`_other_closes`), and its basket prices
+        # (`constituent_prices`).
+        held = sorted(
+            {c["security_id"] for c in listed if c["security_id"] is not None}
+            | {i for c in listed for i in c.get("security_ids") or []}
+        )
+        basket_prices = (
+            await self.db.execute(
+                select(func.count(), func.max(ConstituentPrice.date))
+            )
+        ).one()
         daily = await MarketPriceRepository(self.db).get_latest_prices(held)
         actions = (
             await self.db.execute(
@@ -1567,6 +1613,7 @@ class CompanyFinancialsService:
                 for sid, p in sorted(daily.items())
             ),
             tuple(actions),
+            tuple(basket_prices),
         )
 
     async def _screen(

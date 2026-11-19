@@ -69,6 +69,7 @@ from app.services.etf_basket_fetch import (
     new_client,
     parse_bodies,
 )
+from app.services.constituent_prices import PRICE_CURRENCY_PARAM, record_constituent_prices
 from app.services.identity_service import IdentityService, held_isins
 from app.services.lookthrough_service import (
     LookthroughService,
@@ -296,6 +297,21 @@ async def refresh_stale_baskets(
                 bodies = await fetch(client, source_isin, source)
                 basket = parse(source_isin, bodies, source.adapter, symbol, as_of)
                 stored = await repo.replace_basket(basket)
+                if not stored.unchanged:
+                    prices = await record_constituent_prices(
+                        db, basket, source.params.get(PRICE_CURRENCY_PARAM)
+                    )
+                    refused = prices["verified"] is False and "median_ratio" in prices
+                    if prices["recorded"] or refused:
+                        result.setdefault("constituent_prices", []).append(
+                            {"symbol": symbol, **prices}
+                        )
+                    if refused:
+                        result["warnings"].append(
+                            f"{symbol}: basket prices kept for no company — {prices['reason']} "
+                            f"(median ratio {prices['median_ratio']} to the SEC closes); "
+                            f"check `price_currency` in app/etf_sources.py"
+                        )
                 await db.commit()
             except BasketReplaceRefused as e:
                 await db.rollback()

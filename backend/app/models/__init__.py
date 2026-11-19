@@ -29,7 +29,12 @@ from app.models.sync_run import SyncRun
 # These two were missing, so `import app.models` left Base.metadata incomplete — Alembic
 # discovery and any create_all() silently skipped them.
 from app.models.ticker_mapping import TickerMapping
-from app.models.etf_basket import EtfBasket, EtfHolding, ConstituentIdentifierMiss
+from app.models.etf_basket import (
+    ConstituentIdentifierMiss,
+    ConstituentPrice,
+    EtfBasket,
+    EtfHolding,
+)
 from app.models.isin_identity import IsinIdentity
 from app.models.security_logo import SecurityLogo
 from app.models.company_financials import (
@@ -82,6 +87,7 @@ __all__ = [
     "EtfBasket",
     "EtfHolding",
     "ConstituentIdentifierMiss",
+    "ConstituentPrice",
     "IsinIdentity",
     "SecurityLogo",
     "CompanyFinancial",

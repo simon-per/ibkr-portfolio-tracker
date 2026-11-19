@@ -632,6 +632,12 @@ locale while the UCITS lines kept working, and IQQ's own US product page reads i
 `parse_ishares` has no branch (#92). Pinned by a family rule keyed on the ISIN's country prefix, so
 the next US iShares fund is caught by declaration rather than by somebody debugging a 404.
 
+**The iShares rows carry a price** (`unitPrice`, `unitsHeld`, read from the raw `value` arrays and
+held to the same equal-length check). It is in the fund's base currency, which each BlackRock
+fund declares as `params["price_currency"]`; the look-through ignores it, and the Company tab
+keeps it for the companies of another regulator (docs/company-financials.md, *Prices without
+Yahoo*). A refresh's result lists what was kept under `constituent_prices`.
+
 **Note also that IQQ's `portfolio_id` happens to equal the id in its product-page URL, and the
 UCITS entries' do not** — IWDA's page is `/products/251882/` against `portfolio_id` 287737. Read
 it from the sitemap and confirm by row count, as the comment in `etf_sources.py` says; do not
