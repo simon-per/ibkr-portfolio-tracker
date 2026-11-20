@@ -1591,13 +1591,21 @@ Owner's choice 2026-11-20, **waiting for the owner's free-tier key**
   `/line-item-definitions/?template=` (industrial, bank, insurer; 1 credit a page) and were
   checked on Siemens' FY2025 against its annual report (2026-11-20): `net_income_loss` is the
   profit to the parent's owners, `consolidated_net_income` the consolidated one; a bank's
-  revenue is `total_net_revenue` beside `net_interest_income`, an insurer's `total_revenues`;
+  revenue is `total_net_revenue` beside `net_interest_income`, an insurer's `total_revenues` or
+  `insurance_revenue` (Allianz's first read matched neither: re-read with the next credits);
   the cash falls back to a bank's `cash_and_central_bank_balances`. Values are absolute
   decimals in the statement's currency; the vendor states outflows negative, written as the
   positive payments the normaliser's US twins are (`PAYMENTS`: FCF = OCF − capex). A share
-  count carries the statement's currency there and is read as shares. One call returns the
-  years back to about FY2013. No dividend per share: that is the vendor's separate
-  `/dividends/` (40 credits more a company).
+  count carries the statement's currency there and is read as shares. A diluted EPS further
+  than `EPS_CHECK_FACTOR` (2×) from the profit to owners over the diluted shares is left out
+  (Serabi's FY2024: 36.73, its cents as dollars). One call returns the years back to about
+  FY2013. No dividend per share: that is the vendor's separate `/dividends/` (40 credits more
+  a company).
+- **First run, 2026-11-20**: ten pages (the German four, Roche, Nestlé, ABB, Tencent, Hydro
+  One, Serabi), checked against the annual reports; the month's credits ran out before
+  Commonwealth Bank and China Construction Bank (the next month's pass). The vendor's own data
+  has holes no read fills: Nestlé's FY2015 and FY2020, Roche's FY2023 revenue, ABB's FY2025
+  capex (0.26bn against about 0.8bn a year).
 
 ### Not yet
 

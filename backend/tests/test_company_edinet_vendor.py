@@ -317,6 +317,40 @@ def test_the_vendors_lines_are_mapped_by_code():
     assert all(f["end"] == "2025-09-30" for f in facts)  # the half-year is not read
 
 
+def test_an_eps_its_own_profit_and_shares_contradict_is_left_out():
+    # Serabi's FY2024 as the vendor served it: its 36.73 cents read as dollars.
+    def period(eps):
+        return {
+            "currency": {"code": "USD"},
+            "periods": [
+                {
+                    "fiscal_period": "FY",
+                    "period_start_date": "2024-01-01",
+                    "period_end_date": "2024-12-31",
+                    "statements": [
+                        {
+                            "line_items": [
+                                {"code": "net_income_loss", "value": "27800000"},
+                                {"code": "diluted_eps", "value": eps},
+                                {
+                                    "code": "weighted_avg_diluted_shares_outstanding",
+                                    "value": "75700000",
+                                },
+                            ]
+                        }
+                    ],
+                }
+            ],
+        }
+
+    def concepts(body):
+        return {f["concept"] for f in facts_of(body)[0]}
+
+    assert "DilutedEarningsLossPerShare" not in concepts(period("36.73"))
+    assert "ProfitLossAttributableToOwnersOfParent" in concepts(period("36.73"))
+    assert "DilutedEarningsLossPerShare" in concepts(period("0.367"))
+
+
 def test_a_banks_vendor_lines():
     bank = {
         "currency": {"code": "AUD"},

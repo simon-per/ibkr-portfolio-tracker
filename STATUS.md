@@ -7,7 +7,7 @@
 > [docs/troubleshooting.md](docs/troubleshooting.md); local-dev traps in
 > [docs/local-development.md](docs/local-development.md).
 
-**Last updated: 2026-11-19.** The **Company tab** (one company's SEC EDGAR fundamentals history,
+**Last updated: 2026-11-20.** The **Company tab** (one company's SEC EDGAR fundamentals history,
 docs/company-financials.md) is deployed and filled for the held filers **and the Nasdaq-100**
 (102 companies with figures, keyed by CIK), with key figures, valuation multiples (weekly Yahoo closes), ROE and net cash, gross margin, operating income,
 buybacks & dividends, cash & debt and 3/5/10Y CAGRs (docs/shipped-log.md 2026-10-25). PR #80 (Swiss residency)
@@ -29,16 +29,13 @@ code trace; all of them shipped that evening (waves 1–3, the product issues #7
 
 ## Needs a human
 
-- **Two keys for the Company tab's last blank pages** (owner's answers 2026-11-20; measured on
-  production 2026-11-19: of the 206 companies the app names, 190 have a page and 186 of those
-  are fully backfilled). **`EDINET_API_KEY`**: register at the FSA's EDINET API page and put it
-  in the VPS `.env` (`docker compose up -d`, never `restart`); the Japanese pass is built and
-  waits for it (Hitachi, Fujitsu, NEC, Tokyo Electron). **`FINANCIALREPORTS_API_KEY`**: sign up
-  for financialfilings.com's free tier (500 credits a month) and put the key there too; the
-  vendor fallback is built and waits for it (the German four, Roche, Nestlé, ABB, Tencent, China
-  Construction Bank, Commonwealth Bank, Hydro One, Serabi; about twelve a month). Then run
-  `fetch_company_markets --source edinet` and `--source vendor` once and check the pages against
-  the annual reports: both passes were built from documentation, without a live answer.
+- **`EDINET_API_KEY` for the Company tab's Japanese pages** (owner sends it later; measured on
+  production 2026-11-20: of the 206 companies the app names, 200 have a page and 193 are fully
+  backfilled). Register at the FSA's EDINET API page and put it in the VPS `.env` (`docker
+  compose up -d`, never `restart`); the Japanese pass is built and waits for it (Hitachi,
+  Fujitsu, NEC, Tokyo Electron). Then run `fetch_company_markets --source edinet` once and check
+  the pages against the annual reports: the pass was built from documentation, without a live
+  answer.
 
 - **Confirm the Alpha Vantage key's tier.** The Company tab's statement fill and the price
   fallback now share one budget of 25 calls a UTC day (`alpha_vantage.DAILY_LIMIT`, the free
@@ -111,6 +108,11 @@ code trace; all of them shipped that evening (waves 1–3, the product issues #7
   MAPPING` before trusting either.
 - **Misfire recovery never observed end to end.** `/health`'s `scheduler_jobstore_persistent:
   false` means the store fell back to memory.
+- **The vendor fallback's next month** (financialfilings.com, free tier, first read 2026-11-20
+  with the month's credits spent): the weekly markets job's first pass after the credits renew
+  should write Commonwealth Bank and China Construction Bank (bank template: `total_net_revenue`,
+  `net_interest_income`) and leave the ten read pages `unchanged` until their 90 days pass;
+  Allianz's revenue (insurer template) only comes back then, on its re-read.
 
 ## Watch after the next deploy
 
@@ -647,6 +649,12 @@ Rough priority. Re-verify each `path:line` in code before fixing; lines move.
 
 One line each, newest first; drop the oldest.
 
+- **2026-11-20 (the vendor fallback live)** — the owner's financialfilings.com key; the line
+  mapping rebuilt on the vendor's own codes after Siemens' live answer (OCF and equity missed,
+  profit to owners misread, capex's sign), Japanese companies asked last, an EPS its profit and
+  shares contradict left out; ten pages written and checked against the annual reports.
+  Measured: 200 of 206 companies with a page, 193 fully backfilled.
+
 - **2026-11-19 (closing the Company tab's gaps)** — the SEC widening backfilled by hand; then
   Korean and European multiples from prices already held (held listings, iShares rows with a
   checked fund currency), three dividend rules measured over the 166 filers' companyfacts (an
@@ -673,8 +681,3 @@ One line each, newest first; drop the oldest.
   (bridging: a concept that agrees where both report fills the gaps); zero debt read off balance
   sheets that show none; a loss quarter's basic count; the newest filing's currency (NBIS). GBP checked in the
   browser; the tax report follows the base currency (docs corrected).
-
-- **2026-11-14 (GBP base currency, merged to `main` and pushed)** — GBP joined EUR/CHF/USD as a
-  switchable base; the daily FX job's hard-coded `("CHF", "USD")` became `eur_to_base_pairs()`,
-  and the job now backfills every base's EUR→base history to the first lot (`ensure_base_history`).
-  The owner kept the benchmark's baseline FX gap (*Worth doing next* #5) out of scope.

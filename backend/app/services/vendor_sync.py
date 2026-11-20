@@ -66,7 +66,12 @@ FLOW, INSTANT = "flow", "instant"
 #: the parent's owners (Siemens: 9,620m beside 10,387m consolidated); a bank states its total
 #: net revenue and its net interest income, an insurer its total revenues.
 LINES: Tuple[Tuple[str, str, str, Tuple[str, ...]], ...] = (
-    ("Revenue", MONEY, FLOW, ("revenue", "total_revenues", "total_net_revenue")),
+    (
+        "Revenue",
+        MONEY,
+        FLOW,
+        ("revenue", "total_revenues", "total_net_revenue", "insurance_revenue"),
+    ),
     ("InterestRevenueExpense", MONEY, FLOW, ("net_interest_income",)),
     ("CostOfSales", MONEY, FLOW, ("cost_of_revenue",)),
     ("GrossProfit", MONEY, FLOW, ("gross_profit",)),
@@ -109,6 +114,11 @@ LINES: Tuple[Tuple[str, str, str, Tuple[str, ...]], ...] = (
     ("Equity", MONEY, INSTANT, ("total_equity",)),
 )
 
+#: A diluted EPS further than this factor from the profit to owners over the diluted shares
+#: is the vendor's extraction, not the company's (Serabi's FY2024 36.73: its cents as
+#: dollars, 0.37 in its report; 2026-11-20): left out, since an unknown is absent.
+EPS_CHECK_FACTOR = 2.0
+
 #: The vendor states a cash outflow negative; the normaliser reads payments as the positive
 #: US twins they map to (FCF = operating cash flow − capex).
 PAYMENTS = frozenset(
@@ -135,7 +145,8 @@ def facts_of(body: Dict[str, Any]) -> Tuple[List[Dict[str, Any]], Dict[str, str]
     """
     The financials response's fiscal years as facts in the shape `regulator_facts` reads, and
     the vendor's line code per IFRS concept (`tagged`). Per period and concept the first of
-    its codes the period states, from the period's own statements before a comparative.
+    its codes the period states, from the period's own statements before a comparative; a
+    diluted EPS its own profit and share count contradict is left out (`EPS_CHECK_FACTOR`).
     """
     facts: List[Dict[str, Any]] = []
     tagged: Dict[str, str] = {}
@@ -158,6 +169,7 @@ def facts_of(body: Dict[str, Any]) -> Tuple[List[Dict[str, Any]], Dict[str, str]
         for statement in statements:
             for item in statement.get("line_items") or []:
                 lines.setdefault(str(item.get("code") or ""), (item, statement))
+        found: Dict[str, Dict[str, Any]] = {}
         for concept, kind, timing, codes in LINES:
             for code in codes:
                 item, statement = lines.get(code, (None, None))
@@ -175,7 +187,7 @@ def facts_of(body: Dict[str, Any]) -> Tuple[List[Dict[str, Any]], Dict[str, str]
                 ):
                     continue
                 source = statement.get("source_filing") or {}
-                facts.append(
+                found[concept] = (
                     {
                         "concept": concept,
                         "unit": "shares"
@@ -194,7 +206,25 @@ def facts_of(body: Dict[str, Any]) -> Tuple[List[Dict[str, Any]], Dict[str, str]
                 )
                 tagged.setdefault(concept, f"{SOURCE}:{code}")
                 break
+        if not _eps_agrees(found):
+            found.pop("DilutedEarningsLossPerShare")
+        facts.extend(found.values())
     return one_value_each(facts), tagged
+
+
+def _eps_agrees(found: Dict[str, Dict[str, Any]]) -> bool:
+    """False when the period's EPS, profit to owners and diluted shares all exist and the EPS
+    is further than `EPS_CHECK_FACTOR` from the profit over the shares."""
+    eps = found.get("DilutedEarningsLossPerShare")
+    profit = found.get("ProfitLossAttributableToOwnersOfParent")
+    shares = found.get("AdjustedWeightedAverageShares")
+    if eps is None or profit is None or shares is None or not shares["val"]:
+        return True
+    implied = profit["val"] / shares["val"]
+    if not implied or not eps["val"]:
+        return True
+    ratio = abs(eps["val"] / implied)
+    return 1 / EPS_CHECK_FACTOR <= ratio <= EPS_CHECK_FACTOR
 
 
 class VendorStop(Exception):
