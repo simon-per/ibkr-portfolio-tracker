@@ -188,20 +188,39 @@ FINANCIALS = {
                         {
                             "code": "revenue",
                             "name": "Total Revenues",
-                            "value": "78900000000.00",
+                            "value": "78914000000.00",
                             "currency": "EUR",
                         },
                         {
-                            "code": "net_income_attributable_to_parent",
-                            "name": "Net income attributable to shareholders of the parent",
-                            "value": "10300000000.00",
+                            "code": "consolidated_net_income",
+                            "name": "Consolidated Net Income (incl. Minority Interest)",
+                            "value": "10387000000.00",
                             "currency": "EUR",
                         },
                         {
-                            "code": "eps_diluted",
+                            "code": "net_income_loss",
+                            "name": "Net Income",
+                            "value": "9620000000.00",
+                            "currency": "EUR",
+                        },
+                        {
+                            "code": "diluted_eps",
                             "name": "Diluted EPS",
-                            "value": "12.80",
+                            "value": "12.11",
                             "currency": "EUR",
+                        },
+                        {
+                            # The vendor puts the statement's currency on a share count.
+                            "code": "weighted_avg_diluted_shares_outstanding",
+                            "name": "Weighted Avg Diluted Shares Outstanding",
+                            "value": "793781000.00",
+                            "currency": "EUR",
+                        },
+                        {
+                            "code": "full_time_employees",
+                            "name": "Full Time Employees",
+                            "value": "318000.00",
+                            "currency": None,
                         },
                     ],
                 },
@@ -213,15 +232,21 @@ FINANCIALS = {
                     },
                     "line_items": [
                         {
-                            "code": "cash_from_operating_activities",
-                            "name": "Cash flows from operating activities",
-                            "value": "11000000000.00",
+                            "code": "cash_from_operations",
+                            "name": "Cash from Ops",
+                            "value": "13257000000.00",
                             "currency": "EUR",
                         },
                         {
-                            "code": "capex",
-                            "name": "Capital expenditures",
-                            "value": "2600000000.00",
+                            "code": "capital_expenditure_cf",
+                            "name": "Capital Expenditure",
+                            "value": "-2445000000.00",
+                            "currency": "EUR",
+                        },
+                        {
+                            "code": "common_dividends_paid_cf",
+                            "name": "Common Dividends Paid",
+                            "value": "-4093000000.00",
                             "currency": "EUR",
                         },
                     ],
@@ -235,8 +260,20 @@ FINANCIALS = {
                     "line_items": [
                         {
                             "code": "cash_and_equivalents",
-                            "name": "Cash and cash equivalents",
-                            "value": "9200000000.00",
+                            "name": "Cash And Equivalents",
+                            "value": "14495000000.00",
+                            "currency": "EUR",
+                        },
+                        {
+                            "code": "total_common_equity",
+                            "name": "Total Common Equity",
+                            "value": "62244000000.00",
+                            "currency": "EUR",
+                        },
+                        {
+                            "code": "total_equity",
+                            "name": "Total Equity",
+                            "value": "68371000000.00",
                             "currency": "EUR",
                         },
                     ],
@@ -254,19 +291,64 @@ FINANCIALS = {
 }
 
 
-def test_the_vendors_lines_are_mapped_by_code_or_name():
-    facts, _ = facts_of(FINANCIALS)
+def test_the_vendors_lines_are_mapped_by_code():
+    # Siemens' FY2025 as the vendor served it (2026-11-20), against its annual report.
+    facts, tagged = facts_of(FINANCIALS)
     by = {f["concept"]: f["val"] for f in facts}
-    assert by["Revenue"] == 78.9e9
-    assert by["ProfitLossAttributableToOwnersOfParent"] == 10.3e9
-    assert by["DilutedEarningsLossPerShare"] == 12.8
-    assert by["CashFlowsFromUsedInOperatingActivities"] == 11.0e9
+    unit = {f["concept"]: f["unit"] for f in facts}
+    assert by["Revenue"] == 78.914e9
+    assert by["ProfitLossAttributableToOwnersOfParent"] == 9.62e9
+    assert by["ProfitLoss"] == 10.387e9
+    assert by["DilutedEarningsLossPerShare"] == 12.11
+    assert unit["DilutedEarningsLossPerShare"] == "EUR/shares"
+    assert by["AdjustedWeightedAverageShares"] == 793.781e6
+    assert unit["AdjustedWeightedAverageShares"] == "shares"
+    assert by["CashFlowsFromUsedInOperatingActivities"] == 13.257e9
+    # Payments as the positive twins the normaliser reads (FCF = OCF − capex).
     assert (
         by["PurchaseOfPropertyPlantAndEquipmentClassifiedAsInvestingActivities"]
-        == -2.6e9
+        == 2.445e9
     )
-    assert by["CashAndCashEquivalents"] == 9.2e9
+    assert by["DividendsPaidClassifiedAsFinancingActivities"] == 4.093e9
+    assert by["CashAndCashEquivalents"] == 14.495e9
+    assert by["EquityAttributableToOwnersOfParent"] == 62.244e9
+    assert by["Equity"] == 68.371e9
+    assert tagged["Revenue"] == "financialfilings:revenue"
     assert all(f["end"] == "2025-09-30" for f in facts)  # the half-year is not read
+
+
+def test_a_banks_vendor_lines():
+    bank = {
+        "currency": {"code": "AUD"},
+        "periods": [
+            {
+                "fiscal_period": "FY",
+                "period_start_date": "2024-07-01",
+                "period_end_date": "2025-06-30",
+                "statements": [
+                    {
+                        "statement_type": "IS",
+                        "currency": {"code": "AUD"},
+                        "line_items": [
+                            {"code": "net_interest_income", "value": "23000000000"},
+                            {"code": "total_net_revenue", "value": "28000000000"},
+                        ],
+                    },
+                    {
+                        "statement_type": "BS",
+                        "line_items": [
+                            {"code": "cash_and_central_bank_balances", "value": "1e10"},
+                        ],
+                    },
+                ],
+            }
+        ],
+    }
+    facts, _ = facts_of(bank)
+    by = {f["concept"]: (f["val"], f["unit"]) for f in facts}
+    assert by["InterestRevenueExpense"] == (23e9, "AUD")
+    assert by["Revenue"] == (28e9, "AUD")
+    assert by["CashAndCashEquivalents"] == (1e10, "AUD")
 
 
 class Vendor:
@@ -334,7 +416,9 @@ async def test_the_vendor_fills_only_what_no_regulator_covers(db, monkeypatch):
         await svc.company_by_key("vendor:390"), "annual", "max"
     )
     revenue = [p["value"] for p in page["series"]["revenue"]["points"]]
-    assert revenue == [78.9e9]
+    assert revenue == [78.914e9]
+    fcf = [p["value"] for p in page["series"]["fcf"]["points"]]
+    assert fcf == [13.257e9 - 2.445e9]
 
     # Within the refresh interval: nothing asked, the page stays listed.
     fake.requests.clear()

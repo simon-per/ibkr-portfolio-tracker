@@ -1585,11 +1585,18 @@ Owner's choice 2026-11-20, **waiting for the owner's free-tier key**
   most every `REFRESH_AFTER` (90 days) a company, while `X-RateLimit-Monthly-Remaining` stays
   above `CREDIT_FLOOR` (the free tier's 500 credits a month cover about twelve companies, so the
   first fill takes two months). 401/402/403/429 stop the pass with a warning.
-- **Mapped by line code or name** (`LINES`, `facts_of`): the vendor's standardised statements,
-  not a filing's tags; a line no pattern names stays out. The codes beyond `revenue` are not in
-  the vendor's published reference, so the patterns read code and name both, and **the first
-  live run is to be checked against each company's annual report**. Values are absolute
-  decimals in the statement's currency; capex is written as the outflow IFRS tags.
+- **Mapped by line code** (`LINES`, `facts_of`): the vendor's standardised statements, not a
+  filing's tags; a code `LINES` does not name stays out. The codes come from the vendor's
+  `/line-item-definitions/?template=` (industrial, bank, insurer; 1 credit a page) and were
+  checked on Siemens' FY2025 against its annual report (2026-11-20): `net_income_loss` is the
+  profit to the parent's owners, `consolidated_net_income` the consolidated one; a bank's
+  revenue is `total_net_revenue` beside `net_interest_income`, an insurer's `total_revenues`;
+  the cash falls back to a bank's `cash_and_central_bank_balances`. Values are absolute
+  decimals in the statement's currency; the vendor states outflows negative, written as the
+  positive payments the normaliser's US twins are (`PAYMENTS`: FCF = OCF − capex). A share
+  count carries the statement's currency there and is read as shares. One call returns the
+  years back to about FY2013. No dividend per share: that is the vendor's separate
+  `/dividends/` (40 credits more a company).
 
 ### Not yet
 

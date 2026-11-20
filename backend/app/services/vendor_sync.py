@@ -15,10 +15,11 @@ this pass no longer stamps it, `universe_seen_at`).
 once in `REFRESH_AFTER` a company, and only while the month's credits last
 (`X-RateLimit-Monthly-Remaining` above `CREDIT_FLOOR`). A 401, 403 or 429 stops the pass.
 
-**Read** (`facts_of`): each fiscal year's line items mapped by their code or name
-(`LINES`) to the IFRS concept the one normaliser reads — the vendor's own standardised
-statements, not a filing's tags, so a line no pattern names is left out rather than guessed.
-Values are absolute decimals in the statement's currency.
+**Read** (`facts_of`): each fiscal year's line items mapped by the vendor's own line code
+(`LINES`, its `/line-item-definitions/` for the industrial, bank and insurer templates) to the
+IFRS concept the one normaliser reads — standardised statements, not a filing's tags, so a code
+`LINES` does not name is left out rather than guessed. Values are absolute decimals in the
+statement's currency.
 """
 
 import asyncio
@@ -55,67 +56,66 @@ REQUEST_INTERVAL_S = 1.0
 READ = "read"
 YEAR_DAYS = (350, 380)
 
-#: (IFRS concept, kind, pattern over "<code> <name>" lower-cased), first match wins per
-#: period. Attributable profit before the consolidated one; an instant for balances.
-LINES: Tuple[Tuple[str, str, str, "re.Pattern[str]"], ...] = tuple(
-    (concept, kind, timing, re.compile(pattern))
-    for concept, kind, timing, pattern in (
-        (
-            "Revenue",
-            "money",
-            "flow",
-            r"^(revenue|total_revenues?|revenues) |^\S+ total revenues?$",
-        ),
-        (
-            "ProfitLossAttributableToOwnersOfParent",
-            "money",
-            "flow",
-            r"net income.*attributable to (the )?(parent|owners|shareholders|common|equity holders)",
-        ),
-        (
-            "ProfitLoss",
-            "money",
-            "flow",
-            r"^net_income_loss |^\S+ net income( \(loss\))?$",
-        ),
-        (
-            "DilutedEarningsLossPerShare",
-            "per_share",
-            "flow",
-            r"diluted.*(eps|earnings per share)|(eps|earnings per share).*diluted",
-        ),
-        (
-            "ProfitLossFromOperatingActivities",
-            "money",
-            "flow",
-            r"^(operating_income|operating_profit|ebit) |^\S+ operating (income|profit)( \(loss\))?$",
-        ),
-        (
-            "CashFlowsFromUsedInOperatingActivities",
-            "money",
-            "flow",
-            r"cash (flows? )?(from|provided by|generated (by|from)|used in) operating",
-        ),
-        (
-            "PurchaseOfPropertyPlantAndEquipmentClassifiedAsInvestingActivities",
-            "money",
-            "flow",
-            r"capital expenditure|capex|purchases? of property",
-        ),
-        (
-            "CashAndCashEquivalents",
-            "money",
-            "instant",
-            r"^\S+ cash and (cash )?equivalents$",
-        ),
-        (
-            "EquityAttributableToOwnersOfParent",
-            "money",
-            "instant",
-            r"(equity attributable to (the )?(owners|shareholders|equity holders) of the parent)"
-            r"|total (shareholders'?|stockholders'?) equity",
-        ),
-    )
+MONEY, PER_SHARE, SHARES = "money", "per_share", "shares"
+FLOW, INSTANT = "flow", "instant"
+
+#: (IFRS concept, kind, timing, the vendor's line codes in order of preference), from its
+#: `/line-item-definitions/` for the industrial, bank and insurer templates and Siemens' live
+#: FY2025 checked against its annual report (2026-11-20). `net_income_loss` is the profit to
+#: the parent's owners (Siemens: 9,620m beside 10,387m consolidated); a bank states its total
+#: net revenue and its net interest income, an insurer its total revenues.
+LINES: Tuple[Tuple[str, str, str, Tuple[str, ...]], ...] = (
+    ("Revenue", MONEY, FLOW, ("revenue", "total_revenues", "total_net_revenue")),
+    ("InterestRevenueExpense", MONEY, FLOW, ("net_interest_income",)),
+    ("CostOfSales", MONEY, FLOW, ("cost_of_revenue",)),
+    ("GrossProfit", MONEY, FLOW, ("gross_profit",)),
+    ("ProfitLossFromOperatingActivities", MONEY, FLOW, ("operating_income_loss",)),
+    ("ProfitLossAttributableToOwnersOfParent", MONEY, FLOW, ("net_income_loss",)),
+    ("ProfitLoss", MONEY, FLOW, ("consolidated_net_income",)),
+    ("DilutedEarningsLossPerShare", PER_SHARE, FLOW, ("diluted_eps",)),
+    (
+        "AdjustedWeightedAverageShares",
+        SHARES,
+        FLOW,
+        ("weighted_avg_diluted_shares_outstanding",),
+    ),
+    ("CashFlowsFromUsedInOperatingActivities", MONEY, FLOW, ("cash_from_operations",)),
+    (
+        "PurchaseOfPropertyPlantAndEquipmentClassifiedAsInvestingActivities",
+        MONEY,
+        FLOW,
+        ("capital_expenditure_cf",),
+    ),
+    (
+        "DividendsPaidClassifiedAsFinancingActivities",
+        MONEY,
+        FLOW,
+        ("common_dividends_paid_cf", "total_dividends_paid_cf"),
+    ),
+    (
+        "PaymentsToAcquireOrRedeemEntitysShares",
+        MONEY,
+        FLOW,
+        ("repurchase_of_common_stock_cf",),
+    ),
+    (
+        "CashAndCashEquivalents",
+        MONEY,
+        INSTANT,
+        ("cash_and_equivalents", "cash_and_central_bank_balances"),
+    ),
+    ("EquityAttributableToOwnersOfParent", MONEY, INSTANT, ("total_common_equity",)),
+    ("Equity", MONEY, INSTANT, ("total_equity",)),
+)
+
+#: The vendor states a cash outflow negative; the normaliser reads payments as the positive
+#: US twins they map to (FCF = operating cash flow − capex).
+PAYMENTS = frozenset(
+    {
+        "PurchaseOfPropertyPlantAndEquipmentClassifiedAsInvestingActivities",
+        "DividendsPaidClassifiedAsFinancingActivities",
+        "PaymentsToAcquireOrRedeemEntitysShares",
+    }
 )
 
 
@@ -133,8 +133,8 @@ def _number(text: Any) -> Optional[float]:
 def facts_of(body: Dict[str, Any]) -> Tuple[List[Dict[str, Any]], Dict[str, str]]:
     """
     The financials response's fiscal years as facts in the shape `regulator_facts` reads, and
-    the vendor's line code per IFRS concept (`tagged`). Per period and concept the first line
-    a pattern names; a capex line is a payment, written as the outflow IFRS tags (negative).
+    the vendor's line code per IFRS concept (`tagged`). Per period and concept the first of
+    its codes the period states, from the period's own statements before a comparative.
     """
     facts: List[Dict[str, Any]] = []
     tagged: Dict[str, str] = {}
@@ -149,41 +149,50 @@ def facts_of(body: Dict[str, Any]) -> Tuple[List[Dict[str, Any]], Dict[str, str]
             continue
         if not YEAR_DAYS[0] <= (end - start).days + 1 <= YEAR_DAYS[1]:
             continue
-        taken: set = set()
-        for statement in period.get("statements") or []:
-            source = statement.get("source_filing") or {}
-            filed = str(source.get("release_datetime") or "")[:10] or end.isoformat()
-            accn = f"{SOURCE}:{source.get('id') or end.isoformat()}"
+        lines: Dict[str, Tuple[Dict[str, Any], Dict[str, Any]]] = {}
+        statements = sorted(
+            period.get("statements") or [],
+            key=lambda s: bool(s.get("is_comparative")),
+        )
+        for statement in statements:
             for item in statement.get("line_items") or []:
-                text = (
-                    f"{item.get('code') or ''} {item.get('name') or ''}".strip().lower()
-                )
-                value = _number(item.get("value"))
-                currency = (item.get("currency") or default_currency or "").upper()
-                if value is None or not re.fullmatch(r"[A-Z]{3}", currency):
+                lines.setdefault(str(item.get("code") or ""), (item, statement))
+        for concept, kind, timing, codes in LINES:
+            for code in codes:
+                item, statement = lines.get(code, (None, None))
+                if item is None:
                     continue
-                for concept, kind, timing, pattern in LINES:
-                    if concept in taken or not pattern.search(text):
-                        continue
-                    if concept.startswith("PurchaseOf"):
-                        value = -abs(value)
-                    facts.append(
-                        {
-                            "concept": concept,
-                            "unit": f"{currency}/shares"
-                            if kind == "per_share"
-                            else currency,
-                            "start": None if timing == "instant" else start.isoformat(),
-                            "end": end.isoformat(),
-                            "val": value,
-                            "accn": accn,
-                            "filed": filed,
-                            "form": REGULATOR_ANNUAL,
-                        }
-                    )
-                    tagged.setdefault(concept, f"{SOURCE}:{item.get('code')}")
-                    taken.add(concept)
-                    break
+                value = _number(item.get("value"))
+                currency = (
+                    item.get("currency")
+                    or (statement.get("currency") or {}).get("code")
+                    or default_currency
+                    or ""
+                ).upper()
+                if value is None or (
+                    kind != SHARES and not re.fullmatch(r"[A-Z]{3}", currency)
+                ):
+                    continue
+                source = statement.get("source_filing") or {}
+                facts.append(
+                    {
+                        "concept": concept,
+                        "unit": "shares"
+                        if kind == SHARES
+                        else f"{currency}/shares"
+                        if kind == PER_SHARE
+                        else currency,
+                        "start": None if timing == INSTANT else start.isoformat(),
+                        "end": end.isoformat(),
+                        "val": abs(value) if concept in PAYMENTS else value,
+                        "accn": f"{SOURCE}:{source.get('id') or end.isoformat()}",
+                        "filed": str(source.get("release_datetime") or "")[:10]
+                        or end.isoformat(),
+                        "form": REGULATOR_ANNUAL,
+                    }
+                )
+                tagged.setdefault(concept, f"{SOURCE}:{code}")
+                break
     return one_value_each(facts), tagged
 
 
