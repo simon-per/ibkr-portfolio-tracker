@@ -58,6 +58,24 @@ def _source(name: str):
             twse_sync.TaiwanFinancialsSync,
             None,
         )
+    if name == "edinet":
+        from app.services import edinet_sync
+
+        return (
+            edinet_sync.EDINET_GATE,
+            edinet_sync.MANUAL_SYNC_TYPE,
+            edinet_sync.JapanFinancialsSync,
+            edinet_sync.NOT_CONFIGURED,
+        )
+    if name == "vendor":
+        from app.services import vendor_sync
+
+        return (
+            vendor_sync.VENDOR_GATE,
+            vendor_sync.MANUAL_SYNC_TYPE,
+            vendor_sync.VendorFinancialsSync,
+            vendor_sync.NOT_CONFIGURED,
+        )
     raise ValueError(name)
 
 
@@ -108,7 +126,7 @@ def main() -> int:
     parser = argparse.ArgumentParser(
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
     )
-    parser.add_argument("--source", choices=("dart", "esef", "twse"), required=True)
+    parser.add_argument("--source", choices=("dart", "esef", "twse", "edinet", "vendor"), required=True)
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--force", action="store_true")
     args = parser.parse_args()

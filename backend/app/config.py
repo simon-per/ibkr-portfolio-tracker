@@ -70,6 +70,18 @@ class Settings(BaseSettings):
     # no request, as the Alpha Vantage fill does without its key.
     opendart_api_key: str = ""
 
+    # EDINET (Japan's Financial Services Agency), the Company tab's Japanese figures
+    # (docs/company-financials.md, *Japan*). A free subscription key the owner registers; it
+    # travels in the query string (`Subscription-Key`), so app/redact.py masks it. Without it
+    # the Japanese pass makes no request.
+    edinet_api_key: str = ""
+
+    # financialfilings.com (formerly financialreports.eu), the last fallback for a company no
+    # regulator the app reads covers (docs/company-financials.md, *Vendor fallback*). The
+    # owner's free-tier key (500 credits a month); sent as the `X-API-Key` header. Without it
+    # the vendor pass makes no request.
+    financialreports_api_key: str = ""
+
     # Database Configuration. The default is local development's backend/portfolio.db.
     # The container never uses it: docker-compose.yml sets DATABASE_URL to
     # /app/data/portfolio.db (the directory mount) in `environment:`, which overrides

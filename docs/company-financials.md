@@ -1544,6 +1544,53 @@ page (its 20-F).
 - **Prices**: Taiwan sits in EMIM, whose basket prices are not kept (too few SEC companies to
   check its currency), and neither is held, so their pages show figures without multiples.
 
+### Japan (EDINET)
+
+Built 2026-11-20, **waiting for the owner's key** (`EDINET_API_KEY`, the FSA's free
+subscription key; without it the pass returns nothing and records no run, as OpenDART's).
+`edinet_sync.JapanFinancialsSync`, `edinet:` keys, `--source edinet`, the weekly markets job
+after Taiwan; `tests/test_company_edinet_vendor.py`. Hitachi, Fujitsu, NEC, Tokyo Electron
+(Toyota and MUFG keep their 20-F pages).
+
+- **Found by day lists**: EDINET lists filings per day only (`/api/v2/documents.json?date=`),
+  each day asked once a pass and shared by every company; the company is its `secCode` (the
+  baskets' four-digit ticker and `0`), the report `docTypeCode` 120 (有価証券報告書). A first
+  look goes `FIRST_LOOKBACK_DAYS` (400) back; the history, `HISTORY_YEARS` (5) before the
+  newest report ±`HISTORY_WINDOW_DAYS`; the next one once `NEXT_DUE_AFTER` (330 days) past the
+  newest filing, from the day last looked through (`profile_checked_at`).
+- **Read from the summary of business results** (`summary_facts`): the report zip's instance
+  (`XBRL/PublicDoc/*.xbrl`) states five fiscal years of revenue, profit to owners, diluted EPS,
+  operating cash flow, cash and equity (`…SummaryOfBusinessResults` in its standard's spelling:
+  J-GAAP, `…IFRS…`, `…USGAAP…`), mapped to the IFRS concepts the normaliser reads (`SUMMARY`);
+  the dividend per share from its non-consolidated context; operating income from the
+  statements. J-GAAP's net assets include the non-controlling interests (total equity). Two
+  reports five years apart give ten years. The element names come from the published taxonomy
+  and third-party maps, **unverified against a live filing until the key exists**.
+- The key travels in the query string (`Subscription-Key`): `app/redact.py` masks it.
+
+### Vendor fallback (financialfilings.com)
+
+Owner's choice 2026-11-20, **waiting for the owner's free-tier key**
+(`FINANCIALREPORTS_API_KEY`, sent as `X-API-Key`; without it nothing). `vendor_sync`,
+`vendor:<the vendor's company id>` keys, `--source vendor`, last in the weekly markets job;
+`tests/test_company_edinet_vendor.py`.
+
+- **Scope**: the named companies no page answers for (an SEC page, or another regulator's with
+  figures), heaviest first — the German four, Roche, Nestlé, ABB, Tencent, China Construction
+  Bank, Commonwealth Bank, Hydro One, Serabi, and the Japanese four until EDINET reads them. A
+  regulator's page always wins: the regulators' scopes ignore vendor pages, and a company a
+  regulator covers leaves this scope and its vendor page the list.
+- **Asked**: the company by ISIN (`GET /companies/?isin=`, 1 credit), its fiscal years
+  (`GET /companies/{id}/financials/?fiscal_period=FY`, 40 credits, every year in one call), at
+  most every `REFRESH_AFTER` (90 days) a company, while `X-RateLimit-Monthly-Remaining` stays
+  above `CREDIT_FLOOR` (the free tier's 500 credits a month cover about twelve companies, so the
+  first fill takes two months). 401/402/403/429 stop the pass with a warning.
+- **Mapped by line code or name** (`LINES`, `facts_of`): the vendor's standardised statements,
+  not a filing's tags; a line no pattern names stays out. The codes beyond `revenue` are not in
+  the vendor's published reference, so the patterns read code and name both, and **the first
+  live run is to be checked against each company's annual report**. Values are absolute
+  decimals in the statement's currency; capex is written as the outflow IFRS tags.
+
 ### Not yet
 
 | order | market | the regulator's source | notes |
@@ -1552,8 +1599,8 @@ page (its 20-F).
 
 | later | China A/H, India, Middle East | CNINFO/HKEX, NSE/BSE/MCA21, Tadawul | no usable free structured source today; their US ADR filers only |
 | through the SEC | SAP, Novartis (and Toyota, MUFG, BHP) | their 20-F (*Scope*, 2026-11-19) | annual only, priced by the ordinary share |
-| later | Germany (Siemens, Allianz, E.ON, Infineon) | ESMA's European Single Access Point: phase 1 (Transparency Directive reports, ESEF among them) is due for public roll-out from Q3 2027 (ESMA's 2027 work programme) | today only the Unternehmensregister's manual download (XHTML/ZIP, no API) or each company's IR site; ESEF is inline XBRL, which `esef_client` does not parse (it reads the index's xBRL-JSON) |
-| none | Switzerland (Roche, Nestlé; ABB's last 20-F is FY2023) | outside ESEF; SIX publishes no structured reports | a paid vendor (EODHD) declined by the owner 2026-11-19, a private app; their pages stay absent |
+| vendor until then | Germany (Siemens, Allianz, E.ON, Infineon) | ESMA's European Single Access Point: phase 1 (Transparency Directive reports, ESEF among them) is due for public roll-out from Q3 2027 (ESMA's 2027 work programme) | today the Unternehmensregister's manual download (XHTML/ZIP, no API; `ixbrl.parse` reads it); the vendor fallback meanwhile |
+| vendor only | Switzerland (Roche, Nestlé; ABB's last 20-F is FY2023), Hong Kong (Tencent, China Construction Bank), Australia (Commonwealth Bank), Hydro One, Serabi | no structured regulator source | the vendor fallback (owner, 2026-11-20); EODHD's paid tier was declined 2026-11-19 |
 
 ## Known gaps and out of scope
 

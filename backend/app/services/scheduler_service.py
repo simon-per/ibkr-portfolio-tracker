@@ -2013,9 +2013,13 @@ class SchedulerService:
         (`dart_sync.KoreaFinancialsSync`, `company_dart_refresh`; without a key it records
         nothing), then the ESEF annual reports (`esef_sync.EuropeFinancialsSync`,
         `company_esef_refresh`), then Taiwan's MOPS reports (`twse_sync.TaiwanFinancialsSync`,
-        `company_twse_refresh`). One failing never stops the others.
+        `company_twse_refresh`), Japan's EDINET reports (`edinet_sync.JapanFinancialsSync`,
+        `company_edinet_refresh`; without a key it records nothing), and last the vendor
+        fallback for companies no regulator covers (`vendor_sync.VendorFinancialsSync`,
+        `company_vendor_pages_refresh`; without a key nothing). One failing never stops the
+        others.
         """
-        from app.services import dart_sync, esef_sync, twse_sync
+        from app.services import dart_sync, edinet_sync, esef_sync, twse_sync, vendor_sync
 
         dart = await self._company_job(
             dart_sync.DART_GATE, dart_sync.SCHEDULED_SYNC_TYPE, dart_sync.RESULT_KEY,
@@ -2032,8 +2036,23 @@ class SchedulerService:
             "Taiwan company financials refresh",
             lambda db: twse_sync.TaiwanFinancialsSync(db).refresh(),
         )
+        edinet = await self._company_job(
+            edinet_sync.EDINET_GATE, edinet_sync.SCHEDULED_SYNC_TYPE, edinet_sync.RESULT_KEY,
+            "Japanese company financials refresh",
+            lambda db: edinet_sync.JapanFinancialsSync(db).refresh(),
+        )
+        vendor = await self._company_job(
+            vendor_sync.VENDOR_GATE, vendor_sync.SCHEDULED_SYNC_TYPE, vendor_sync.RESULT_KEY,
+            "Vendor company financials refresh",
+            lambda db: vendor_sync.VendorFinancialsSync(db).refresh(),
+        )
         return {
-            "type": "company_markets_refresh", "dart": dart, "esef": esef, "twse": twse
+            "type": "company_markets_refresh",
+            "dart": dart,
+            "esef": esef,
+            "twse": twse,
+            "edinet": edinet,
+            "vendor": vendor,
         }
 
     async def _company_job(

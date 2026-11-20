@@ -34,7 +34,7 @@ import httpx
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.clock import utc_today, utcnow
-from app.models.company_financials import TWSE_SCHEME, Company
+from app.models.company_financials import TWSE_SCHEME, VENDOR_SCHEME, Company
 from app.repositories.company_financials_repository import CompanyFinancialsRepository
 from app.services.company_markets import NamedCompany, named_companies, sec_isins
 from app.services.esef_reports import convert
@@ -104,7 +104,9 @@ class TaiwanFinancialsSync:
         others = {
             isin
             for scheme_company in await self.repo.other_companies()
-            if scheme_company.scheme != TWSE_SCHEME and scheme_company.isin
+            # A vendor page yields to a regulator's (`vendor_sync`).
+            if scheme_company.scheme not in (TWSE_SCHEME, VENDOR_SCHEME)
+            and scheme_company.isin
             for isin in [scheme_company.isin.strip().upper()]
         }
         return [

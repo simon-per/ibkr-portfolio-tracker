@@ -36,7 +36,7 @@ _REDACTED = "[REDACTED]"
 # stringified into a message. The query id (`q=`) is left readable: it is already
 # public in the repo docs and useless without the token, and keeping it makes the
 # stored error still debuggable.
-_TOKEN_PARAM = re.compile(r"([?&](?:t|apikey)=)[^&\s'\"]+")
+_TOKEN_PARAM = re.compile(r"([?&](?:t|apikey|Subscription-Key)=)[^&\s'\"]+")
 
 # Never substring-replace a trivially short secret value: a one-letter test token
 # would corrupt every message it touches, and a six-digit share passcode would mangle
@@ -56,6 +56,8 @@ _LITERAL_SECRET_SETTINGS = (
     "logo_dev_secret_key",
     "alpha_vantage_api_key",
     "opendart_api_key",
+    "edinet_api_key",
+    "financialreports_api_key",
     "openfigi_api_key",
     "api_admin_token",
     # Not a secret, but it carries the operator's email address (docs/company-financials.md).

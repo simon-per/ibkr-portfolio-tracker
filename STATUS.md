@@ -29,19 +29,16 @@ code trace; all of them shipped that evening (waves 1–3, the product issues #7
 
 ## Needs a human
 
-- **The Company tab's last blank pages need a source only you can open** (2026-11-19, measured
-  on production: of the 206 companies the app names, 190 have a page and 186 of those are fully
-  backfilled — last FY present, core lines in it, no gap in ten years; the four short are
-  Berkshire's EPS (two listed classes), Iberdrola's (no total EPS tagged), Prysmian's and Terna's
-  FY2025 (not in the ESEF index)). **Japan** (Hitachi, Fujitsu, NEC, Tokyo Electron): EDINET's API
-  answers 401 without a free subscription key — register at the FSA's EDINET API page and put it
-  in the VPS `.env` (no code reads one yet: the EDINET pass is the next build, needing a J-GAAP
-  map). **Germany** (Siemens, Allianz, E.ON, Infineon): their ESEF reports sit on the
-  Unternehmensregister, manual download only (XHTML/ZIP; `ixbrl.parse` reads them) or a
-  free-tier vendor account (financialfilings.com, 500 credits a month) — or wait for ESMA's
-  single access point (phase 1 from Q3 2027). **No free structured source at all**: Roche,
-  Nestlé, ABB (Swiss; ABB's 20-F stops at FY2023), Tencent, China Construction Bank, Commonwealth
-  Bank, Hydro One, Serabi.
+- **Two keys for the Company tab's last blank pages** (owner's answers 2026-11-20; measured on
+  production 2026-11-19: of the 206 companies the app names, 190 have a page and 186 of those
+  are fully backfilled). **`EDINET_API_KEY`**: register at the FSA's EDINET API page and put it
+  in the VPS `.env` (`docker compose up -d`, never `restart`); the Japanese pass is built and
+  waits for it (Hitachi, Fujitsu, NEC, Tokyo Electron). **`FINANCIALREPORTS_API_KEY`**: sign up
+  for financialfilings.com's free tier (500 credits a month) and put the key there too; the
+  vendor fallback is built and waits for it (the German four, Roche, Nestlé, ABB, Tencent, China
+  Construction Bank, Commonwealth Bank, Hydro One, Serabi; about twelve a month). Then run
+  `fetch_company_markets --source edinet` and `--source vendor` once and check the pages against
+  the annual reports: both passes were built from documentation, without a live answer.
 
 - **Confirm the Alpha Vantage key's tier.** The Company tab's statement fill and the price
   fallback now share one budget of 25 calls a UTC day (`alpha_vantage.DAILY_LIMIT`, the free

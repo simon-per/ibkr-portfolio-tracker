@@ -53,7 +53,11 @@ SEC_SCHEME = "sec"
 DART_SCHEME = "dart"
 LEI_SCHEME = "lei"
 TWSE_SCHEME = "twse"
-OTHER_SCHEMES = (DART_SCHEME, LEI_SCHEME, TWSE_SCHEME)
+#: A Japanese listing's four-digit code (EDINET), and a company only a vendor covers
+#: (`vendor_sync`, financialfilings.com's company id) — both 2026-11-20.
+EDINET_SCHEME = "edinet"
+VENDOR_SCHEME = "vendor"
+OTHER_SCHEMES = (DART_SCHEME, LEI_SCHEME, TWSE_SCHEME, EDINET_SCHEME, VENDOR_SCHEME)
 
 
 def company_key(scheme: str, native_id: object) -> str:
