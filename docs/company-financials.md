@@ -1577,7 +1577,8 @@ Owner's choice 2026-11-20, **waiting for the owner's free-tier key**
 
 - **Scope**: the named companies no page answers for (an SEC page, or another regulator's with
   figures), heaviest first — the German four, Roche, Nestlé, ABB, Tencent, China Construction
-  Bank, Commonwealth Bank, Hydro One, Serabi, and the Japanese four until EDINET reads them. A
+  Bank, Commonwealth Bank, Hydro One, Serabi, and the Japanese four until EDINET reads them,
+  asked last (a month's credits cover about ten companies, and EDINET is free). A
   regulator's page always wins: the regulators' scopes ignore vendor pages, and a company a
   regulator covers leaves this scope and its vendor page the list.
 - **Asked**: the company by ISIN (`GET /companies/?isin=`, 1 credit), its fiscal years

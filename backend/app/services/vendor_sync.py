@@ -37,6 +37,7 @@ from app.models.company_financials import VENDOR_SCHEME
 from app.repositories.company_financials_repository import CompanyFinancialsRepository
 from app.services.company_financials_normaliser import REGULATOR_ANNUAL
 from app.services.company_markets import NamedCompany, named_companies, sec_isins
+from app.services.edinet_sync import JAPAN_ISIN
 from app.services.regulator_facts import normalise_reports, one_value_each
 
 logger = logging.getLogger(__name__)
@@ -215,16 +216,21 @@ class VendorFinancialsSync:
         self.remaining: Optional[int] = None
 
     async def scope(self) -> List[NamedCompany]:
-        """The named companies no other source's page answers for, heaviest first."""
+        """
+        The named companies no other source's page answers for, heaviest first — and a
+        Japanese one last: EDINET reads it free once its key exists, and a month's credits
+        cover about ten companies (2026-11-20, sixteen in scope).
+        """
         answered = await sec_isins(self.db)
         for company in await self.repo.other_companies():
             if company.scheme != VENDOR_SCHEME and company.isin and company.fetched_at:
                 answered.add(company.isin.strip().upper())
-        return [
+        scope = [
             c
             for c in await named_companies(self.db)
             if c.isins and not any(i in answered for i in c.isins)
         ]
+        return sorted(scope, key=lambda c: any(JAPAN_ISIN.match(i) for i in c.isins))
 
     async def refresh(
         self, *, force: bool = False, dry_run: bool = False

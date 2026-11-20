@@ -430,6 +430,21 @@ async def test_the_vendor_fills_only_what_no_regulator_covers(db, monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_the_vendor_asks_a_japanese_company_last(db, monkeypatch):
+    hitachi = NamedCompany("HITACHI LTD", ["JP3788600009"])
+    siemens = NamedCompany("Siemens Aktiengesellschaft", ["DE0007236101"])
+
+    async def named(_db):
+        return [hitachi, siemens]
+
+    monkeypatch.setattr(vendor_sync, "named_companies", named)
+    assert [c.name for c in await VendorFinancialsSync(db).scope()] == [
+        siemens.name,
+        hitachi.name,
+    ]
+
+
+@pytest.mark.asyncio
 async def test_spent_credits_or_a_refused_key_stop_the_vendor_pass(db, monkeypatch):
     monkeypatch.setattr(
         settings, "financialreports_api_key", "vendor-test-key", raising=False
