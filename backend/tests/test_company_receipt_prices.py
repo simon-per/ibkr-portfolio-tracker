@@ -72,6 +72,31 @@ async def test_an_adr_filer_is_priced_by_its_ordinary_shares_listing(db, today):
 
 
 @pytest.mark.asyncio
+async def test_a_new_york_registry_share_is_its_ordinary_share_converted(db, today):
+    # ASML's New York share has a CINS ISIN: its USD closes, converted, price EUR figures.
+    db.add(SecCompany(cik=937966, ticker="ASML", name="ASML Holding NV", isin="USN070592100",
+                      fetched_at=datetime(2026, 11, 1), universe_seen_at=datetime(2026, 11, 1)))
+    for metric, value, unit in (
+        ("revenue", 32.67e9, "EUR"),
+        ("net_income", 9.6094e9, "EUR"),
+        ("eps_diluted", 24.71, "EUR/shares"),
+        ("diluted_shares", 388.9e6, "shares"),
+    ):
+        db.add(CompanyFinancial(
+            cik=937966, period_end=date(2025, 12, 31), fiscal_year=2025, fiscal_period="FY",
+            metric=metric, value=value, unit=unit, source_concept=metric,
+            filed=date(2026, 2, 11), fetched_at=datetime(2026, 11, 1),
+        ))
+    db.add(CompanyPrice(cik=937966, date=FRIDAY, close=1495.16, currency="USD"))
+    db.add(ExchangeRate(date=FRIDAY, from_currency="USD", to_currency="EUR",
+                        rate=Decimal(str(USD_EUR)), source="frankfurter"))
+    await db.commit()
+    svc = CompanyFinancialsService(db)
+    page = await svc.get_financials(await svc.company_by_key("sec:937966"), "annual", "max")
+    assert page["key_stats"]["pe_ratio"] == pytest.approx(1495.16 * USD_EUR / 24.71)
+
+
+@pytest.mark.asyncio
 async def test_no_whole_ratio_or_an_eps_per_receipt_prices_nothing(db, today):
     # 0.8 of a share: a preferred's discount, not a receipt of whole shares.
     await _tsmc(db, adr_close=1460 * TWD_EUR / USD_EUR * 0.8)

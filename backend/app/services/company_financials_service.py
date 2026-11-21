@@ -56,6 +56,7 @@ fold a decade of exchange-rate moves into every growth rate.
 
 import copy
 import json
+import re
 from bisect import bisect_right
 from dataclasses import dataclass, field
 from statistics import median
@@ -199,6 +200,10 @@ MARKET_CAP_SHARE_TOLERANCE = 0.10
 #: New York share is one, TSMC's ADR five plus its premium), and its EPS is per reported
 #: share: net income over EPS within this of the diluted count.
 RECEIPT_RATIO_TOLERANCE = 0.10
+#: A CINS-based ISIN: `US`, then a letter for the issuer's country (`N` the Netherlands),
+#: the foreign issuer's own share registered in New York — never a depositary receipt, which
+#: a US bank issues under an all-numeric CUSIP.
+CINS_ISIN = re.compile(r"^US[A-Z][0-9A-Z]{8}\d$")
 # The compound growth the cards and the key figures quote, in years back from the latest.
 CAGR_YEARS = (3, 5, 10)
 # Two quarter ends this far apart are consecutive: 12 to 14 weeks, or the 16 and 17 of a
@@ -1258,31 +1263,48 @@ class CompanyFinancialsService:
 
     async def _ordinary_closes(
         self, company, rows: Sequence[CompanyFinancial], currency: str
-    ) -> List[Tuple[date, float]]:
+    ) -> Tuple[List[Tuple[date, float]], bool]:
         """
         An SEC filer quoted in another currency than it reports in has Yahoo closes that
         match nothing (ASML's New York share in USD beside EUR figures, TSMC's ADR beside
-        TWD), so it had no multiple. A held listing the identity store folds with it
-        (`_linked_listings`: ASML@AEB, 2330@TWSE) is its ordinary share when the listing is
-        another security than the receipt (its own ISIN), the receipt's newest close,
-        converted at that day's rate, stands at a whole number of the listing's close
-        (`NEIGHBOUR_RATIOS` within `RECEIPT_RATIO_TOLERANCE`: a preferred share's discount or
-        another company's price does not), and the EPS is per reported share (net income over
-        it within the same tolerance of the diluted count, so never an EPS per receipt). Its
-        closes, in the reporting currency, then price the figures as another regulator's are
-        (`_other_closes`), unless IBKR booked a split of it after the newest filing.
+        TWD), so it had no multiple. Its closes in the reporting currency, and whether they
+        are its own Yahoo closes (put on the EPS basis with Yahoo's splits), when the EPS is
+        per reported share (net income over it within `RECEIPT_RATIO_TOLERANCE` of the diluted
+        count, so never an EPS per receipt) and either:
+
+        - **its own ISIN is a CINS one** (`US` and a letter, `CINS_ISIN`): the foreign
+          issuer's own share registered in New York, one for one (ASML's `USN070592100`),
+          where a depositary receipt carries a bank's all-numeric CUSIP (TSM's
+          `US8740391003`). Its Yahoo closes, converted at each day's rate.
+        - **a held listing the identity store folds with it** (`_linked_listings`:
+          2330@TWSE) is its ordinary share: another security than the receipt (its own ISIN),
+          and the receipt's newest close, converted at that day's rate, stands at a whole
+          number of the listing's close (`NEIGHBOUR_RATIOS` within `RECEIPT_RATIO_TOLERANCE`:
+          a preferred share's discount or another company's price does not). Its closes then
+          price the figures as another regulator's are (`_other_closes`), unless IBKR booked
+          a split of it after the newest filing.
         """
         stored = await self.repo.prices_for(company.cik)
         if not stored or stored[-1].currency == currency or not _eps_per_reported_share(rows):
-            return []
+            return [], False
         receipt = stored[-1]
         own = (company.isin or "").strip().upper()
+        if CINS_ISIN.match(own):
+            rates = await preload_eur_rates(
+                self.db, {receipt.currency, currency}, stored[0].date, receipt.date
+            )
+            converted = []
+            for p in stored:
+                rate = cross_rate(rates, p.currency, currency, p.date)
+                if rate is not None and p.close > 0:
+                    converted.append((p.date, p.close * rate))
+            return converted, bool(converted)
         rates = await preload_eur_rates(
             self.db, {receipt.currency, currency}, receipt.date, receipt.date
         )
         rate = cross_rate(rates, receipt.currency, currency, receipt.date)
         if rate is None or receipt.close <= 0:
-            return []
+            return [], False
         newest_filed = max(r.filed for r in rows)
         for sid in (await self._linked_held()).get(company.key, []):
             listing = await self.db.get(Security, sid)
@@ -1298,9 +1320,9 @@ class CompanyFinancialsService:
             if _snap(ratio, NEIGHBOUR_RATIOS, RECEIPT_RATIO_TOLERANCE) is None:
                 continue
             if await self._split_since(sid, newest_filed):
-                return []
-            return closes
-        return []
+                return [], False
+            return closes, False
+        return [], False
 
     async def _split_since(self, security_id: int, since: Optional[date]) -> bool:
         """
@@ -1518,8 +1540,10 @@ class CompanyFinancialsService:
             closes = await self._closes(company.cik, rows, currency, listing)
             prices = await self._on_eps_basis(company.cik, rows, closes)
             if not closes and rows and currency is not None:
-                closes = await self._ordinary_closes(company, rows, currency)
-                if closes:
+                closes, own_share = await self._ordinary_closes(company, rows, currency)
+                if own_share:
+                    prices = await self._on_eps_basis(company.cik, rows, closes)
+                elif closes:
                     prices = eps_basis(closes, [], max(r.filed for r in rows))
         elif rows and currency is not None:
             closes, splits = await self._other_closes(company, rows, currency)

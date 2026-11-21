@@ -978,12 +978,19 @@ no multiple rather than a receipt's.
 
 **An SEC filer quoted in another currency than it reports in** (ASML's New York share in USD
 beside EUR figures, TSMC's ADR beside TWD; 2026-11-21) has Yahoo closes that match nothing.
-`_ordinary_closes` prices it by a held listing the identity store folds with it, when that
-listing is another security than the receipt, the receipt's newest close converted at the day's
-rate stands at a whole number of the listing's close (`NEIGHBOUR_RATIOS` within
-`RECEIPT_RATIO_TOLERANCE`: not a preferred's discount), and the EPS is per reported share (net
-income over it near the stated diluted count). Alibaba, PDD and Kaspi have no such listing held:
-no multiple. `tests/test_company_receipt_prices.py`.
+`_ordinary_closes` prices it, when the EPS is per reported share (net income over it near the
+stated diluted count, never an EPS per receipt), by:
+
+- **its own Yahoo closes converted at each day's rate, when its ISIN is a CINS one**
+  (`CINS_ISIN`: `US` and a country letter, ASML's `USN070592100`): the foreign issuer's own share
+  registered in New York, one for one. A depositary receipt carries a US bank's all-numeric
+  CUSIP (TSM's `US8740391003`) and is never converted.
+- **else a held listing the identity store folds with it** (2330@TWSE for TSMC), when that
+  listing is another security than the receipt and the receipt's newest close converted at the
+  day's rate stands at a whole number of the listing's close (`NEIGHBOUR_RATIOS` within
+  `RECEIPT_RATIO_TOLERANCE`: not a preferred's discount). Its closes then price the figures.
+
+Alibaba, PDD and Kaspi have neither: no multiple. `tests/test_company_receipt_prices.py`.
 `tests/test_constituent_prices.py`, `tests/test_company_twenty_f.py`.
 
 ## The overview
