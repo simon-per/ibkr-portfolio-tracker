@@ -1443,9 +1443,10 @@ def _continuing_eps_alone(values: Dict[str, Dict[Tuple[str, date], Obs]]) -> Non
     in a period with no profit from discontinued operations tagged: there it is the EPS
     (ABNB, Shell). Beside a discontinued profit it leaves that profit out, so the EPS is the
     continuing one plus the discontinued operations' (`DISCONTINUED_EPS`), both over the same
-    diluted count (IAS 33.68, ASC 260): Iberdrola's 2025, 0.843 and 0.054, is 0.897
-    (2026-11-21). Without the discontinued EPS it stays absent. The discontinued figures are
-    dropped here, read for this alone (2026-11-19).
+    diluted count (IAS 33.68, ASC 260; 2026-11-21). Without the discontinued EPS it stays
+    absent: Iberdrola's 2025 states 0.843 continuing and its 0.054 discontinued only in its
+    own extension (`ibe:GananciasPerdidasPorAccion…Discontinuadas`), which is not read. The
+    discontinued figures are dropped here, read for this alone (2026-11-19).
     """
     discontinued = values.pop(DISCONTINUED, {})
     discontinued_eps = values.pop(DISCONTINUED_EPS, {})

@@ -329,7 +329,8 @@ def test_continuing_eps_is_the_eps_only_without_discontinued_operations():
     assert eps == {date(2024, 12, 31): 0.589}
     assert not any(r["metric"] == "discontinued_income" for r in normalise(doc).rows)
 
-    # With the discontinued operations' EPS tagged, the EPS is the two together (same count).
+    # With the discontinued operations' EPS tagged in the standard taxonomy (Iberdrola tags
+    # it only in its own extension), the EPS is the two together (same count).
     doc["facts"]["ifrs-full"]["DilutedEarningsLossPerShareFromDiscontinuedOperations"] = {
         "units": {"EUR/shares": [_fy("2025-12-31", 0.054)]}
     }
