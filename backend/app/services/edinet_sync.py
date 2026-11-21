@@ -82,9 +82,10 @@ ANNUAL_REPORT = "120"
 FIRST_LOOKBACK_DAYS = 400
 #: What a read keeps: 1 until 2026-11-21 (NULL); 2 with per-share figures on the latest
 #: share basis, a transition year's IFRS spelling, basic EPS for a blank diluted one, and an
-#: IFRS filer's operating profit and total equity from its summary. A report read under an
-#: older one is read once more, by its document id (`_reread`).
-READER = 2
+#: IFRS filer's operating profit and total equity from its summary; 3 with the shares
+#: outstanding at the year end (`OUTSTANDING`). A report read under an older one is read once
+#: more, by its document id (`_reread`).
+READER = 3
 #: Four years apart, so two reports' five-year summaries share a year (*Splits*); three
 #: reports give thirteen fiscal years.
 HISTORY_YEARS = 4
@@ -188,6 +189,11 @@ BASIC_EPS: Dict[str, Tuple[str, str]] = {
 #: The issued share count at each year end, on the non-consolidated context: never stored,
 #: it dates each split (`_split_factors`).
 ISSUED_SHARES = "TotalNumberOfIssuedSharesSummaryOfBusinessResults"
+#: The treasury shares (and those held crosswise) at the year end, from the report's status of
+#: shares: the issued count less them is the shares outstanding, the market cap's count
+#: (`OUTSTANDING`; Fujitsu's FY2025 1,739.8m issued, 5.3m held). Without it, no count.
+TREASURY_SHARES = "TotalNumberOfSharesHeldTreasurySharesEtc"
+OUTSTANDING = "NumberOfSharesOutstanding"
 EPS = "DilutedEarningsLossPerShare"
 DPS = "DividendsRecognisedAsDistributionsToOwnersPerShare"
 #: Operating income from the statements (`jppfs_cor`, `jpigp_cor`), for a J-GAAP filer's
@@ -278,6 +284,7 @@ def summary_facts(
                 or name in OPERATING
                 or name in BASIC_EPS
                 or name == ISSUED_SHARES
+                or name == TREASURY_SHARES
             ):
                 if elem.get(XSI_NIL) != "true" and elem.text and elem.text.strip():
                     raw.append(
@@ -291,6 +298,7 @@ def summary_facts(
         elem.clear()
     candidates: List[Tuple[Tuple[bool, bool], Dict[str, Any], str]] = []
     issued: Dict[str, float] = {}
+    treasury: Dict[str, float] = {}
     for name, ctx, unit_ref, text in raw:
         context = contexts.get(ctx)
         if context is None:
@@ -306,6 +314,12 @@ def summary_facts(
                 value = _number(text)
                 if value:
                     issued[end] = value
+            continue
+        if name == TREASURY_SHARES:
+            if start is None and end and not members and units.get(unit_ref) == "shares":
+                value = _number(text)
+                if value is not None and value >= 0:
+                    treasury[end] = value
             continue
         concept, kind = SUMMARY.get(name) or OPERATING.get(name) or BASIC_EPS[name]
         dividend = concept == "DividendsRecognisedAsDistributionsToOwnersPerShare"
@@ -366,6 +380,21 @@ def summary_facts(
         if rank == best[(f["concept"], f["start"], f["end"])]:
             facts.append(f)
             tagged.setdefault(f["concept"], f"edinet:{name}")
+    for end, held in treasury.items():
+        if issued.get(end, 0) > held:
+            facts.append(
+                {
+                    "concept": OUTSTANDING,
+                    "unit": "shares",
+                    "start": None,
+                    "end": end,
+                    "val": issued[end] - held,
+                    "accn": accn,
+                    "filed": filed.isoformat(),
+                    "form": REGULATOR_ANNUAL,
+                }
+            )
+            tagged.setdefault(OUTSTANDING, f"edinet:{ISSUED_SHARES}-{TREASURY_SHARES}")
     return _on_latest_basis(one_value_each(facts), issued), tagged
 
 

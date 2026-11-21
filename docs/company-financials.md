@@ -1584,7 +1584,10 @@ after Taiwan; `tests/test_company_edinet_vendor.py`. Hitachi, Fujitsu, NEC, Toky
   (current and prior year). J-GAAP's net assets include the non-controlling interests (total
   equity): a J-GAAP filer (Tokyo Electron) has no equity attributable to owners in the
   summary. Checked 2026-11-21 against the four FY2025 reports (Hitachi, Fujitsu, NEC,
-  Tokyo Electron). A year an IFRS adopter's summary states in both standards takes the IFRS
+  Tokyo Electron). The shares outstanding at the year end are the summary's issued count less
+  the treasury shares the report's status of shares states then
+  (`TotalNumberOfSharesHeldTreasurySharesEtc`; none stated, no count), the market cap's count.
+  A year an IFRS adopter's summary states in both standards takes the IFRS
   figure (`_rank`: NEC's FY2015-FY2016, 2,821bn J-GAAP beside 2,825bn IFRS, else one period
   with two values the normaliser refuses); a blank diluted EPS (no dilutive share, or a loss
   year) takes the basic one (`BASIC_EPS`).
@@ -1626,7 +1629,9 @@ Owner's choice 2026-11-20, **waiting for the owner's free-tier key**
   the cash falls back to a bank's `cash_and_central_bank_balances`. Values are absolute
   decimals in the statement's currency; the vendor states outflows negative, written as the
   positive payments the normaliser's US twins are (`PAYMENTS`: FCF = OCF − capex). A share
-  count carries the statement's currency there and is read as shares. A diluted EPS further
+  count carries the statement's currency there and is read as shares; so is
+  `shares_outstanding_on_filing_date`, kept at the period end as the market cap's count. A
+  diluted EPS further
   than `EPS_CHECK_FACTOR` (2×) from the profit to owners over the diluted shares is left out
   (Serabi's FY2024: 36.73, its cents as dollars). One call returns the years back to about
   FY2013. No dividend per share: that is the vendor's separate `/dividends/` (40 credits more

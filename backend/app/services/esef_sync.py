@@ -71,9 +71,9 @@ REFUSED_OVER = "refused_over"
 #: The IFRS concept set a read keeps (`regulator_facts.CONCEPT_KIND`, from the normaliser's
 #: twins): 1 until 2026-11-19 (NULL), 2 with continuing EPS and operating cash flow, net
 #: interest income and discontinued profit (Shell's EPS, National Grid's cash flow, HSBC's
-#: and Santander's top line), 3 with the discontinued operations' EPS (2026-11-21). A report
-#: read under an older set is read once more.
-READER = 3
+#: and Santander's top line), 3 with the discontinued operations' EPS, 4 with the shares
+#: outstanding (2026-11-21). A report read under an older set is read once more.
+READER = 4
 
 
 def stale_read(report) -> bool:

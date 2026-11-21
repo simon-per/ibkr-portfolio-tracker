@@ -440,6 +440,49 @@ def test_an_eps_its_own_profit_and_shares_contradict_is_left_out():
     assert "DilutedEarningsLossPerShare" in concepts(period("0.367"))
 
 
+def test_the_shares_outstanding_from_each_source():
+    facts, _ = facts_of(
+        {
+            "currency": {"code": "EUR"},
+            "periods": [
+                {
+                    "fiscal_period": "FY",
+                    "period_start_date": "2024-10-01",
+                    "period_end_date": "2025-09-30",
+                    "statements": [
+                        {
+                            "line_items": [
+                                {
+                                    "code": "shares_outstanding_on_filing_date",
+                                    "value": "781000000",
+                                    "currency": "EUR",
+                                }
+                            ]
+                        }
+                    ],
+                }
+            ],
+        }
+    )
+    assert [(f["concept"], f["val"], f["unit"], f["start"]) for f in facts] == [
+        ("NumberOfSharesOutstanding", 781e6, "shares", None)
+    ]
+    # EDINET: the year end's issued count less the treasury shares the report states then.
+    instance = _instance().replace(
+        b"</xbrli:xbrl>",
+        b'<xbrli:context id="CurrentYearInstant_NonConsolidatedMember"><xbrli:entity><xbrli:identifier scheme="s">E</xbrli:identifier></xbrli:entity>'
+        b"<xbrli:period><xbrli:instant>2026-03-31</xbrli:instant></xbrli:period>"
+        b'<xbrli:scenario><xbrldi:explicitMember dimension="jppfs_cor:ConsolidatedOrNonConsolidatedAxis">jppfs_cor:NonConsolidatedMember</xbrldi:explicitMember></xbrli:scenario></xbrli:context>'
+        b'<xbrli:unit id="shares"><xbrli:measure>xbrli:shares</xbrli:measure></xbrli:unit>'
+        b'<jpcrp_cor:TotalNumberOfIssuedSharesSummaryOfBusinessResults contextRef="CurrentYearInstant_NonConsolidatedMember" unitRef="shares">4535560000</jpcrp_cor:TotalNumberOfIssuedSharesSummaryOfBusinessResults>'
+        b'<jpcrp_cor:TotalNumberOfSharesHeldTreasurySharesEtc contextRef="CurrentYearInstant" unitRef="shares">5560000</jpcrp_cor:TotalNumberOfSharesHeldTreasurySharesEtc>'
+        b"</xbrli:xbrl>",
+    )
+    facts, _ = summary_facts(instance, "S100TEST", date(2026, 6, 20))
+    out = [f for f in facts if f["concept"] == "NumberOfSharesOutstanding"]
+    assert [(f["end"], f["val"]) for f in out] == [("2026-03-31", 4.53e9)]
+
+
 def test_a_banks_vendor_lines():
     bank = {
         "currency": {"code": "AUD"},

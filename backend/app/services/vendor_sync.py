@@ -112,6 +112,14 @@ LINES: Tuple[Tuple[str, str, str, Tuple[str, ...]], ...] = (
     ),
     ("EquityAttributableToOwnersOfParent", MONEY, INSTANT, ("total_common_equity",)),
     ("Equity", MONEY, INSTANT, ("total_equity",)),
+    # The count on the filing date, kept at the period end: the market cap's count, which the
+    # service checks against the diluted average (`MARKET_CAP_SHARE_TOLERANCE`).
+    (
+        "NumberOfSharesOutstanding",
+        SHARES,
+        INSTANT,
+        ("shares_outstanding_on_filing_date",),
+    ),
 )
 
 #: A diluted EPS further than this factor from the profit to owners over the diluted shares

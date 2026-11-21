@@ -681,6 +681,9 @@ IFRS_TWINS: Dict[str, str] = {
     "PaymentsToAcquireOrRedeemEntitysShares": "PaymentsForRepurchaseOfCommonStock",
     "CashAndCashEquivalents": "CashAndCashEquivalentsAtCarryingValue",
     "EquityAttributableToOwnersOfParent": "StockholdersEquity",
+    # The shares outstanding at a period end, for the market cap (2026-11-21: no page of
+    # another regulator had one, so none had a market cap).
+    "NumberOfSharesOutstanding": "CommonStockSharesOutstanding",
     "Equity": "StockholdersEquityIncludingPortionAttributableToNoncontrollingInterest",
 }
 
