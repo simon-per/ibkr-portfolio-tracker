@@ -1546,7 +1546,7 @@ page (its 20-F).
 
 ### Japan (EDINET)
 
-Built 2026-11-20, **waiting for the owner's key** (`EDINET_API_KEY`, the FSA's free
+Built 2026-11-20, live 2026-11-21 with the owner's key (`EDINET_API_KEY`, the FSA's free
 subscription key; without it the pass returns nothing and records no run, as OpenDART's).
 `edinet_sync.JapanFinancialsSync`, `edinet:` keys, `--source edinet`, the weekly markets job
 after Taiwan; `tests/test_company_edinet_vendor.py`. Hitachi, Fujitsu, NEC, Tokyo Electron
@@ -1555,17 +1555,28 @@ after Taiwan; `tests/test_company_edinet_vendor.py`. Hitachi, Fujitsu, NEC, Toky
 - **Found by day lists**: EDINET lists filings per day only (`/api/v2/documents.json?date=`),
   each day asked once a pass and shared by every company; the company is its `secCode` (the
   baskets' four-digit ticker and `0`), the report `docTypeCode` 120 (有価証券報告書). A first
-  look goes `FIRST_LOOKBACK_DAYS` (400) back; the history, `HISTORY_YEARS` (5) before the
-  newest report ±`HISTORY_WINDOW_DAYS`; the next one once `NEXT_DUE_AFTER` (330 days) past the
-  newest filing, from the day last looked through (`profile_checked_at`).
+  look goes `FIRST_LOOKBACK_DAYS` (400) back; the history, `HISTORY_YEARS` (4) before the
+  oldest report ±`HISTORY_WINDOW_DAYS`, one more report a pass up to `HISTORY_REPORTS` (3,
+  thirteen fiscal years); the next one once `NEXT_DUE_AFTER` (330 days) past the newest
+  filing, from the day last looked through (`profile_checked_at`).
 - **Read from the summary of business results** (`summary_facts`): the report zip's instance
   (`XBRL/PublicDoc/*.xbrl`) states five fiscal years of revenue, profit to owners, diluted EPS,
   operating cash flow, cash and equity (`…SummaryOfBusinessResults` in its standard's spelling:
   J-GAAP, `…IFRS…`, `…USGAAP…`), mapped to the IFRS concepts the normaliser reads (`SUMMARY`);
-  the dividend per share from its non-consolidated context; operating income from the
-  statements. J-GAAP's net assets include the non-controlling interests (total equity). Two
-  reports five years apart give ten years. The element names come from the published taxonomy
-  and third-party maps, **unverified against a live filing until the key exists**.
+  the dividend per share from its non-consolidated context; an IFRS filer's operating profit
+  and total equity from the summary, a J-GAAP filer's operating income from the statements
+  (current and prior year). J-GAAP's net assets include the non-controlling interests (total
+  equity): a J-GAAP filer (Tokyo Electron) has no equity attributable to owners in the
+  summary. Checked 2026-11-21 against the four FY2025 reports (Hitachi, Fujitsu, NEC,
+  Tokyo Electron).
+- **Splits** (`_on_latest_basis`): a summary restates EPS for a split only from some year on
+  (Fujitsu's 10:1 of 2024 left FY2021's 922.97 beside FY2022's 110.54; Hitachi, NEC and Tokyo
+  Electron restated all five) and states dividends as declared (Tokyo Electron's 1,711 before
+  its 3:1, 393 after). The issued share count at each year end (non-consolidated context)
+  steps by the split, snapped to `NEIGHBOUR_RATIOS`; years before it get the dividend divided
+  by the split always, the EPS when its profit over EPS sits nearer the issued count than the
+  count times the split. Reports four years apart share a year, so the normaliser's split vote
+  carries an older report onto the newer basis.
 - The key travels in the query string (`Subscription-Key`): `app/redact.py` masks it.
 
 ### Vendor fallback (financialfilings.com)

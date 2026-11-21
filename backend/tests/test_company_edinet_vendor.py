@@ -94,6 +94,64 @@ def test_the_summary_of_business_results_becomes_ifrs_facts():
     assert sec_code(HITACHI) == "65010"
 
 
+def _split_instance(eps_2022: str) -> bytes:
+    """Fujitsu's FY2025 summary as filed 2026-06-26, three of its five years: its 10:1
+    split of 2024 left FY2022's EPS (to March 2022) unrestated beside FY2023's restated
+    one, and the dividends as declared; a cancellation shrinks FY2026's count."""
+    years = (("Prior4Year", "2021-04-01", "2022-03-31"),
+             ("Prior3Year", "2022-04-01", "2023-03-31"),
+             ("Prior1Year", "2024-04-01", "2025-03-31"),
+             ("CurrentYear", "2025-04-01", "2026-03-31"))
+    contexts = "".join(
+        f'<xbrli:context id="{y}Duration"><xbrli:entity><xbrli:identifier scheme="s">E</xbrli:identifier></xbrli:entity>'
+        f"<xbrli:period><xbrli:startDate>{s}</xbrli:startDate><xbrli:endDate>{e}</xbrli:endDate></xbrli:period></xbrli:context>"
+        f'<xbrli:context id="{y}Duration_NonConsolidatedMember"><xbrli:entity><xbrli:identifier scheme="s">E</xbrli:identifier></xbrli:entity>'
+        f"<xbrli:period><xbrli:startDate>{s}</xbrli:startDate><xbrli:endDate>{e}</xbrli:endDate></xbrli:period>"
+        '<xbrli:scenario><xbrldi:explicitMember dimension="jppfs_cor:ConsolidatedOrNonConsolidatedAxis">jppfs_cor:NonConsolidatedMember</xbrldi:explicitMember></xbrli:scenario></xbrli:context>'
+        f'<xbrli:context id="{y}Instant_NonConsolidatedMember"><xbrli:entity><xbrli:identifier scheme="s">E</xbrli:identifier></xbrli:entity>'
+        f"<xbrli:period><xbrli:instant>{e}</xbrli:instant></xbrli:period>"
+        '<xbrli:scenario><xbrldi:explicitMember dimension="jppfs_cor:ConsolidatedOrNonConsolidatedAxis">jppfs_cor:NonConsolidatedMember</xbrldi:explicitMember></xbrli:scenario></xbrli:context>'
+        for y, s, e in years
+    )
+    rows = {
+        "Prior4Year": ("182691000000", eps_2022, "220.00", "207001821"),
+        "Prior3Year": ("215182000000", "110.54", "240.00", "207001821"),
+        "Prior1Year": ("219807000000", "120.66", "28.00", "2071108450"),
+        "CurrentYear": ("449408000000", "254.05", "50.00", "1739778265"),
+    }
+    facts = "".join(
+        f'<c:ProfitLossAttributableToOwnersOfParentIFRSSummaryOfBusinessResults contextRef="{y}Duration" unitRef="JPY">{p}</c:ProfitLossAttributableToOwnersOfParentIFRSSummaryOfBusinessResults>'
+        f'<c:DilutedEarningsLossPerShareIFRSSummaryOfBusinessResults contextRef="{y}Duration" unitRef="JPYPerShares">{eps}</c:DilutedEarningsLossPerShareIFRSSummaryOfBusinessResults>'
+        f'<c:DividendPaidPerShareSummaryOfBusinessResults contextRef="{y}Duration_NonConsolidatedMember" unitRef="JPYPerShares">{dps}</c:DividendPaidPerShareSummaryOfBusinessResults>'
+        f'<c:TotalNumberOfIssuedSharesSummaryOfBusinessResults contextRef="{y}Instant_NonConsolidatedMember" unitRef="shares">{n}</c:TotalNumberOfIssuedSharesSummaryOfBusinessResults>'
+        for y, (p, eps, dps, n) in rows.items()
+    )
+    return f"""<?xml version="1.0" encoding="UTF-8"?>
+<xbrli:xbrl xmlns:xbrli="http://www.xbrl.org/2003/instance" xmlns:xbrldi="http://xbrl.org/2006/xbrldi"
+ xmlns:iso4217="http://www.xbrl.org/2003/iso4217" xmlns:c="http://disclosure.edinet-fsa.go.jp/taxonomy/jpcrp/2024-11-01/jpcrp_cor"
+ xmlns:jppfs_cor="http://disclosure.edinet-fsa.go.jp/taxonomy/jppfs/2024-11-01/jppfs_cor">{contexts}
+<xbrli:unit id="JPY"><xbrli:measure>iso4217:JPY</xbrli:measure></xbrli:unit>
+<xbrli:unit id="shares"><xbrli:measure>xbrli:shares</xbrli:measure></xbrli:unit>
+<xbrli:unit id="JPYPerShares"><xbrli:divide><xbrli:unitNumerator><xbrli:measure>iso4217:JPY</xbrli:measure></xbrli:unitNumerator><xbrli:unitDenominator><xbrli:measure>xbrli:shares</xbrli:measure></xbrli:unitDenominator></xbrli:divide></xbrli:unit>
+{facts}</xbrli:xbrl>""".encode()
+
+
+def test_a_summarys_per_share_figures_go_on_its_latest_share_basis():
+    facts, _ = summary_facts(_split_instance("922.97"), "S100YM3K", date(2026, 6, 26))
+    eps = {f["end"]: round(f["val"], 3) for f in facts if f["concept"] == "DilutedEarningsLossPerShare"}
+    dps = {f["end"]: round(f["val"], 3) for f in facts
+           if f["concept"] == "DividendsRecognisedAsDistributionsToOwnersPerShare"}
+    # The unrestated year divided by the split; the restated ones and the cancellation kept.
+    assert eps == {"2022-03-31": 92.297, "2023-03-31": 110.54,
+                   "2025-03-31": 120.66, "2026-03-31": 254.05}
+    assert dps == {"2022-03-31": 22.0, "2023-03-31": 24.0,
+                   "2025-03-31": 28.0, "2026-03-31": 50.0}
+    # A summary that restated every year (Tokyo Electron's) is left as it is.
+    facts, _ = summary_facts(_split_instance("92.30"), "S100YM3K", date(2026, 6, 26))
+    eps = {f["end"]: f["val"] for f in facts if f["concept"] == "DilutedEarningsLossPerShare"}
+    assert eps["2022-03-31"] == 92.30
+
+
 class Edinet:
     def __init__(self):
         self.requests = []

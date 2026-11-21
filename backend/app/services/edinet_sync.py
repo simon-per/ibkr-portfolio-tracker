@@ -13,7 +13,8 @@ weekly markets job beside the other regulators and by `app/cli/fetch_company_mar
 **Finding a report**: EDINET lists filings by day only (`documents.json?date=`), so the pass
 reads day lists, each once a pass and shared by every company: from today back
 `FIRST_LOOKBACK_DAYS` for a company with no report yet, around the anniversary
-`HISTORY_YEARS` before its newest report for its history, and once its next report is due
+`HISTORY_YEARS` before its oldest report for its history (one more a pass, up to
+`HISTORY_REPORTS` reports), and once its next report is due
 (`NEXT_DUE_AFTER` past the newest filing) the days since it last looked
 (`profile_checked_at`). An annual securities report is `docTypeCode` 120.
 
@@ -22,9 +23,18 @@ reads day lists, each once a pass and shared by every company: from today back
 years of revenue, profit attributable to owners, diluted EPS, operating cash flow, cash and
 equity, in the company's standard's spelling (J-GAAP, `…IFRS…`, `…USGAAP…`), and the dividend
 per share on its non-consolidated context. Each becomes its IFRS concept (`SUMMARY`), so the
-one normaliser reads them as it reads an ESEF report; operating income comes from the
-statements (`OPERATING`), the current and prior year. Consolidated contexts only. Two
-reports, five years apart, give ten years.
+one normaliser reads them as it reads an ESEF report; an IFRS filer's operating profit is in
+the summary too, a J-GAAP filer's only in the statements (`OPERATING`), the current and prior
+year. Consolidated contexts only.
+
+**Splits** (`_on_latest_basis`, checked on all four reports 2026-11-21): a summary's EPS is
+restated for a split only from some year on (Fujitsu's 10:1 of 2024 left FY2021's 922.97
+beside FY2022's 110.54) and its dividends are as declared (Tokyo Electron's 1,711 before its
+3:1, 393 after). The issued share count it states at each year end steps by the split
+(`_split_factors`), so each year's per-share figures are put on the report's latest basis:
+the dividend always, the EPS when its profit over EPS sits nearer the year's issued count
+than the count times the split. Reports `HISTORY_YEARS` (4) apart share a year, so the
+normaliser's own vote links an older report's basis to the newer one.
 
 **Bounded**: `PASS_REQUEST_CAP` requests a pass, `REQUEST_INTERVAL_S` apart.
 """
@@ -32,10 +42,12 @@ reports, five years apart, give ten years.
 import asyncio
 import io
 import logging
+import math
 import re
 import xml.etree.ElementTree as ET
 import zipfile
 from datetime import date, datetime, timedelta
+from fractions import Fraction
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
 import httpx
@@ -46,7 +58,12 @@ from app.config import settings
 from app.models.company_financials import EDINET_SCHEME, VENDOR_SCHEME, Company
 from app.repositories.company_financials_repository import CompanyFinancialsRepository
 from app.services.company_markets import NamedCompany, named_companies, sec_isins
-from app.services.company_financials_normaliser import REGULATOR_ANNUAL
+from app.services.company_financials_normaliser import (
+    NEIGHBOUR_RATIOS,
+    NEIGHBOUR_TOLERANCE,
+    REGULATOR_ANNUAL,
+    _snap,
+)
 from app.services.regulator_facts import normalise_reports, one_value_each
 
 logger = logging.getLogger(__name__)
@@ -63,7 +80,10 @@ NOT_CONFIGURED = (
 BASE = "https://api.edinet-fsa.go.jp/api/v2"
 ANNUAL_REPORT = "120"
 FIRST_LOOKBACK_DAYS = 400
-HISTORY_YEARS = 5
+#: Four years apart, so two reports' five-year summaries share a year (*Splits*); three
+#: reports give thirteen fiscal years.
+HISTORY_YEARS = 4
+HISTORY_REPORTS = 3
 HISTORY_WINDOW_DAYS = 12
 NEXT_DUE_AFTER = timedelta(days=330)
 PASS_REQUEST_CAP = 700
@@ -111,6 +131,11 @@ SUMMARY: Dict[str, Tuple[str, str]] = {
         "CashFlowsFromUsedInOperatingActivities",
         "money",
     ),
+    "ProfitLossIFRSSummaryOfBusinessResults": ("ProfitLoss", "money"),
+    "OperatingProfitIFRSSummaryOfBusinessResults": (
+        "ProfitLossFromOperatingActivities",
+        "money",
+    ),
     "CashFlowsFromUsedInOperatingActivitiesUSGAAPSummaryOfBusinessResults": (
         "CashFlowsFromUsedInOperatingActivities",
         "money",
@@ -137,19 +162,29 @@ SUMMARY: Dict[str, Tuple[str, str]] = {
     ),
     # J-GAAP's net assets include the non-controlling interests: the total equity line.
     "NetAssetsSummaryOfBusinessResults": ("Equity", "money"),
+    "TotalEquityIFRSSummaryOfBusinessResults": ("Equity", "money"),
     # Declared for the fiscal year, stated on the non-consolidated context.
     "DividendPaidPerShareSummaryOfBusinessResults": (
         "DividendsRecognisedAsDistributionsToOwnersPerShare",
         "per_share",
     ),
 }
-#: Operating income from the statements (`jppfs_cor`, `jpigp_cor`): the summary has none.
+#: The issued share count at each year end, on the non-consolidated context: never stored,
+#: it dates each split (`_split_factors`).
+ISSUED_SHARES = "TotalNumberOfIssuedSharesSummaryOfBusinessResults"
+EPS = "DilutedEarningsLossPerShare"
+DPS = "DividendsRecognisedAsDistributionsToOwnersPerShare"
+#: Operating income from the statements (`jppfs_cor`, `jpigp_cor`), for a J-GAAP filer's
+#: summary, which has none.
 OPERATING: Dict[str, Tuple[str, str]] = {
     "OperatingIncome": ("ProfitLossFromOperatingActivities", "money"),
     "OperatingProfitLossIFRS": ("ProfitLossFromOperatingActivities", "money"),
 }
+#: EDINET's taxonomy, and a report's own extension of it: an IFRS filer's summary states its
+#: operating profit and total equity in elements of its own namespace under the standard
+#: names (Fujitsu's FY2025, `jpcrp030000/asr/001/E01766-000/…`), read by those names only.
 EDINET_NS = re.compile(
-    r"^http://disclosure\.edinet-fsa\.go\.jp/taxonomy/(jpcrp|jppfs|jpigp)/"
+    r"^http://disclosure\.edinet-fsa\.go\.jp/(taxonomy/(jpcrp|jppfs|jpigp)|jpcrp\d+/)"
 )
 XBRLI = "{http://www.xbrl.org/2003/instance}"
 XBRLDI = "{http://xbrl.org/2006/xbrldi}"
@@ -178,7 +213,9 @@ def summary_facts(
     The report's summary of business results (and operating income) as facts in the shape
     `regulator_facts` reads: `{concept, unit, start, end, val, accn, filed, form}`, and the
     report's element per IFRS concept (`tagged`). Consolidated contexts only, but the
-    dividend per share, which the summary states on the non-consolidated one.
+    dividend per share and the issued shares, which the summary states on the
+    non-consolidated one. Per-share figures on the report's latest share basis
+    (`_on_latest_basis`).
     """
     contexts: Dict[str, Tuple[Optional[str], Optional[str], List[str]]] = {}
     units: Dict[str, str] = {}
@@ -220,7 +257,9 @@ def summary_facts(
             units[elem.get("id") or ""] = "/".join(measures)
         elif tag.startswith("{"):
             uri, _, name = tag[1:].partition("}")
-            if EDINET_NS.match(uri) and (name in SUMMARY or name in OPERATING):
+            if EDINET_NS.match(uri) and (
+                name in SUMMARY or name in OPERATING or name == ISSUED_SHARES
+            ):
                 if elem.get(XSI_NIL) != "true" and elem.text and elem.text.strip():
                     raw.append(
                         (
@@ -233,12 +272,24 @@ def summary_facts(
         elem.clear()
     facts: List[Dict[str, Any]] = []
     tagged: Dict[str, str] = {}
+    issued: Dict[str, float] = {}
     for name, ctx, unit_ref, text in raw:
-        concept, kind = SUMMARY.get(name) or OPERATING[name]
         context = contexts.get(ctx)
         if context is None:
             continue
         start, end, members = context
+        if name == ISSUED_SHARES:
+            if (
+                start is None
+                and end
+                and members in ([], [NON_CONSOLIDATED])
+                and units.get(unit_ref) == "shares"
+            ):
+                value = _number(text)
+                if value:
+                    issued[end] = value
+            continue
+        concept, kind = SUMMARY.get(name) or OPERATING[name]
         dividend = concept == "DividendsRecognisedAsDistributionsToOwnersPerShare"
         if members and not (dividend and members == [NON_CONSOLIDATED]):
             continue
@@ -286,7 +337,68 @@ def summary_facts(
             }
         )
         tagged.setdefault(concept, f"edinet:{name}")
-    return one_value_each(facts), tagged
+    return _on_latest_basis(one_value_each(facts), issued), tagged
+
+
+def _number(text: str) -> Optional[float]:
+    try:
+        return float(text)
+    except ValueError:
+        return None
+
+
+def _split_factors(issued: Dict[str, float]) -> Dict[str, Fraction]:
+    """
+    Each year end's factor to the report's latest share basis: the product of the issued
+    count's steps after it that snap to a split ratio (`NEIGHBOUR_RATIOS` within
+    `NEIGHBOUR_TOLERANCE`). A buyback or a cancellation snaps to no ratio and is no step
+    (Fujitsu's 2,071m to 1,740m in FY2025).
+    """
+    ends = sorted(issued, reverse=True)
+    factors: Dict[str, Fraction] = {}
+    factor = Fraction(1)
+    for i, end in enumerate(ends):
+        if i:
+            step = _snap(issued[ends[i - 1]] / issued[end], NEIGHBOUR_RATIOS, NEIGHBOUR_TOLERANCE)
+            if step is not None:
+                factor *= step
+        factors[end] = factor
+    return factors
+
+
+def _on_latest_basis(
+    facts: List[Dict[str, Any]], issued: Dict[str, float]
+) -> List[Dict[str, Any]]:
+    """
+    The dividends and EPS of the years before a split on the report's latest basis: a
+    dividend is as declared, so always divided by the split; an EPS only when its profit
+    over EPS sits nearer that year's issued count than the count times the split (the
+    summary restates some years and not others). An EPS whose basis cannot be told (no
+    profit, no count, opposite signs) is left out: an unknown is absent.
+    """
+    factors = _split_factors(issued)
+    profit = {
+        f["end"]: f["val"]
+        for f in facts
+        if f["concept"] == "ProfitLossAttributableToOwnersOfParent"
+    }
+    out = []
+    for f in facts:
+        factor = float(factors.get(f["end"], 1))
+        if factor == 1 or f["concept"] not in (EPS, DPS):
+            out.append(f)
+            continue
+        if f["concept"] == DPS:
+            out.append({**f, "val": f["val"] / factor})
+            continue
+        shares = profit.get(f["end"], 0) / f["val"] if f["val"] else 0
+        count = issued.get(f["end"])
+        if shares <= 0 or not count:
+            continue
+        stated = abs(math.log(shares / count))
+        restated = abs(math.log(shares / (count * factor)))
+        out.append({**f, "val": f["val"] / factor} if stated < restated else f)
+    return out
 
 
 def instance_of(zipped: bytes) -> Optional[bytes]:
@@ -491,7 +603,7 @@ class JapanFinancialsSync:
                     start + timedelta(days=d) for d in range((today - start).days + 1)
                 ]
                 wanted.append((days, True))
-            if len(read) < 2:
+            if len(read) < HISTORY_REPORTS:
                 anchor = oldest.filed.replace(year=oldest.filed.year - HISTORY_YEARS)
                 wanted.append(
                     (
