@@ -80,6 +80,11 @@ NOT_CONFIGURED = (
 BASE = "https://api.edinet-fsa.go.jp/api/v2"
 ANNUAL_REPORT = "120"
 FIRST_LOOKBACK_DAYS = 400
+#: What a read keeps: 1 until 2026-11-21 (NULL); 2 with per-share figures on the latest
+#: share basis, a transition year's IFRS spelling, basic EPS for a blank diluted one, and an
+#: IFRS filer's operating profit and total equity from its summary. A report read under an
+#: older one is read once more, by its document id (`_reread`).
+READER = 2
 #: Four years apart, so two reports' five-year summaries share a year (*Splits*); three
 #: reports give thirteen fiscal years.
 HISTORY_YEARS = 4
@@ -168,6 +173,17 @@ SUMMARY: Dict[str, Tuple[str, str]] = {
         "DividendsRecognisedAsDistributionsToOwnersPerShare",
         "per_share",
     ),
+}
+#: The basic EPS, read as the diluted one only for a year whose diluted EPS the summary leaves
+#: blank: a Japanese report leaves it blank when no share is dilutive, or in a loss year, and
+#: diluted then equals basic (NEC's FY2013-FY2016).
+BASIC_EPS: Dict[str, Tuple[str, str]] = {
+    name: ("DilutedEarningsLossPerShare", "per_share")
+    for name in (
+        "BasicEarningsLossPerShareSummaryOfBusinessResults",
+        "BasicEarningsLossPerShareIFRSSummaryOfBusinessResults",
+        "BasicEarningsLossPerShareUSGAAPSummaryOfBusinessResults",
+    )
 }
 #: The issued share count at each year end, on the non-consolidated context: never stored,
 #: it dates each split (`_split_factors`).
@@ -258,7 +274,10 @@ def summary_facts(
         elif tag.startswith("{"):
             uri, _, name = tag[1:].partition("}")
             if EDINET_NS.match(uri) and (
-                name in SUMMARY or name in OPERATING or name == ISSUED_SHARES
+                name in SUMMARY
+                or name in OPERATING
+                or name in BASIC_EPS
+                or name == ISSUED_SHARES
             ):
                 if elem.get(XSI_NIL) != "true" and elem.text and elem.text.strip():
                     raw.append(
@@ -270,8 +289,7 @@ def summary_facts(
                         )
                     )
         elem.clear()
-    facts: List[Dict[str, Any]] = []
-    tagged: Dict[str, str] = {}
+    candidates: List[Tuple[Tuple[bool, bool], Dict[str, Any], str]] = []
     issued: Dict[str, float] = {}
     for name, ctx, unit_ref, text in raw:
         context = contexts.get(ctx)
@@ -289,7 +307,7 @@ def summary_facts(
                 if value:
                     issued[end] = value
             continue
-        concept, kind = SUMMARY.get(name) or OPERATING[name]
+        concept, kind = SUMMARY.get(name) or OPERATING.get(name) or BASIC_EPS[name]
         dividend = concept == "DividendsRecognisedAsDistributionsToOwnersPerShare"
         if members and not (dividend and members == [NON_CONSOLIDATED]):
             continue
@@ -324,20 +342,38 @@ def summary_facts(
                 or not FY_DAYS[0] <= (end_day - start_day).days + 1 <= FY_DAYS[1]
             ):
                 continue
-        facts.append(
-            {
-                "concept": concept,
-                "unit": unit_out,
-                "start": start_day.isoformat() if start_day else None,
-                "end": end_day.isoformat(),
-                "val": value,
-                "accn": accn,
-                "filed": filed.isoformat(),
-                "form": REGULATOR_ANNUAL,
-            }
-        )
-        tagged.setdefault(concept, f"edinet:{name}")
+        fact = {
+            "concept": concept,
+            "unit": unit_out,
+            "start": start_day.isoformat() if start_day else None,
+            "end": end_day.isoformat(),
+            "val": value,
+            "accn": accn,
+            "filed": filed.isoformat(),
+            "form": REGULATOR_ANNUAL,
+        }
+        candidates.append((_rank(name), fact, name))
+    # Per period and concept, only the best-ranked spelling: the year an IFRS adopter's
+    # summary states in both standards (NEC's FY2015-FY2016, 2,821bn J-GAAP beside 2,825bn
+    # IFRS) is otherwise two values one period refuses.
+    best: Dict[Tuple[str, Optional[str], str], Tuple[bool, bool]] = {}
+    for rank, f, _ in candidates:
+        key = (f["concept"], f["start"], f["end"])
+        best[key] = max(best.get(key, rank), rank)
+    facts: List[Dict[str, Any]] = []
+    tagged: Dict[str, str] = {}
+    for rank, f, name in candidates:
+        if rank == best[(f["concept"], f["start"], f["end"])]:
+            facts.append(f)
+            tagged.setdefault(f["concept"], f"edinet:{name}")
     return _on_latest_basis(one_value_each(facts), issued), tagged
+
+
+def _rank(name: str) -> Tuple[bool, bool]:
+    """A diluted EPS before a basic one (`BASIC_EPS`), then the IFRS or US-GAAP spelling
+    before J-GAAP's: the standard the company reports in now, as `_taxonomy` picks a 20-F
+    filer's newer taxonomy."""
+    return name not in BASIC_EPS, "IFRS" in name or "USGAAP" in name
 
 
 def _number(text: str) -> Optional[float]:
@@ -579,6 +615,7 @@ class JapanFinancialsSync:
             company.universe_seen_at = now
             await self.db.commit()
         reports = await self.repo.company_reports(company.id)
+        read_any = await self._reread(client, company, reports, summary, now)
         read = sorted(
             (r for r in reports.values() if r.status == READ),
             key=lambda r: r.filed or date.min,
@@ -616,7 +653,6 @@ class JapanFinancialsSync:
                         False,
                     )
                 )
-        read_any = False
         for days, watch in wanted:
             found = await self._find(client, code, days)
             if watch:
@@ -654,6 +690,7 @@ class JapanFinancialsSync:
                 filed=filed,
                 facts=facts,
                 tagged=tagged,
+                reader=READER,
             )
             await self.db.commit()
             summary["reports_read"] += 1
@@ -662,6 +699,39 @@ class JapanFinancialsSync:
         if read_any or force or (company.fetched_at is None and read):
             return await self._write(company, summary, now)
         return "unchanged"
+
+    async def _reread(
+        self, client, company: Company, reports, summary, now: datetime
+    ) -> bool:
+        """Each report read under an older `READER`, read once more from its zip."""
+        any_read = False
+        for report in list(reports.values()):
+            if report.status != READ or (report.reader or 1) >= READER:
+                continue
+            zipped = (
+                await self._get(client, f"documents/{report.report_id}", type="1")
+            ).content
+            instance = instance_of(zipped)
+            if instance is None:
+                continue
+            filed = report.filed or now.date()
+            facts, tagged = summary_facts(instance, report.report_id, filed)
+            await self.repo.record_report(
+                company.id,
+                report.report_id,
+                status=READ,
+                read_at=now,
+                period_end=report.period_end,
+                accn=report.report_id,
+                filed=filed,
+                facts=facts,
+                tagged=tagged,
+                reader=READER,
+            )
+            await self.db.commit()
+            summary["reports_read"] += 1
+            any_read = True
+        return any_read
 
     async def _write(
         self, company: Company, summary: Dict[str, Any], now: datetime

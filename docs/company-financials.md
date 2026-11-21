@@ -1568,7 +1568,10 @@ after Taiwan; `tests/test_company_edinet_vendor.py`. Hitachi, Fujitsu, NEC, Toky
   (current and prior year). J-GAAP's net assets include the non-controlling interests (total
   equity): a J-GAAP filer (Tokyo Electron) has no equity attributable to owners in the
   summary. Checked 2026-11-21 against the four FY2025 reports (Hitachi, Fujitsu, NEC,
-  Tokyo Electron).
+  Tokyo Electron). A year an IFRS adopter's summary states in both standards takes the IFRS
+  figure (`_rank`: NEC's FY2015-FY2016, 2,821bn J-GAAP beside 2,825bn IFRS, else one period
+  with two values the normaliser refuses); a blank diluted EPS (no dilutive share, or a loss
+  year) takes the basic one (`BASIC_EPS`).
 - **Splits** (`_on_latest_basis`): a summary restates EPS for a split only from some year on
   (Fujitsu's 10:1 of 2024 left FY2021's 922.97 beside FY2022's 110.54; Hitachi, NEC and Tokyo
   Electron restated all five) and states dividends as declared (Tokyo Electron's 1,711 before

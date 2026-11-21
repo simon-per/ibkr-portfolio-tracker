@@ -12,9 +12,10 @@ from datetime import date
 
 import httpx
 import pytest
+from sqlalchemy import select
 
 from app.config import settings
-from app.models.company_financials import Company, CompanyFinancial
+from app.models.company_financials import Company, CompanyFinancial, CompanyReport
 from app.services import edinet_sync, vendor_sync
 from app.services.company_financials_service import CompanyFinancialsService
 from app.services.company_markets import NamedCompany
@@ -152,6 +153,23 @@ def test_a_summarys_per_share_figures_go_on_its_latest_share_basis():
     assert eps["2022-03-31"] == 92.30
 
 
+def test_a_transition_years_ifrs_figure_wins_and_basic_eps_fills_a_blank_diluted():
+    # NEC's FY2017 report (IFRS adopted): FY2016 in both standards, its diluted EPS blank.
+    instance = _instance().replace(
+        b"</xbrli:xbrl>",
+        b'<jpcrp_cor:NetSalesSummaryOfBusinessResults contextRef="Prior1YearDuration" unitRef="JPY">9690000000000</jpcrp_cor:NetSalesSummaryOfBusinessResults>'
+        b'<jpcrp_cor:DilutedEarningsLossPerShareIFRSSummaryOfBusinessResults contextRef="Prior1YearDuration" unitRef="JPYPerShares" xsi:nil="true" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"/>'
+        b'<jpcrp_cor:BasicEarningsLossPerShareIFRSSummaryOfBusinessResults contextRef="Prior1YearDuration" unitRef="JPYPerShares">140.00</jpcrp_cor:BasicEarningsLossPerShareIFRSSummaryOfBusinessResults>'
+        b'<jpcrp_cor:BasicEarningsLossPerShareIFRSSummaryOfBusinessResults contextRef="CurrentYearDuration" unitRef="JPYPerShares">152.00</jpcrp_cor:BasicEarningsLossPerShareIFRSSummaryOfBusinessResults>'
+        b"</xbrli:xbrl>",
+    )
+    facts, _ = summary_facts(instance, "S100TEST", date(2026, 6, 20))
+    by = {(f["concept"], f["end"]): f["val"] for f in facts}
+    assert by[("Revenue", "2025-03-31")] == 9.7e12  # IFRS, not J-GAAP's 9.69
+    assert by[("DilutedEarningsLossPerShare", "2025-03-31")] == 140.0  # basic, diluted blank
+    assert by[("DilutedEarningsLossPerShare", "2026-03-31")] == 151.0  # diluted stated
+
+
 class Edinet:
     def __init__(self):
         self.requests = []
@@ -222,6 +240,19 @@ async def test_the_japanese_pass_finds_reads_and_lists_a_report(db, monkeypatch)
         db, transport=httpx.MockTransport(fake.handler), sleep=_none
     ).refresh()
     assert not [u for u in fake.requests if "/documents/S100TEST" in u]
+
+    # A report read under an older reader is read once more, by its document id.
+    report = (await db.execute(select(CompanyReport))).scalars().one()
+    report.reader = None
+    await db.commit()
+    fake.requests.clear()
+    summary = await JapanFinancialsSync(
+        db, transport=httpx.MockTransport(fake.handler), sleep=_none
+    ).refresh()
+    assert [u for u in fake.requests if "/documents/S100TEST" in u]
+    assert summary["reports_read"] == 1
+    await db.refresh(report)
+    assert report.reader == edinet_sync.READER
 
 
 # ── the vendor fallback ──────────────────────────────────────────────────────
