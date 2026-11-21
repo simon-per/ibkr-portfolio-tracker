@@ -7,7 +7,7 @@
 > [docs/troubleshooting.md](docs/troubleshooting.md); local-dev traps in
 > [docs/local-development.md](docs/local-development.md).
 
-**Last updated: 2026-11-20.** The **Company tab** (one company's SEC EDGAR fundamentals history,
+**Last updated: 2026-11-21.** The **Company tab** (one company's SEC EDGAR fundamentals history,
 docs/company-financials.md) is deployed and filled for the held filers **and the Nasdaq-100**
 (102 companies with figures, keyed by CIK), with key figures, valuation multiples (weekly Yahoo closes), ROE and net cash, gross margin, operating income,
 buybacks & dividends, cash & debt and 3/5/10Y CAGRs (docs/shipped-log.md 2026-10-25). PR #80 (Swiss residency)
@@ -29,13 +29,14 @@ code trace; all of them shipped that evening (waves 1–3, the product issues #7
 
 ## Needs a human
 
-- **`EDINET_API_KEY` for the Company tab's Japanese pages** (owner sends it later; measured on
-  production 2026-11-20: of the 206 companies the app names, 200 have a page and 193 are fully
-  backfilled). Register at the FSA's EDINET API page and put it in the VPS `.env` (`docker
-  compose up -d`, never `restart`); the Japanese pass is built and waits for it (Hitachi,
-  Fujitsu, NEC, Tokyo Electron). Then run `fetch_company_markets --source edinet` once and check
-  the pages against the annual reports: the pass was built from documentation, without a live
-  answer.
+- **Push `main`** if `origin/main` is behind: the 2026-11-21 session committed the basket-price
+  verification by held listings' closes and ADR filers priced by their ordinary share
+  (`_ordinary_closes`) locally and stopped at its usage limit before the push window; then run
+  the weekly markets job's prices check after the evening basket refresh (IEEM's prices should
+  record; Japanese, Taiwanese and Tencent pages should show a P/E). Coverage on production
+  2026-11-21: 207 of 209 companies with a page, 200 fully backfilled (Allianz revenue, CBA and
+  CCB wait for the vendor's next month of credits; BRK and Iberdrola EPS, Nestlé/Roche vendor
+  holes and Prysmian/Terna FY2025 have no free source).
 
 - **Confirm the Alpha Vantage key's tier.** The Company tab's statement fill and the price
   fallback now share one budget of 25 calls a UTC day (`alpha_vantage.DAILY_LIMIT`, the free

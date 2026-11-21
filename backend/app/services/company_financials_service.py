@@ -44,7 +44,9 @@ given. TTM, free cash flow, margins, per-share figures and growth:
   the diluted shares, so all four share the EPS's split basis. A period's close is the newest stored within `PRICE_MATCH_DAYS`
   before its end (`company_prices`, weekly); the key figures' is the newest of those and the
   held listing's daily close, null when older than `PRICE_MAX_AGE_DAYS`. Closes in another
-  currency than the filings are not used. Yahoo adjusts closes for splits to today, the
+  currency than the filings are not used: such a filer (a New York receipt beside EUR or TWD
+  figures) is priced by its ordinary share's held listing when one is proven
+  (`_ordinary_closes`), else not at all. Yahoo adjusts closes for splits to today, the
   figures to the newest filing, so a split after that filing scales the closes (`eps_basis`).
 - **Annual** is the fiscal years as filed (the FY facts), not a sum of quarters.
 
@@ -78,7 +80,7 @@ from app.repositories.analyst_rating_repository import AnalystRatingRepository
 from app.repositories.company_financials_repository import CompanyFinancialsRepository
 from app.repositories.fundamentals_repository import FundamentalsRepository
 from app.repositories.market_price_repository import MarketPriceRepository
-from app.services.constituent_prices import basket_closes, listing_closes
+from app.services.constituent_prices import basket_closes, cross_rate, listing_closes
 from app.repositories.security_repository import held
 from app.repositories.sync_run_repository import utc_iso
 from app.services.company_classification import Classification, classify, gics_sector
@@ -86,9 +88,13 @@ from app.services.sector_taxonomy import UNKNOWN
 from app.services.company_identity import IdentityMember
 from app.services.company_financials_normaliser import (
     ANNUAL,
+    NEIGHBOUR_RATIOS,
     QUARTER_WITNESSES,
+    SHARES_FROM_EPS_SOURCE,
     SPLIT_RATIOS,
+    _snap,
 )
+from app.services.fx_preload import preload_eur_rates
 
 PERIODS = ("quarterly", "ttm", "annual")
 # 3Y (owner, 2026-11-07): twelve quarters, the shortest span a fundamentals trend reads in.
@@ -187,6 +193,12 @@ FILED_SPLIT_RATIO_TOLERANCE = 0.02
 # The market cap's share count must sit this near the diluted average: a filer that tags one
 # class of several without its class (half of GOOGL's, 87% of META's) is no company's count.
 MARKET_CAP_SHARE_TOLERANCE = 0.10
+#: A filer quoted in another currency than it reports in is priced by a held listing of its
+#: ordinary share (`_ordinary_closes`) when the receipt's close, converted at the day's rate,
+#: stands within this of a whole number of that listing's closes (`NEIGHBOUR_RATIOS`: ASML's
+#: New York share is one, TSMC's ADR five plus its premium), and its EPS is per reported
+#: share: net income over EPS within this of the diluted count.
+RECEIPT_RATIO_TOLERANCE = 0.10
 # The compound growth the cards and the key figures quote, in years back from the latest.
 CAGR_YEARS = (3, 5, 10)
 # Two quarter ends this far apart are consecutive: 12 to 14 weeks, or the 16 and 17 of a
@@ -566,6 +578,30 @@ def _with_valuations(
         )
 
 
+def _eps_per_reported_share(rows: Sequence[CompanyFinancial]) -> bool:
+    """Whether the newest fiscal year's EPS is per reported share: its net income over the
+    EPS within `RECEIPT_RATIO_TOLERANCE` of a diluted count the filing states (not one
+    derived from that EPS). An EPS per receipt would read N times a share's."""
+    years: Dict[date, Dict[str, CompanyFinancial]] = {}
+    for r in rows:
+        if r.fiscal_period == "FY":
+            years.setdefault(r.period_end, {})[r.metric] = r
+    for end in sorted(years, reverse=True):
+        year = years[end]
+        income, eps, shares = (
+            year.get("net_income"), year.get("eps_diluted"), year.get("diluted_shares")
+        )
+        if income is None or eps is None or shares is None:
+            continue
+        if shares.source_concept and SHARES_FROM_EPS_SOURCE in shares.source_concept:
+            return False
+        if not eps.value or not shares.value:
+            return False
+        implied = income.value / eps.value
+        return abs(implied / shares.value - 1) <= RECEIPT_RATIO_TOLERANCE
+    return False
+
+
 def market_cap(
     price: Optional[float], outstanding: Optional[float], diluted: Optional[float]
 ) -> Optional[float]:
@@ -914,6 +950,7 @@ class CompanyFinancialsService:
         self.db = db
         self.repo = CompanyFinancialsRepository(db)
         self._ordinary: Optional[set] = None
+        self._linked: Optional[Dict[str, List[int]]] = None
 
     async def _ordinary_priced(self) -> set:
         """The SEC filers priced by their ordinary share (`repo.ordinary_priced_ciks`),
@@ -1106,6 +1143,7 @@ class CompanyFinancialsService:
         coverage = await self.repo.coverage_of(listed)
         isins_of = await self._company_isins(listed, members)
         linked = await self._linked_listings(listed, members, isins_of)
+        self._linked = linked
         out = []
         for company in listed:
             cov = coverage.get(company.key)
@@ -1209,6 +1247,60 @@ class CompanyFinancialsService:
                     return [], []
                 return closes, []
         return await basket_closes(self.db, isin, currency)
+
+    async def _linked_held(self) -> Dict[str, List[int]]:
+        """Company key -> its held listings (`_linked_listings`), folded once per service."""
+        if self._linked is None:
+            listed, members = await self._listed()
+            isins_of = await self._company_isins(listed, members)
+            self._linked = await self._linked_listings(listed, members, isins_of)
+        return self._linked
+
+    async def _ordinary_closes(
+        self, company, rows: Sequence[CompanyFinancial], currency: str
+    ) -> List[Tuple[date, float]]:
+        """
+        An SEC filer quoted in another currency than it reports in has Yahoo closes that
+        match nothing (ASML's New York share in USD beside EUR figures, TSMC's ADR beside
+        TWD), so it had no multiple. A held listing the identity store folds with it
+        (`_linked_listings`: ASML@AEB, 2330@TWSE) is its ordinary share when the listing is
+        another security than the receipt (its own ISIN), the receipt's newest close,
+        converted at that day's rate, stands at a whole number of the listing's close
+        (`NEIGHBOUR_RATIOS` within `RECEIPT_RATIO_TOLERANCE`: a preferred share's discount or
+        another company's price does not), and the EPS is per reported share (net income over
+        it within the same tolerance of the diluted count, so never an EPS per receipt). Its
+        closes, in the reporting currency, then price the figures as another regulator's are
+        (`_other_closes`), unless IBKR booked a split of it after the newest filing.
+        """
+        stored = await self.repo.prices_for(company.cik)
+        if not stored or stored[-1].currency == currency or not _eps_per_reported_share(rows):
+            return []
+        receipt = stored[-1]
+        own = (company.isin or "").strip().upper()
+        rates = await preload_eur_rates(
+            self.db, {receipt.currency, currency}, receipt.date, receipt.date
+        )
+        rate = cross_rate(rates, receipt.currency, currency, receipt.date)
+        if rate is None or receipt.close <= 0:
+            return []
+        newest_filed = max(r.filed for r in rows)
+        for sid in (await self._linked_held()).get(company.key, []):
+            listing = await self.db.get(Security, sid)
+            if listing is None or (listing.isin or "").strip().upper() in ("", own):
+                continue
+            closes = await listing_closes(self.db, sid, currency)
+            near = [
+                c for d, c in closes if 0 <= (receipt.date - d).days <= PRICE_MATCH_DAYS
+            ]
+            if not near or near[-1] <= 0:
+                continue
+            ratio = receipt.close * rate / near[-1]
+            if _snap(ratio, NEIGHBOUR_RATIOS, RECEIPT_RATIO_TOLERANCE) is None:
+                continue
+            if await self._split_since(sid, newest_filed):
+                return []
+            return closes
+        return []
 
     async def _split_since(self, security_id: int, since: Optional[date]) -> bool:
         """
@@ -1425,6 +1517,10 @@ class CompanyFinancialsService:
             listing = (await self._held_listings([company.cik])).get(company.cik)
             closes = await self._closes(company.cik, rows, currency, listing)
             prices = await self._on_eps_basis(company.cik, rows, closes)
+            if not closes and rows and currency is not None:
+                closes = await self._ordinary_closes(company, rows, currency)
+                if closes:
+                    prices = eps_basis(closes, [], max(r.filed for r in rows))
         elif rows and currency is not None:
             closes, splits = await self._other_closes(company, rows, currency)
             prices = eps_basis(closes, splits, max(r.filed for r in rows)) if closes else []

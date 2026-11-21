@@ -234,7 +234,8 @@ it safe (`tests/test_company_twenty_f.py`):
 - **Priced by its ordinary share, never at Yahoo** (`repo.ordinary_priced_ciks`: a 20-F filer kept
   under a non-US ISIN): its closes are the held listing's or the baskets' (*Prices without Yahoo*),
   and neither the weekly closes nor the profile rotation asks Yahoo about it. ASML, NU and TSMC,
-  found by their US listing, are unchanged.
+  found by their US listing, keep their Yahoo closes; ASML's (USD, EUR figures) and TSMC's (USD,
+  TWD) are replaced by their ordinary share's held listing when it is proven (*Prices*).
 - **A list that named none** (`-`) is asked again once a year, and once at once when it was
   recorded before the 40-F counted (RBC, TD and Thomson Reuters, 2026-11-19).
 - **Stale only after a year and five months** (`ANNUAL_FIGURES_STALE_AFTER`): an annual-only
@@ -689,9 +690,10 @@ GOOG and GOOGL are both Alphabet. **Since 2026-11-17 that includes every held li
 store folds with the company** (`_linked_listings`, `identity_service.group_companies`: ISIN, LEI,
 share-class FIGI, `ISSUER_OVERRIDES`), never a ticker: 2330@TWSE opens TSMC's page (filed by its
 ADR, TSM), ASML@AEB ASML's, 000660 SK Hynix's. A fold reaching two listed companies links neither.
-It is a link only: the page's figures, closes and per-share basis stay its own (TSM's EPS is per
-common share in TWD, one ADR is five shares; 2330's TWD close is never put beside it). `held` is
-whether any listing is held.
+It is a link only for figures and per-share basis, which stay the page's own (TSM's EPS is per
+common share in TWD, one ADR is five shares). One price rule reads it: a filer whose Yahoo closes
+are in another currency than its figures is priced by such a linked listing once it is proven the
+ordinary share (*Prices*, `_ordinary_closes`). `held` is whether any listing is held.
 
 `GET /api/company-financials/{ref}?period=quarterly|ttm|annual&range=3y|5y|10y|max` — `ref` is the
 key or, as every link was before 2026-11-17, a bare CIK; an unknown scheme or a malformed id is 404
@@ -973,6 +975,15 @@ what the app already fetches (`constituent_prices`, `_other_closes`), in this or
 
 Nothing for a company outside every held iShares basket or with no listing held: its page shows
 no multiple rather than a receipt's.
+
+**An SEC filer quoted in another currency than it reports in** (ASML's New York share in USD
+beside EUR figures, TSMC's ADR beside TWD; 2026-11-21) has Yahoo closes that match nothing.
+`_ordinary_closes` prices it by a held listing the identity store folds with it, when that
+listing is another security than the receipt, the receipt's newest close converted at the day's
+rate stands at a whole number of the listing's close (`NEIGHBOUR_RATIOS` within
+`RECEIPT_RATIO_TOLERANCE`: not a preferred's discount), and the EPS is per reported share (net
+income over it near the stated diluted count). Alibaba, PDD and Kaspi have no such listing held:
+no multiple. `tests/test_company_receipt_prices.py`.
 `tests/test_constituent_prices.py`, `tests/test_company_twenty_f.py`.
 
 ## The overview
@@ -1119,8 +1130,9 @@ All three were misses: the normaliser read 10-K/10-Q facts in us-gaap only.
   (`_unit_for`), so two currencies never meet in one series. Until 2026-11-15 each concept kept
   the currency *it* reported most, which kept NBIS (Yandex until 2024) in fifteen years of RUB and
   ended its series at FY2023. TSMC stays in TWD: its 20-F translates only the latest year into
-  USD, beside TWD for every year, so its ADR's USD closes match nothing — no multiples, rather
-  than wrong ones.
+  USD, beside TWD for every year, so its ADR's USD closes match nothing. Its multiples come from
+  2330@TWSE's TWD closes instead, once that listing is proven its ordinary share
+  (`_ordinary_closes`, *Prices*); without such a listing, no multiples rather than wrong ones.
 - **An annual-only filer's TTM is its fiscal years** (`_series_points`): each year is its own
   trailing twelve months, so the default view and the key figures show the latest year; the
   quarterly view stays empty. A filer counts as quarterly only by a quarter's own statement
