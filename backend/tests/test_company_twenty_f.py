@@ -329,6 +329,16 @@ def test_continuing_eps_is_the_eps_only_without_discontinued_operations():
     assert eps == {date(2024, 12, 31): 0.589}
     assert not any(r["metric"] == "discontinued_income" for r in normalise(doc).rows)
 
+    # With the discontinued operations' EPS tagged, the EPS is the two together (same count).
+    doc["facts"]["ifrs-full"]["DilutedEarningsLossPerShareFromDiscontinuedOperations"] = {
+        "units": {"EUR/shares": [_fy("2025-12-31", 0.054)]}
+    }
+    rows = normalise(doc).rows
+    eps = {r["period_end"]: r["value"] for r in rows if r["metric"] == "eps_diluted"}
+    assert eps[date(2024, 12, 31)] == 0.589
+    assert abs(eps[date(2025, 12, 31)] - 0.897) < 1e-9
+    assert not any(r["metric"] == "discontinued_eps" for r in rows)
+
 
 def test_none_listed_is_asked_again_once_then_yearly():
     """RBC's, TD's and Thomson Reuters' lists said "-" while the 40-F did not count."""

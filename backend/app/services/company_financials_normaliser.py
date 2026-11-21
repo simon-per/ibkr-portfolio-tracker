@@ -47,7 +47,7 @@ exercises:
 
 import re
 from collections import Counter, defaultdict
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import date, timedelta
 from fractions import Fraction
 from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
@@ -97,6 +97,9 @@ BASIC_SHARES = "basic_shares"
 # Profit from discontinued operations, read only to tell whether a period's continuing EPS
 # is its EPS (`_continuing_eps_alone`); never stored as a figure.
 DISCONTINUED = "discontinued_income"
+# The discontinued operations' diluted EPS, read only to complete a continuing EPS beside a
+# discontinued profit (`_continuing_eps_alone`); never stored as a figure.
+DISCONTINUED_EPS = "discontinued_eps"
 
 # Verified across the book's SEC filers (2026-10-25). Order is preference.
 #
@@ -254,6 +257,15 @@ METRICS: Dict[str, MetricSpec] = {
         (
             "IncomeLossFromDiscontinuedOperationsNetOfTax",
             "IncomeLossFromDiscontinuedOperationsNetOfTaxAttributableToReportingEntity",
+        ),
+    ),
+    # Only read to complete a continuing EPS (`_continuing_eps_alone`); never stored.
+    DISCONTINUED_EPS: MetricSpec(
+        PER_SHARE,
+        FLOW,
+        (
+            "IncomeLossFromDiscontinuedOperationsNetOfTaxPerDilutedShare",
+            "DiscontinuedOperationIncomeLossFromDiscontinuedOperationNetOfTaxPerDilutedShare",
         ),
     ),
     # Only read where the diluted count is missing in a loss period; never stored.
@@ -646,6 +658,9 @@ IFRS_TWINS: Dict[str, str] = {
     "BasicAndDilutedEarningsLossPerShare": "EarningsPerShareBasicAndDiluted",
     "DilutedEarningsLossPerShareFromContinuingOperations": CONTINUING_EPS,
     "ProfitLossFromDiscontinuedOperations": "IncomeLossFromDiscontinuedOperationsNetOfTax",
+    "DilutedEarningsLossPerShareFromDiscontinuedOperations": (
+        "IncomeLossFromDiscontinuedOperationsNetOfTaxPerDilutedShare"
+    ),
     "ProfitLossFromOperatingActivities": "OperatingIncomeLoss",
     "GrossProfit": "GrossProfit",
     "CostOfSales": "CostOfRevenue",
@@ -1426,16 +1441,32 @@ def _continuing_eps_alone(values: Dict[str, Dict[Tuple[str, date], Obs]]) -> Non
     """
     Continuing operations' EPS stands for the EPS (`CONTINUING_EPS`, last in its chain) only
     in a period with no profit from discontinued operations tagged: there it is the EPS
-    (ABNB, Shell); beside a discontinued profit it leaves that profit out (Iberdrola's 2025:
-    0.843 continuing, 0.054 discontinued) and stays absent. The discontinued figures are
-    dropped here, read for this test alone (2026-11-19).
+    (ABNB, Shell). Beside a discontinued profit it leaves that profit out, so the EPS is the
+    continuing one plus the discontinued operations' (`DISCONTINUED_EPS`), both over the same
+    diluted count (IAS 33.68, ASC 260): Iberdrola's 2025, 0.843 and 0.054, is 0.897
+    (2026-11-21). Without the discontinued EPS it stays absent. The discontinued figures are
+    dropped here, read for this alone (2026-11-19).
     """
     discontinued = values.pop(DISCONTINUED, {})
+    discontinued_eps = values.pop(DISCONTINUED_EPS, {})
     eps = values.get("eps_diluted", {})
     for key, obs in list(eps.items()):
         other = discontinued.get(key)
-        if obs.concept == CONTINUING_EPS and other is not None and other.value:
+        if obs.concept != CONTINUING_EPS or other is None or not other.value:
+            continue
+        part = discontinued_eps.get(key)
+        if part is None:
             del eps[key]
+            continue
+        eps[key] = replace(
+            obs,
+            value=obs.value + part.value,
+            filed=max(obs.filed, part.filed),
+            concept=f"{CONTINUING_EPS}+{part.concept}",
+            error=obs.error + part.error,
+            derived=True,
+            vintages=(),
+        )
 
 
 def _total_only_when_current(values: Dict[str, Dict[Tuple[str, date], Obs]]) -> None:
