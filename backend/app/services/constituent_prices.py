@@ -42,6 +42,8 @@ from app.models.company_financials import (
     SecCompany,
 )
 from app.models.etf_basket import ConstituentPrice
+from app.models.market_price import MarketPrice
+from app.models.security import Security
 from app.repositories.company_financials_repository import CompanyFinancialsRepository
 from app.services.company_financials_normaliser import SPLIT_RATIOS
 from app.services.fx_preload import eur_rate_on, preload_eur_rates
@@ -50,8 +52,9 @@ logger = logging.getLogger(__name__)
 
 #: The declared base currency of a fund's basket prices (`app/etf_sources.py`).
 PRICE_CURRENCY_PARAM = "price_currency"
-#: The declaration holds when the median basket price over the SEC companies' newest weekly
-#: close (within `VERIFY_MATCH_DAYS` before the basket's date) is this near 1, over at least
+#: The declaration holds when the median basket price over the closes the app already holds
+#: for the same ISINs (within `VERIFY_MATCH_DAYS` before the basket's date: an SEC company's
+#: newest weekly close, else a held listing's newest daily one) is this near 1, over at least
 #: `VERIFY_MIN_MATCHES` companies. A week's moves stay within a few percent in the median;
 #: the nearest wrong currency (EUR for USD) is off by over 10%.
 VERIFY_TOLERANCE = 0.06
@@ -72,7 +75,7 @@ async def record_constituent_prices(
     Keep the basket's price of every company of another regulator, and of every SEC filer
     priced by its ordinary share (a 20-F filer found by its name, `ordinary_priced_ciks`),
     once per ISIN and day (`constituent_prices`), when the fund declares its price currency
-    and the declaration holds against the SEC companies' closes. Nothing is written
+    and the declaration holds against the closes the app holds (`_verify`). Nothing is written
     otherwise; the outcome says why.
     """
     out: Dict[str, Any] = {"recorded": 0, "verified": None}
@@ -142,11 +145,20 @@ async def record_constituent_prices(
 
 
 async def _verify(db: AsyncSession, basket, price_currency: str) -> Dict[str, Any]:
-    """Whether the basket's prices are in `price_currency`: the median ratio to the SEC
-    companies' newest weekly close, each converted at the basket's date."""
+    """
+    Whether the basket's prices are in `price_currency`: the median ratio to the closes the
+    app already holds for the same ISINs, each converted at the basket's date — an SEC
+    company's newest weekly close (`company_prices`), else a held listing's newest daily one
+    (`market_prices`). An emerging-markets basket holds almost no SEC filer with a Yahoo close
+    (IEEM two on 2026-11-21) but the held listings of Samsung, SK hynix, NU and TSMC's
+    ordinary share: without them its prices were refused, and Taiwan's, Tencent's and China
+    Construction Bank's pages had no multiple.
+    """
     by_isin = {
         r.isin: r for r in basket.rows if r.isin and r.price is not None and r.price > 0
     }
+    since = basket.as_of_date - timedelta(days=VERIFY_MATCH_DAYS)
+    references: Dict[str, Tuple[float, str]] = {}
     ciks = dict(
         (
             await db.execute(
@@ -156,48 +168,65 @@ async def _verify(db: AsyncSession, basket, price_currency: str) -> Dict[str, An
             )
         ).all()
     )
-    if not ciks:
-        return {"holds": False, "matches": 0, "reason": "no SEC company to compare"}
-    since = basket.as_of_date - timedelta(days=VERIFY_MATCH_DAYS)
-    closes: Dict[int, CompanyPrice] = {}
-    for p in (
-        await db.execute(
-            select(CompanyPrice)
-            .where(
-                CompanyPrice.cik.in_(list(ciks.values())),
-                CompanyPrice.date >= since,
-                CompanyPrice.date <= basket.as_of_date,
+    if ciks:
+        closes: Dict[int, CompanyPrice] = {}
+        for p in (
+            await db.execute(
+                select(CompanyPrice)
+                .where(
+                    CompanyPrice.cik.in_(list(ciks.values())),
+                    CompanyPrice.date >= since,
+                    CompanyPrice.date <= basket.as_of_date,
+                )
+                .order_by(CompanyPrice.date)
             )
-            .order_by(CompanyPrice.date)
-        )
-    ).scalars():
-        closes[p.cik] = p
+        ).scalars():
+            closes[p.cik] = p
+        for isin, cik in ciks.items():
+            close = closes.get(cik)
+            if close is not None and close.close > 0:
+                references[isin] = (float(close.close), close.currency)
+    held = [isin for isin in by_isin if isin not in references]
+    if held:
+        for isin, close, currency in (
+            await db.execute(
+                select(Security.isin, MarketPrice.close_price, MarketPrice.currency)
+                .join(MarketPrice, MarketPrice.security_id == Security.id)
+                .where(
+                    Security.isin.in_(held),
+                    MarketPrice.date >= since,
+                    MarketPrice.date <= basket.as_of_date,
+                )
+                .order_by(MarketPrice.date)
+            )
+        ).all():
+            if close is not None and close > 0:
+                references[isin] = (float(close), currency)
+    if not references:
+        return {"holds": False, "matches": 0, "reason": "no close to compare"}
     rates = await preload_eur_rates(
         db,
-        {price_currency, *(p.currency for p in closes.values())},
+        {price_currency, *(currency for _, currency in references.values())},
         basket.as_of_date,
         basket.as_of_date,
     )
     ratios = []
-    for isin, cik in ciks.items():
-        close = closes.get(cik)
-        if close is None or close.close <= 0:
-            continue
-        rate = cross_rate(rates, price_currency, close.currency, basket.as_of_date)
+    for isin, (close, currency) in references.items():
+        rate = cross_rate(rates, price_currency, currency, basket.as_of_date)
         if rate is None:
             continue
-        ratios.append(float(by_isin[isin].price) * rate / close.close)
+        ratios.append(float(by_isin[isin].price) * rate / close)
     if len(ratios) < VERIFY_MIN_MATCHES:
         return {
             "holds": False,
             "matches": len(ratios),
-            "reason": "too few SEC closes to compare",
+            "reason": "too few closes to compare",
         }
     middle = median(ratios)
     if abs(middle - 1) > VERIFY_TOLERANCE:
         logger.warning(
             f"{basket.fund_isin}: basket prices are not in {price_currency} "
-            f"(median ratio {middle:.3f} over {len(ratios)} SEC closes); none kept"
+            f"(median ratio {middle:.3f} over {len(ratios)} closes); none kept"
         )
         return {
             "holds": False,

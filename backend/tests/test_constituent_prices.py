@@ -15,6 +15,7 @@ from app.models.company_financials import CompanyPrice, SecCompany
 from app.models.etf_basket import ConstituentPrice
 from app.models.exchange_rate import ExchangeRate
 from app.models.market_price import MarketPrice
+from app.models.security import Security
 from app.services import company_financials_service, esef_sync
 from app.services.company_financials_service import CompanyFinancialsService
 from app.services.constituent_prices import basket_splits, record_constituent_prices
@@ -148,6 +149,41 @@ async def test_a_wrong_price_currency_keeps_nothing(db, dated):
     assert out["median_ratio"] == pytest.approx(1.25) and "not in USD" in out["reason"]
     # No declaration, no prices.
     assert (await record_constituent_prices(db, _basket(), None))["skipped"]
+
+
+@pytest.mark.asyncio
+async def test_held_listings_closes_verify_a_basket_with_few_sec_filers(db, dated):
+    """IEEM holds two SEC filers with a Yahoo close but held listings of Samsung, SK hynix,
+    NU and TSMC: their daily closes, in their own currency, verify the declaration."""
+    await _schneider(db)
+    await _sec_closes(db)
+    # Only two of the SEC filers keep a close in the window; three held listings stand in.
+    for cik in (1002, 1003, 1004):
+        await db.execute(
+            CompanyPrice.__table__.delete().where(CompanyPrice.cik == cik)
+        )
+    for sid, (isin, _, close) in enumerate(SEC[2:], start=50):
+        db.add(
+            Security(
+                id=sid, isin=isin, symbol=f"H{sid}", description="held", currency="EUR",
+                conid=9500 + sid, asset_category="STK", exchange="XETRA",
+            )
+        )
+        db.add(
+            MarketPrice(
+                security_id=sid,
+                date=date(2025, 11, 28),
+                close_price=Decimal(str(round(close * USD_EUR, 4))),
+                currency="EUR",
+                source="yahoo",
+            )
+        )
+    await db.commit()
+    out = await record_constituent_prices(db, _basket(), "USD")
+    assert out["verified"] is True and out["matches"] == 5 and out["recorded"] == 1
+    # A wrong declaration is still caught against the same closes.
+    out = await record_constituent_prices(db, _basket(sec_scale=1.25), "USD")
+    assert out["verified"] is False and "not in USD" in out["reason"]
 
 
 @pytest.mark.asyncio

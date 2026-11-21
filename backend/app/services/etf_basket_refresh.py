@@ -309,7 +309,7 @@ async def refresh_stale_baskets(
                     if refused:
                         result["warnings"].append(
                             f"{symbol}: basket prices kept for no company — {prices['reason']} "
-                            f"(median ratio {prices['median_ratio']} to the SEC closes); "
+                            f"(median ratio {prices['median_ratio']} to the closes held); "
                             f"check `price_currency` in app/etf_sources.py"
                         )
                 await db.commit()

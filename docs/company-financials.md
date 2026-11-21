@@ -957,10 +957,14 @@ what the app already fetches (`constituent_prices`, `_other_closes`), in this or
      356.27 USD weekly close, and Toyota's 21.29 is dollars, not yen. The payload names only the
      share class's currency (GBP), so each fund declares `price_currency`
      (`app/etf_sources.py`). Every recording checks it: the median ratio of the basket's price to
-     the SEC companies' newest weekly close (within `VERIFY_MATCH_DAYS`) must be within
-     `VERIFY_TOLERANCE` of 1 over at least `VERIFY_MIN_MATCHES` companies. A wrong declaration
-     keeps nothing and warns. A fund with too few SEC companies to compare (EMIM, an
-     emerging-markets fund) keeps nothing, silently.
+     the closes the app already holds for the same ISINs (within `VERIFY_MATCH_DAYS`: an SEC
+     company's newest weekly close, else a held listing's newest daily one, `market_prices`)
+     must be within `VERIFY_TOLERANCE` of 1 over at least `VERIFY_MIN_MATCHES` companies. A
+     wrong declaration keeps nothing and warns. The held listings count since 2026-11-21: an
+     emerging-markets basket (IEEM) holds two SEC filers with a Yahoo close but held listings
+     of Samsung, SK hynix, NU and TSMC; refused, it left Taiwan, Tencent and China
+     Construction Bank without a multiple. A fund with too few closes to compare still keeps
+     nothing, silently.
    - **Converted** to the reporting currency at each day's ECB rate (`fx_preload`, cache only):
      Shell's USD figures over a USD price, Schneider's EUR figures over the price × USD→EUR.
    - **A split** shows as a fund's units multiplying while the price divides by the same ratio

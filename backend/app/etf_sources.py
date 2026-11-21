@@ -97,7 +97,8 @@ FUND_SOURCES: Dict[str, FundSource] = {
     #
     # `price_currency` is the fund's base currency, the currency of every row's `unitPrice`
     # (`constituent_prices`; the payload names only the share class's). Checked against the
-    # SEC companies' closes on every recording, so a wrong one keeps nothing.
+    # closes the app holds (SEC companies', held listings') on every recording, so a wrong one
+    # keeps nothing.
     "IE00B4L5Y983": FundSource(
         symbol="IWDA",
         name="iShares Core MSCI World UCITS ETF",
