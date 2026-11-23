@@ -7,7 +7,7 @@
 > [docs/troubleshooting.md](docs/troubleshooting.md); local-dev traps in
 > [docs/local-development.md](docs/local-development.md).
 
-**Last updated: 2026-11-21.** The **Company tab** (one company's SEC EDGAR fundamentals history,
+**Last updated: 2026-11-23.** The **Company tab** (one company's SEC EDGAR fundamentals history,
 docs/company-financials.md) is deployed and filled for the held filers **and the Nasdaq-100**
 (102 companies with figures, keyed by CIK), with key figures, valuation multiples (weekly Yahoo closes), ROE and net cash, gross margin, operating income,
 buybacks & dividends, cash & debt and 3/5/10Y CAGRs (docs/shipped-log.md 2026-10-25). PR #80 (Swiss residency)
@@ -29,14 +29,17 @@ code trace; all of them shipped that evening (waves 1–3, the product issues #7
 
 ## Needs a human
 
-- **Push `main`** if `origin/main` is behind: the 2026-11-21 session committed the basket-price
-  verification by held listings' closes and ADR filers priced by their ordinary share
-  (`_ordinary_closes`) locally and stopped at its usage limit before the push window; then run
-  the weekly markets job's prices check after the evening basket refresh (IEEM's prices should
-  record; Japanese, Taiwanese and Tencent pages should show a P/E). Coverage on production
-  2026-11-21: 207 of 209 companies with a page, 200 fully backfilled (Allianz revenue, CBA and
-  CCB wait for the vendor's next month of credits; BRK and Iberdrola EPS, Nestlé/Roche vendor
-  holes and Prysmian/Terna FY2025 have no free source).
+- **Push `main`, then run `fetch_company_markets --source edinet`.** Committed 2026-11-23, not
+  pushed: a split after a Japanese annual report read from the half-year report, and basket
+  prices recorded from an unchanged file. **Until then Tokyo Electron's live page is wrong:**
+  its 5:1 split of 2026-10-01 puts a post-split price beside pre-split figures, so its P/E and
+  market cap read a fifth of the real ones and its dividend yield five times. The pass lists
+  about 55 days and reads four half-year reports once; checked on the real reports, only Tokyo
+  Electron's figures move. Not yet done: the planned KPI audit of the 48 non-SEC and
+  foreign-currency pages. Coverage on production 2026-11-21: 207 of 209 companies with a page,
+  200 fully backfilled (Allianz revenue, CBA and CCB wait for the vendor's next month of
+  credits; BRK and Iberdrola EPS, Nestlé/Roche vendor holes and Prysmian/Terna FY2025 have no
+  free source).
 
 - **Confirm the Alpha Vantage key's tier.** The Company tab's statement fill and the price
   fallback now share one budget of 25 calls a UTC day (`alpha_vantage.DAILY_LIMIT`, the free
@@ -650,6 +653,10 @@ Rough priority. Re-verify each `path:line` in code before fixing; lines move.
 
 One line each, newest first; drop the oldest.
 
+- **2026-11-23 (a split after the annual report)** — Tokyo Electron's post-split price beside
+  pre-split figures, found on the live screener; fixed from EDINET's half-year report through
+  the normaliser's own split vote, checked on all four Japanese companies' real reports.
+
 - **2026-11-20 (the vendor fallback live)** — the owner's financialfilings.com key; the line
   mapping rebuilt on the vendor's own codes after Siemens' live answer (OCF and equity missed,
   profit to owners misread, capex's sign), Japanese companies asked last, an EPS its profit and
@@ -676,9 +683,3 @@ One line each, newest first; drop the oldest.
   20-F instances (7b), the companies' own capex/debt concepts by label, BRK's and PCAR's segment
   columns summed where they partition the company, and Alpha Vantage last (one daily budget shared
   with the price fallback, proven per company and metric, fill-only).
-
-- **2026-11-15 (Company tab gaps)** — measured every missing quarter over the 132 companies,
-  matched each to what SEC did carry; widened the chains, then made them extend themselves
-  (bridging: a concept that agrees where both report fills the gaps); zero debt read off balance
-  sheets that show none; a loss quarter's basic count; the newest filing's currency (NBIS). GBP checked in the
-  browser; the tax report follows the base currency (docs corrected).

@@ -16,10 +16,16 @@ from sqlalchemy import select
 
 from app.config import settings
 from app.models.company_financials import Company, CompanyFinancial, CompanyReport
-from app.services import edinet_sync, vendor_sync
+from app.models.etf_basket import ConstituentPrice
+from app.services import company_financials_service, edinet_sync, vendor_sync
 from app.services.company_financials_service import CompanyFinancialsService
 from app.services.company_markets import NamedCompany
-from app.services.edinet_sync import JapanFinancialsSync, sec_code, summary_facts
+from app.services.edinet_sync import (
+    JapanFinancialsSync,
+    restated_eps,
+    sec_code,
+    summary_facts,
+)
 from app.services.vendor_sync import VendorFinancialsSync, facts_of
 
 HITACHI = NamedCompany("HITACHI LTD", ["JP3788600009"], ticker="6501")
@@ -253,6 +259,114 @@ async def test_the_japanese_pass_finds_reads_and_lists_a_report(db, monkeypatch)
     assert summary["reports_read"] == 1
     await db.refresh(report)
     assert report.reader == edinet_sync.READER
+
+
+def _annual_with_shares() -> bytes:
+    """`_instance()` with its year end's issued and treasury shares."""
+    entity = '<xbrli:entity><xbrli:identifier scheme="s">E</xbrli:identifier></xbrli:entity>'
+    return _instance().replace(
+        b"</xbrli:xbrl>",
+        (
+            f'<xbrli:context id="Issued_NonConsolidatedMember">{entity}'
+            "<xbrli:period><xbrli:instant>2026-03-31</xbrli:instant></xbrli:period>"
+            '<xbrli:scenario><xbrldi:explicitMember dimension="jppfs_cor:ConsolidatedOrNonConsolidatedAxis">'
+            "jppfs_cor:NonConsolidatedMember</xbrldi:explicitMember></xbrli:scenario></xbrli:context>"
+            '<xbrli:unit id="shares"><xbrli:measure>xbrli:shares</xbrli:measure></xbrli:unit>'
+            '<jpcrp_cor:TotalNumberOfIssuedSharesSummaryOfBusinessResults contextRef="Issued_NonConsolidatedMember" unitRef="shares">4640000000</jpcrp_cor:TotalNumberOfIssuedSharesSummaryOfBusinessResults>'
+            '<jpcrp_cor:TotalNumberOfSharesHeldTreasurySharesEtc contextRef="CurrentYearInstant" unitRef="shares">40000000</jpcrp_cor:TotalNumberOfSharesHeldTreasurySharesEtc>'
+            "</xbrli:xbrl>"
+        ).encode(),
+    )
+
+
+def _half_year(eps: str = "30.20", issued: str = "23200000000") -> bytes:
+    """A half-year report after a 5:1 split: last year's EPS restated, the filing date's count."""
+    entity = '<xbrli:entity><xbrli:identifier scheme="s">E</xbrli:identifier></xbrli:entity>'
+    return f"""<?xml version="1.0" encoding="UTF-8"?>
+<xbrli:xbrl xmlns:xbrli="http://www.xbrl.org/2003/instance" xmlns:iso4217="http://www.xbrl.org/2003/iso4217"
+ xmlns:c="http://disclosure.edinet-fsa.go.jp/taxonomy/jpcrp/2024-11-01/jpcrp_cor">
+<xbrli:context id="Prior1YearDuration">{entity}<xbrli:period><xbrli:startDate>2025-04-01</xbrli:startDate><xbrli:endDate>2026-03-31</xbrli:endDate></xbrli:period></xbrli:context>
+<xbrli:context id="InterimDuration">{entity}<xbrli:period><xbrli:startDate>2026-04-01</xbrli:startDate><xbrli:endDate>2026-09-30</xbrli:endDate></xbrli:period></xbrli:context>
+<xbrli:context id="FilingDateInstant">{entity}<xbrli:period><xbrli:instant>2026-11-12</xbrli:instant></xbrli:period></xbrli:context>
+<xbrli:unit id="shares"><xbrli:measure>xbrli:shares</xbrli:measure></xbrli:unit>
+<xbrli:unit id="JPYPerShares"><xbrli:divide><xbrli:unitNumerator><xbrli:measure>iso4217:JPY</xbrli:measure></xbrli:unitNumerator><xbrli:unitDenominator><xbrli:measure>xbrli:shares</xbrli:measure></xbrli:unitDenominator></xbrli:divide></xbrli:unit>
+<c:DilutedEarningsLossPerShareIFRSSummaryOfBusinessResults contextRef="Prior1YearDuration" unitRef="JPYPerShares">{eps}</c:DilutedEarningsLossPerShareIFRSSummaryOfBusinessResults>
+<c:DilutedEarningsLossPerShareIFRSSummaryOfBusinessResults contextRef="InterimDuration" unitRef="JPYPerShares">16.00</c:DilutedEarningsLossPerShareIFRSSummaryOfBusinessResults>
+<c:NumberOfIssuedSharesAsOfFilingDateIssuedSharesTotalNumberOfSharesEtc contextRef="FilingDateInstant" unitRef="shares">{issued}</c:NumberOfIssuedSharesAsOfFilingDateIssuedSharesTotalNumberOfSharesEtc>
+</xbrli:xbrl>""".encode()
+
+
+def test_a_half_year_report_proves_a_split_by_its_eps_and_its_share_count():
+    annual, _ = summary_facts(_annual_with_shares(), "S100ANNU", date(2026, 6, 20))
+    filed = date(2026, 11, 12)
+    kept = restated_eps(_half_year(), "S100HALF", filed, annual)
+    assert [(f["end"], f["val"]) for f in kept] == [("2026-03-31", 30.2)]
+    # No split: the same EPS and count.
+    assert not restated_eps(_half_year("151.00", "4640000000"), "S100HALF", filed, annual)
+    # An EPS at a fifth with an unmoved count is no split, nor a restatement off any ratio.
+    assert not restated_eps(_half_year("30.20", "4640000000"), "S100HALF", filed, annual)
+    assert not restated_eps(_half_year("140.00", "23200000000"), "S100HALF", filed, annual)
+
+
+@pytest.mark.asyncio
+async def test_a_split_after_the_annual_report_restates_the_page(db, monkeypatch):
+    monkeypatch.setattr(settings, "edinet_api_key", "edinet-test-key", raising=False)
+
+    async def named(_db):
+        return [HITACHI]
+
+    today = date(2026, 11, 20)
+    monkeypatch.setattr(edinet_sync, "named_companies", named)
+    monkeypatch.setattr(edinet_sync, "utc_today", lambda: today)
+    monkeypatch.setattr(company_financials_service, "utc_today", lambda: today)
+    monkeypatch.setattr(edinet_sync, "FIRST_LOOKBACK_DAYS", 160)
+    monkeypatch.setattr(edinet_sync, "HISTORY_WINDOW_DAYS", 1)
+    requests = []
+
+    def handler(request):
+        requests.append(request.url.path)
+        if request.url.path.endswith("/documents.json"):
+            listed = {
+                "2026-06-20": ("S100ANNU", "120", "2026-03-31", "2026-06-20 15:00"),
+                # EDINET can state the fiscal year's end on a half-year report.
+                "2026-11-12": ("S100HALF", "160", "2027-03-31", "2026-11-12 16:00"),
+            }.get(request.url.params["date"])
+            results = [
+                {"docID": listed[0], "secCode": "65010", "docTypeCode": listed[1],
+                 "xbrlFlag": "1", "withdrawalStatus": "0", "periodEnd": listed[2],
+                 "submitDateTime": listed[3]}
+            ] if listed else []
+            return httpx.Response(200, json={"metadata": {"status": "200"}, "results": results})
+        if request.url.path.endswith("/documents/S100ANNU"):
+            return httpx.Response(200, content=_zip(_annual_with_shares()))
+        if request.url.path.endswith("/documents/S100HALF"):
+            return httpx.Response(200, content=_zip(_half_year()))
+        return httpx.Response(404)
+
+    # The first pass reads the annual report, the second its half-year report.
+    for _ in range(2):
+        await JapanFinancialsSync(
+            db, transport=httpx.MockTransport(handler), sleep=_none
+        ).refresh()
+    db.add(ConstituentPrice(isin="JP3788600009", date=today, price=650.0, currency="JPY",
+                            fund_isin="IE00B4L5Y983", units_held=1000.0))
+    await db.commit()
+    svc = CompanyFinancialsService(db)
+    stats = (await svc.get_financials(
+        await svc.company_by_key("edinet:6501"), "annual", "max"
+    ))["key_stats"]
+    assert stats["eps_diluted"] == pytest.approx(30.2)
+    assert stats["dividends_per_share"] == pytest.approx(9.6)
+    assert stats["pe_ratio"] == pytest.approx(650.0 / 30.2)
+    assert stats["market_cap"] == pytest.approx(650.0 * 4.6e9 * 5)
+    assert stats["dividend_yield"] == pytest.approx(9.6 / 650.0)
+
+    # Read once, and its window is not listed from the start again.
+    requests.clear()
+    await JapanFinancialsSync(db, transport=httpx.MockTransport(handler), sleep=_none).refresh()
+    assert not [p for p in requests if p.endswith("/documents/S100HALF")]
+    annual = await db.get(CompanyReport, ((await db.execute(select(Company.id))).scalar(), "S100ANNU"))
+    assert annual.status == "read"
 
 
 # ── the vendor fallback ──────────────────────────────────────────────────────

@@ -36,6 +36,12 @@ the dividend always, the EPS when its profit over EPS sits nearer the year's iss
 than the count times the split. Reports `HISTORY_YEARS` (4) apart share a year, so the
 normaliser's own vote links an older report's basis to the newer one.
 
+**A split after the annual report** (`restated_eps`): Tokyo Electron's 5:1 of 2026-10-01 left
+its June report's EPS and share count on the old basis beside post-split basket prices, a
+fifth of its real P/E. The half-year report (`docTypeCode` 160) restates last year's EPS and
+states the issued shares at its filing date. When both moved by the same split, that one EPS
+is kept as the newest filing's fact and the normaliser's vote restates the rest.
+
 **Bounded**: `PASS_REQUEST_CAP` requests a pass, `REQUEST_INTERVAL_S` apart.
 """
 
@@ -79,6 +85,7 @@ NOT_CONFIGURED = (
 
 BASE = "https://api.edinet-fsa.go.jp/api/v2"
 ANNUAL_REPORT = "120"
+HALF_YEAR_REPORT = "160"
 FIRST_LOOKBACK_DAYS = 400
 #: What a read keeps: 1 until 2026-11-21 (NULL); 2 with per-share figures on the latest
 #: share basis, a transition year's IFRS spelling, basic EPS for a blank diluted one, and an
@@ -92,9 +99,21 @@ HISTORY_YEARS = 4
 HISTORY_REPORTS = 3
 HISTORY_WINDOW_DAYS = 12
 NEXT_DUE_AFTER = timedelta(days=330)
+#: The half-year report is looked for from the half's end, about this long after the fiscal
+#: year's, for `HALF_YEAR_WINDOW_DAYS` (it is due within 45 days).
+HALF_YEAR_AFTER_DAYS = 183
+HALF_YEAR_WINDOW_DAYS = 70
+#: A split proven by a half-year report: the stated EPS over the restated one is a split ratio
+#: within rounding, and the issued shares at its filing date over the annual report's shares
+#: outstanding are that ratio within the treasury shares the second count leaves out.
+SPLIT_EPS_TOLERANCE = 0.005
+SPLIT_COUNT_TOLERANCE = 0.10
 PASS_REQUEST_CAP = 700
 REQUEST_INTERVAL_S = 0.5
 READ, NONE = "read", "none"
+#: A half-year report: never an annual one (`NEXT_DUE_AFTER` counts from those), its `facts`
+#: the restated EPS of a split it proves, else none.
+INTERIM = "interim"
 #: A Japanese ISIN: `JP3…`.
 JAPAN_ISIN = re.compile(r"^JP3[0-9A-Z]{8}\d$")
 FY_DAYS = (350, 380)
@@ -194,6 +213,9 @@ ISSUED_SHARES = "TotalNumberOfIssuedSharesSummaryOfBusinessResults"
 #: (`OUTSTANDING`; Fujitsu's FY2025 1,739.8m issued, 5.3m held). Without it, no count.
 TREASURY_SHARES = "TotalNumberOfSharesHeldTreasurySharesEtc"
 OUTSTANDING = "NumberOfSharesOutstanding"
+#: The issued shares at a report's filing date, on its whole-company context.
+ISSUED_AT_FILING = "NumberOfIssuedSharesAsOfFilingDateIssuedSharesTotalNumberOfSharesEtc"
+FILING_DATE_CONTEXT = "FilingDateInstant"
 EPS = "DilutedEarningsLossPerShare"
 DPS = "DividendsRecognisedAsDistributionsToOwnersPerShare"
 #: Operating income from the statements (`jppfs_cor`, `jpigp_cor`), for a J-GAAP filer's
@@ -466,6 +488,53 @@ def _on_latest_basis(
     return out
 
 
+def _issued_at_filing(instance: bytes) -> Optional[float]:
+    """The issued shares a report states at its filing date, or None."""
+    found = None
+    for _, elem in ET.iterparse(io.BytesIO(instance)):
+        tag = elem.tag
+        if (
+            tag.startswith("{")
+            and tag.endswith("}" + ISSUED_AT_FILING)
+            and EDINET_NS.match(tag[1:])
+            and elem.get("contextRef") == FILING_DATE_CONTEXT
+        ):
+            found = _number((elem.text or "").strip())
+        elem.clear()
+    return found
+
+
+def restated_eps(
+    instance: bytes, accn: str, filed: date, annual: List[Dict[str, Any]]
+) -> List[Dict[str, Any]]:
+    """
+    The fiscal year's EPS a half-year report restates for a split after the annual report
+    (`annual`, that report's facts), as the newest filing's fact: the normaliser's split vote
+    then puts every older per-share figure and share count on the new basis. Only when the
+    issued shares moved by the same ratio; an EPS restated for anything else is left out.
+    """
+    issued = _issued_at_filing(instance)
+    if not issued:
+        return []
+    stated = {f["end"]: f["val"] for f in annual if f["concept"] == EPS}
+    counts = {f["end"]: f["val"] for f in annual if f["concept"] == OUTSTANDING}
+    out = []
+    for fact in summary_facts(instance, accn, filed)[0]:
+        if fact["concept"] != EPS or not fact["val"]:
+            continue
+        old, count = stated.get(fact["end"]), counts.get(fact["end"])
+        if not old or not count:
+            continue
+        step = _snap(old / fact["val"], NEIGHBOUR_RATIOS, SPLIT_EPS_TOLERANCE)
+        if (
+            step is not None
+            and step != 1
+            and abs(issued / count / float(step) - 1) <= SPLIT_COUNT_TOLERANCE
+        ):
+            out.append(fact)
+    return out
+
+
 def instance_of(zipped: bytes) -> Optional[bytes]:
     """The report's XBRL instance from EDINET's zip (`XBRL/PublicDoc/*.xbrl`), or None."""
     try:
@@ -614,16 +683,20 @@ class JapanFinancialsSync:
         return self._days[day]
 
     async def _find(
-        self, client: httpx.AsyncClient, code: str, days: List[date]
+        self,
+        client: httpx.AsyncClient,
+        code: str,
+        days: List[date],
+        doc_type: str = ANNUAL_REPORT,
     ) -> Optional[Dict[str, Any]]:
-        """The company's annual securities report filed on one of `days`, newest day first."""
+        """The company's report of `doc_type` filed on one of `days`, newest day first."""
         for day in sorted(days, reverse=True):
             if self.requests >= PASS_REQUEST_CAP and day not in self._days:
                 return None
             for row in await self._day(client, day):
                 if (
                     row.get("secCode") == code
-                    and row.get("docTypeCode") == ANNUAL_REPORT
+                    and row.get("docTypeCode") == doc_type
                     and str(row.get("xbrlFlag")) == "1"
                     and str(row.get("withdrawalStatus") or "0") == "0"
                 ):
@@ -724,10 +797,61 @@ class JapanFinancialsSync:
             await self.db.commit()
             summary["reports_read"] += 1
             read_any = True
+        if read and await self._half_year(
+            client, company, code, reports, read[-1], summary, now, today
+        ):
+            read_any = True
         await self.db.commit()
         if read_any or force or (company.fetched_at is None and read):
             return await self._write(company, summary, now)
         return "unchanged"
+
+    async def _half_year(
+        self, client, company: Company, code: str, reports, newest, summary, now, today
+    ) -> bool:
+        """
+        The half-year report after the newest annual one, read once, in its window and from
+        the day last looked through (`profile_checked_at`, which the annual watch starts
+        from only months later). True when it proves a split (`restated_eps`).
+        """
+        if newest.period_end is None or any(
+            r.status == INTERIM and r.filed and r.filed > newest.filed
+            for r in reports.values()
+        ):
+            return False
+        opens = newest.period_end + timedelta(days=HALF_YEAR_AFTER_DAYS)
+        last = min(opens + timedelta(days=HALF_YEAR_WINDOW_DAYS), today)
+        looked = company.profile_checked_at.date() if company.profile_checked_at else opens
+        start = max(opens, looked)
+        if start > last:
+            return False
+        days = [start + timedelta(days=d) for d in range((last - start).days + 1)]
+        found = await self._find(client, code, days, HALF_YEAR_REPORT)
+        if self.requests < PASS_REQUEST_CAP:
+            company.profile_checked_at = datetime.combine(today, datetime.min.time())
+        if found is None or found["docID"] in reports:
+            return False
+        zipped = (await self._get(client, f"documents/{found['docID']}", type="1")).content
+        instance = instance_of(zipped)
+        filed = date.fromisoformat(str(found.get("submitDateTime") or "")[:10])
+        facts = (
+            restated_eps(instance, found["docID"], filed, newest.facts or [])
+            if instance is not None
+            else []
+        )
+        await self.repo.record_report(
+            company.id,
+            found["docID"],
+            status=INTERIM,
+            read_at=now,
+            accn=found["docID"],
+            filed=filed,
+            facts=facts,
+            reader=READER,
+        )
+        await self.db.commit()
+        summary["reports_read"] += 1
+        return bool(facts)
 
     async def _reread(
         self, client, company: Company, reports, summary, now: datetime
@@ -769,7 +893,7 @@ class JapanFinancialsSync:
         facts: List[Dict[str, Any]] = []
         tagged: Dict[str, str] = {}
         for report in sorted(
-            (r for r in reports.values() if r.status == READ),
+            (r for r in reports.values() if r.status in (READ, INTERIM)),
             key=lambda r: (r.filed or date.min, r.report_id),
         ):
             facts.extend(report.facts or [])

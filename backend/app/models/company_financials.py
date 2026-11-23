@@ -295,8 +295,9 @@ class CompanyReport(Base):
     business year and report code) or an ESEF filing (its filings.xbrl.org id). `status`
     `read` keeps what it held — `facts` (companyfacts-shaped, `regulator_facts`) and `tagged`
     (each IFRS concept's own name in the report) — and is never asked again; `none` is an
-    answer with nothing in it, asked again only while the period is recent. Every rewrite of
-    the company's figures normalises all its stored reports at once.
+    answer with nothing in it, asked again only while the period is recent; `interim` is an
+    EDINET half-year report, its `facts` a split's restated EPS or none. Every rewrite of the
+    company's figures normalises all its stored reports at once.
     """
 
     __tablename__ = "company_reports"

@@ -1607,6 +1607,15 @@ after Taiwan; `tests/test_company_edinet_vendor.py`. Hitachi, Fujitsu, NEC, Toky
   by the split always, the EPS when its profit over EPS sits nearer the issued count than the
   count times the split. Reports four years apart share a year, so the normaliser's split vote
   carries an older report onto the newer basis.
+- **A split after the annual report** (`restated_eps`, 2026-11-23): Tokyo Electron's 5:1 of
+  2026-10-01 left its June report's EPS (1,250.88) and share count on the old basis beside
+  post-split basket prices, so its P/E read a fifth of the real one, its yield five times. The
+  half-year report (`docTypeCode` 160, looked for from the half's end for
+  `HALF_YEAR_WINDOW_DAYS`, read once, `status` `interim`) restates last year's EPS (250.18) and
+  states the issued shares at its filing date (2,340m against 468m). When the EPS moved by a
+  split ratio and the count by the same one, that EPS is stored as the newest filing's fact and
+  the normaliser's vote restates the per-share figures and share counts. A split after the
+  half-year report shows in the basket's own rows (`basket_splits`) until the next annual one.
 - The key travels in the query string (`Subscription-Key`): `app/redact.py` masks it.
 
 ### Vendor fallback (financialfilings.com)
