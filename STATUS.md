@@ -29,22 +29,6 @@ code trace; all of them shipped that evening (waves 1–3, the product issues #7
 
 ## Needs a human
 
-- **Push `main`, then run `fetch_company_markets` with `--source edinet`, `esef` and `vendor`.**
-  The fixes of the 2026-11-23 KPI audit (48 pages against public filings, 41 of 68 findings
-  confirmed) are committed, not pushed, because the session's permission check refused the push.
-  **Until then these live figures are wrong:** Tokyo Electron's P/E, market cap and yield
-  (post-split price, pre-split figures); Santander's and Iberdrola's yield (interim dividend
-  only); HSBC's profit; NU's FY2019-20 EPS; Siemens', Hydro One's and Allianz's bad vendor years;
-  Tencent's EPS before 2014; TSMC's dividends after FY2018. The three passes re-read what they
-  stored, with no vendor credit for a rewrite. The SEC-side changes land with the Sunday
-  `company_financials_refresh`, which also reads BHP's FY2026 20-F (companyfacts lacks it, and
-  the overdue check fires from 2026-11-27) and PDD's capex. After that, re-read the audited pages.
-- **Known and left as stated:** Prysmian's revenue is its "total sales and income" tag (1-3%
-  high); ABB's, Siemens' and Roche's growth crosses a change of perimeter in the vendor's data.
-  Coverage on production 2026-11-21: 207 of 209 companies with a page, 200 fully backfilled
-  (Allianz revenue, CBA and CCB wait for the vendor's next month of credits, as do Siemens' and
-  Infineon's FY2026; BRK and Iberdrola EPS, Nestlé/Roche vendor holes and Prysmian/Terna FY2025
-  have no free source).
 
 - **Confirm the Alpha Vantage key's tier.** The Company tab's statement fill and the price
   fallback now share one budget of 25 calls a UTC day (`alpha_vantage.DAILY_LIMIT`, the free
@@ -118,10 +102,21 @@ code trace; all of them shipped that evening (waves 1–3, the product issues #7
 - **Misfire recovery never observed end to end.** `/health`'s `scheduler_jobstore_persistent:
   false` means the store fell back to memory.
 - **The vendor fallback's next month** (financialfilings.com, free tier, first read 2026-11-20
-  with the month's credits spent): the weekly markets job's first pass after the credits renew
-  should write Commonwealth Bank and China Construction Bank (bank template: `total_net_revenue`,
-  `net_interest_income`) and leave the ten read pages `unchanged` until their 90 days pass;
-  Allianz's revenue (insurer template) only comes back then, on its re-read.
+  with the month's credits spent): the first weekly markets job after the credits renew
+  (Sunday 2026-12-06) should write Commonwealth Bank and China Construction Bank (bank template:
+  `total_net_revenue`, `net_interest_income`). Siemens' and Infineon's FY2026 come from Sunday
+  2026-12-27 (`REPORT_RECHECK`), the other pages after their 90 days, Allianz's revenue
+  (insurer template) on that re-read.
+- **The KPI audit's fixes (2026-11-23, 48 pages against public filings, 41 of 68 findings
+  confirmed), deployed and re-read:** seen on the live pages: Tokyo Electron's split, TSMC's
+  dividends, NU's EPS, HSBC's profit, the vendor's bad years, Tencent's EPS, the dividends no cash
+  bears out now blank. **Still to see:** Sunday 2026-11-29 reads BHP's FY2026 20-F (companyfacts
+  lacks it; the overdue check fires from 11-27). PDD's free cash flow from FY2021 returns with its
+  next SEC fetch, Sunday 2026-12-06 (fetched by hand 11-23, so not due on the 29th).
+- **Known and left as stated:** Prysmian's revenue is its "total sales and income" tag (1-3%
+  high); ABB's, Siemens' and Roche's growth crosses a change of perimeter in the vendor's data.
+  Coverage on production 2026-11-21: 207 of 209 companies with a page, 200 fully backfilled; BRK
+  and Iberdrola EPS, Nestlé/Roche vendor holes and Prysmian/Terna FY2025 have no free source.
 
 ## Watch after the next deploy
 
@@ -661,7 +656,8 @@ One line each, newest first; drop the oldest.
 - **2026-11-23 (the KPI audit)** — 48 pages audited against public filings with an adversarial
   check per finding; fixed Tokyo Electron's post-listing split, European dividends proven by
   cash, HSBC's profit, NU's mis-tagged EPS, the vendor's bad years, TSMC's quarterly dividends
-  and consolidation years, each checked on the real filings. Committed; the push was refused.
+  and consolidation years, each checked on the real filings; no book value card on a bank's
+  page (owner's choice). Deployed and re-read the same morning.
 
 - **2026-11-20 (the vendor fallback live)** — the owner's financialfilings.com key; the line
   mapping rebuilt on the vendor's own codes after Siemens' live answer (OCF and equity missed,
