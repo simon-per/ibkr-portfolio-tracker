@@ -424,6 +424,19 @@ SHARES_SLIP_TOLERANCE = 0.5
 # Terna's ESEF reports tag the interim dividend in cents as euros (11.92 for 0.1192, a
 # 2,279% payout; #83). Generous on purpose: a special dividend stays within a few times.
 DPS_SLIP_FACTOR = 10
+#: A year's dividend per share times its shares further than this factor from the dividends
+#: paid is a quarter's rate on the year's context, or a rate scaled by it (Visa's FY2021 0.32 of
+#: 1.28, Applied Materials' FY2009 0.06 of 0.24): `_drop_dividends_cash_contradicts`.
+DPS_CASH_FACTOR = 3.0
+#: A company tagging one of these pays preferred dividends, so its dividends paid are no
+#: measure of its common dividend (JPMorgan's 2009, Bank of America's 2010-13).
+PREFERRED_DIVIDENDS = (
+    "PaymentsOfDividendsPreferredStockAndPreferenceStock",
+    "DividendsPreferredStock",
+    "DividendsPreferredStockCash",
+    "PreferredStockDividendsIncomeStatementImpact",
+    "PreferredStockDividendsAndOtherAdjustments",
+)
 SHARE_COUNT_SLIPS: Tuple[Fraction, ...] = (
     Fraction(1, 1000),
     Fraction(1000),
@@ -492,6 +505,7 @@ SCALE_SLIPS: Tuple[Fraction, ...] = (
 MIN_IMPLIED_SHARES = 1000
 #: A diluted count of such a period stands when a sound EPS's profit over it is this near.
 IMPLIED_COUNT_TOLERANCE = 0.10
+SAME_QUARTER_DAYS = 7
 LONE_SLIP_MIN_AGREEING = 2
 # Loose on purpose: the factors are a thousand apart, and a small EPS is cent-rounded.
 LONE_SLIP_TOLERANCE = 0.25
@@ -2048,8 +2062,11 @@ def _quarters_and_years(
             for rung in rungs:
                 inside = sum(
                     q.value
-                    for q in direct.values()
-                    if q.start is not None and q.start >= start and q.end <= rung.end
+                    for q in _distinct_quarters(
+                        q
+                        for q in direct.values()
+                        if q.start is not None and q.start >= start and q.end <= rung.end
+                    )
                 )
                 if (
                     _days(start, rung.end) > QUARTER_DAYS[1]
@@ -2096,6 +2113,17 @@ def _quarters_and_years(
     quarters = dict(derived)
     quarters.update(direct)  # a reported quarter beats a derived one
     return quarters, years, starts
+
+
+def _distinct_quarters(quarters: Iterable[Obs]) -> List[Obs]:
+    """One per quarter: a filer can state a quarter on two ends days apart (Teradyne's 2012
+    Q1 to March 31 and April 1), and counted twice it outweighed the year, which was lost."""
+    out: List[Obs] = []
+    for q in sorted(quarters, key=lambda o: o.end):
+        if out and (q.end - out[-1].end).days <= SAME_QUARTER_DAYS:
+            continue
+        out.append(q)
+    return out
 
 
 def _adds_up(rungs: Sequence[Obs]) -> bool:
@@ -2351,6 +2379,28 @@ def _drop_implausible_dividends(values) -> None:
         income = values["net_income"].get(key)
         witness = max(paid.value, abs(income.value) if income is not None else 0.0)
         if obs.value * shares.value > DPS_SLIP_FACTOR * witness:
+            del dps[key]
+
+
+def _drop_dividends_cash_contradicts(values, companyfacts) -> None:
+    """
+    A year's dividend per share the dividends paid contradict by `DPS_CASH_FACTOR` either way:
+    absent, an unknown rather than a quarter's rate read as the year's. Not for a company with
+    preferred dividends (`PREFERRED_DIVIDENDS`), whose paid total holds them too.
+    """
+    gaap = ((companyfacts or {}).get("facts") or {}).get("us-gaap") or {}
+    if any(concept in gaap for concept in PREFERRED_DIVIDENDS):
+        return
+    dps = values["dividends_per_share"]
+    for key, obs in list(dps.items()):
+        if key[0] != ANNUAL or obs.value <= 0:
+            continue
+        shares = values["diluted_shares"].get(key)
+        paid = values["dividends_paid"].get(key)
+        if shares is None or shares.value <= 0 or paid is None or paid.value <= 0:
+            continue
+        ratio = obs.value * shares.value / paid.value
+        if ratio > DPS_CASH_FACTOR or ratio < 1 / DPS_CASH_FACTOR:
             del dps[key]
 
 
@@ -2800,6 +2850,7 @@ def normalise(
         _fill_shares_from_eps(values, keys)
     _fill_eps_from_shares(values, keys)
     _drop_implausible_dividends(values)
+    _drop_dividends_cash_contradicts(values, companyfacts)
 
     cash = values["cash"]
     if cash:

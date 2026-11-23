@@ -310,6 +310,48 @@ def test_a_share_count_tagged_as_eps_is_no_eps_and_votes_no_split():
     assert of("diluted_shares")[2021] == pytest.approx(1_602_126_000)
 
 
+def _gaap_year(end, **lines):
+    return {name: {"units": {unit: [_fy(end, val, form="10-K")]}}
+            for name, (unit, val) in lines.items()}
+
+
+def test_a_quarters_rate_on_the_years_context_is_no_annual_dividend():
+    # Visa's FY2021: 0.32 tagged on the year, 2.8bn paid over 2.2bn shares (1.28 a share).
+    lines = {
+        "Revenues": ("USD", 24e9),
+        "NetIncomeLoss": ("USD", 12e9),
+        "WeightedAverageNumberOfDilutedSharesOutstanding": ("shares", 2.2e9),
+        "PaymentsOfDividends": ("USD", 2.8e9),
+        "CommonStockDividendsPerShareDeclared": ("USD/shares", 0.32),
+    }
+    dps = lambda doc: [r["value"] for r in normalise(doc).rows if r["metric"] == "dividends_per_share"]
+    assert dps({"entityName": "V", "facts": {"us-gaap": _gaap_year("2021-09-30", **lines)}}) == []
+    # The whole year's rate stands.
+    whole = {**lines, "CommonStockDividendsPerShareDeclared": ("USD/shares", 1.28)}
+    assert dps({"entityName": "V", "facts": {"us-gaap": _gaap_year("2021-09-30", **whole)}}) == [1.28]
+    # A bank's paid total holds its preferred dividends: no measure of the common one.
+    bank = {**lines, "DividendsPreferredStock": ("USD", 2e9)}
+    assert dps({"entityName": "B", "facts": {"us-gaap": _gaap_year("2021-09-30", **bank)}}) == [0.32]
+
+
+def test_a_quarter_stated_on_two_ends_is_counted_once_against_its_year():
+    # Teradyne's 2012: each of two quarters on two ends days apart outweighed the year.
+    def row(start, end, val):
+        form = "10-K" if end == "2012-12-31" else "10-Q"
+        return {"start": start, "end": end, "val": val, "accn": f"a-{end}", "filed": "2013-03-01",
+                "form": form, "fy": 2012, "fp": "FY" if form == "10-K" else "Q3"}
+
+    doc = {"entityName": "TER", "facts": {"us-gaap": {"Revenues": {"units": {"USD": [
+        row("2012-01-01", "2012-03-31", 397e6), row("2012-01-01", "2012-04-01", 397e6),
+        row("2012-04-01", "2012-06-30", 548e6), row("2012-04-02", "2012-07-01", 548e6),
+        row("2012-07-01", "2012-09-30", 463e6), row("2012-10-01", "2012-12-31", 248e6),
+        row("2012-01-01", "2012-12-31", 1_656e6),
+    ]}}}}}
+    years = [r["value"] for r in normalise(doc).rows
+             if r["metric"] == "revenue" and r["fiscal_period"] == "FY"]
+    assert years == [1_656e6]
+
+
 def test_a_filers_quarterly_dividends_make_its_year():
     # TSMC's 20-F tags each quarter's dividend and no year from 2019.
     def quarter(start, end, val):

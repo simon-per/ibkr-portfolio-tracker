@@ -696,6 +696,9 @@ def test_a_split_the_vendor_left_unrestated_and_its_capex():
     assert _ends(out, "DilutedEarningsLossPerShare")["2012"] == pytest.approx(1.66)
     assert _ends(out, "AdjustedWeightedAverageShares")["2012"] == pytest.approx(9_340e6)
     assert not _ends(out, "PurchaseOfPropertyPlantAndEquipmentClassifiedAsInvestingActivities")
+    # A year before the split with no count of its own is on the same basis.
+    gap = _year(2010, eps=4.33) + facts
+    assert _ends(sound_years(gap), "DilutedEarningsLossPerShare")["2009"] == pytest.approx(0.866)
 
 
 @pytest.mark.asyncio

@@ -112,7 +112,11 @@ code trace; all of them shipped that evening (waves 1–3, the product issues #7
   dividends, NU's EPS, HSBC's profit, the vendor's bad years, Tencent's EPS, the dividends no cash
   bears out now blank. **Still to see:** Sunday 2026-11-29 reads BHP's FY2026 20-F (companyfacts
   lacks it; the overdue check fires from 11-27). PDD's free cash flow from FY2021 returns with its
-  next SEC fetch, Sunday 2026-12-06 (fetched by hand 11-23, so not due on the 29th).
+  next SEC fetch, Sunday 2026-12-06 (fetched by hand 11-23, so not due on the 29th). The same
+  fetch brings Teradyne's FY2011-12 and ON Semiconductor's FY2012 revenue (a quarter stated on
+  two ends had outweighed its year) and drops Visa's and Applied Materials' quarter rates read
+  as a year's dividend. All 206 pages were screened against themselves on 2026-11-23; the
+  remaining flags are real events (IPOs, specials, reverse splits, Sandisk's 8:1 of 11-20).
 - **Known and left as stated:** Prysmian's revenue is its "total sales and income" tag (1-3%
   high); ABB's, Siemens' and Roche's growth crosses a change of perimeter in the vendor's data.
   Coverage on production 2026-11-23: 206 of 208 companies with a page, 197 fully backfilled. Of

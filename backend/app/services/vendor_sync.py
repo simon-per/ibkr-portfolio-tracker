@@ -71,8 +71,9 @@ FINANCIALS_COST = 41
 REQUEST_INTERVAL_S = 1.0
 READ = "read"
 YEAR_DAYS = (350, 380)
-#: What a stored answer has been through: 1 (NULL) nothing, 2 `sound_years`.
-READER = 2
+#: What a stored answer has been through: 1 (NULL) nothing, 2 `sound_years`, 3 with a year
+#: that has no share count on its neighbours' split basis.
+READER = 3
 #: A run of up to `DIP_MAX_RUN` years whose revenue is under this share of the years on both
 #: sides is another entity's statements (Siemens' parent, 28bn and 22bn between 83bn and 57bn).
 #: A company that shrinks for good (E.ON's 2015 spin-off) has no recovery after the run.
@@ -298,18 +299,20 @@ def _unsound_ends(facts: List[Dict[str, Any]]) -> set:
 
 def _split_factors(facts: List[Dict[str, Any]]) -> Dict[str, float]:
     """Each year end's factor to the newest share basis: the steps of the diluted count that
-    snap to a whole split of at least 2 (Tencent's 1,868m to 9,357m)."""
+    snap to a whole split of at least 2 (Tencent's 1,868m to 9,357m). A year with no count
+    takes the factor of the nearest newer year that has one (Tencent's FY2009)."""
     counts = _positive_by_end(facts, "AdjustedWeightedAverageShares")
     factors: Dict[str, float] = {}
     factor = 1.0
     newer = None
-    for end in sorted(counts, reverse=True):
-        if newer is not None:
-            step = _snap(newer / counts[end], NEIGHBOUR_RATIOS, NEIGHBOUR_TOLERANCE)
-            if step is not None and step.denominator == 1 and step >= 2:
-                factor *= float(step)
+    for end in sorted({f["end"] for f in facts}, reverse=True):
+        if end in counts:
+            if newer is not None:
+                step = _snap(newer / counts[end], NEIGHBOUR_RATIOS, NEIGHBOUR_TOLERANCE)
+                if step is not None and step.denominator == 1 and step >= 2:
+                    factor *= float(step)
+            newer = counts[end]
         factors[end] = factor
-        newer = counts[end]
     return factors
 
 
