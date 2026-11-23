@@ -50,6 +50,8 @@ def _lab(*concepts):
     ("Purchases of property and equipment and intangible assets", "capex"),  # NVDA
     ("Capital expenditures", "capex"),
     ("Payments for property, plant and equipment", "capex"),
+    ("Payments to Acquire Property Equipment and Software and Intangible Assets", "capex"),  # PDD
+    ("Purchases of software", None),
     ("Carrying Value Of Debt Outstanding", "debt_total"),  # CDNS
     ("Total debt", "debt_total"),
     ("Current portion of long-term debt", "debt_current"),

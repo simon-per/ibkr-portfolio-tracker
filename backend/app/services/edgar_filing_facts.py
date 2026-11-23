@@ -94,7 +94,7 @@ DEI = re.compile(r"^\{http://xbrl\.sec\.gov/dei/[^}]+\}TradingSymbol$")
 EXTENSION_LABELS: Dict[str, Tuple[str, str]] = {
     "capex": (
         r"^(purchases?|payments?|acquisitions?|additions?|expenditures?) (of|for|to|related"
-        r" to|to acquire|on) (property|premises)(,? plant)?(,| and| &)+ equipment"
+        r" to|to acquire|on) (property|premises)(,? plant)?(,| and| &)* equipment"
         r"|^capital expenditures?$",
         r"business|proceeds|sale|accrued|unpaid|not yet paid|incurred|lease|held for"
         # Software alone is no capex line; "property, equipment and software" is (PDD's).
@@ -150,15 +150,16 @@ GAP_CONCEPTS: Dict[str, Any] = {
 #: What a stored read looked for (`sec_filing_reads.reader`): 1 the dividend per share
 #: alone (2026-11-07), 2 the diluted EPS too (2026-11-08), 3 the company's own concepts
 #: by their labels too (2026-11-16), 4 the EPS of the one listed share class (2026-11-19),
-#: 5 capex labelled with its software (PDD's, 2026-11-23).
+#: 5 capex labelled with its software, 6 that label without a comma (PDD's "Payments to Acquire
+#: Property Equipment and Software and Intangible Assets", 2026-11-23).
 #: A filing read before a gap's kind was looked for is read once more for that gap, and
 #: never again after.
-READER = 5
+READER = 6
 READ_SINCE = {
     "dividends_per_share": 1,
     "eps_diluted": 4,
     **{family: 3 for family in EXTENSION_FAMILIES},
-    "extension:capex": 5,
+    "extension:capex": 6,
     SEGMENT_FAMILY: 3,
 }
 
