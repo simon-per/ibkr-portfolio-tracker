@@ -297,21 +297,23 @@ async def refresh_stale_baskets(
                 bodies = await fetch(client, source_isin, source)
                 basket = parse(source_isin, bodies, source.adapter, symbol, as_of)
                 stored = await repo.replace_basket(basket)
-                if not stored.unchanged:
-                    prices = await record_constituent_prices(
-                        db, basket, source.params.get(PRICE_CURRENCY_PARAM)
+                # An unchanged file too: a company added since the basket last changed (the
+                # Japanese pages of 2026-11-21) gets its price the same evening; the recorder
+                # keeps one row per ISIN and day, so nothing doubles.
+                prices = await record_constituent_prices(
+                    db, basket, source.params.get(PRICE_CURRENCY_PARAM)
+                )
+                refused = prices["verified"] is False and "median_ratio" in prices
+                if prices["recorded"] or refused:
+                    result.setdefault("constituent_prices", []).append(
+                        {"symbol": symbol, **prices}
                     )
-                    refused = prices["verified"] is False and "median_ratio" in prices
-                    if prices["recorded"] or refused:
-                        result.setdefault("constituent_prices", []).append(
-                            {"symbol": symbol, **prices}
-                        )
-                    if refused:
-                        result["warnings"].append(
-                            f"{symbol}: basket prices kept for no company — {prices['reason']} "
-                            f"(median ratio {prices['median_ratio']} to the closes held); "
-                            f"check `price_currency` in app/etf_sources.py"
-                        )
+                if refused:
+                    result["warnings"].append(
+                        f"{symbol}: basket prices kept for no company — {prices['reason']} "
+                        f"(median ratio {prices['median_ratio']} to the closes held); "
+                        f"check `price_currency` in app/etf_sources.py"
+                    )
                 await db.commit()
             except BasketReplaceRefused as e:
                 await db.rollback()

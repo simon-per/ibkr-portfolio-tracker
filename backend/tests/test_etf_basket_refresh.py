@@ -262,6 +262,25 @@ async def test_a_fund_asked_today_is_not_asked_again_until_its_interval(db, cloc
 
 
 @pytest.mark.asyncio
+async def test_an_unchanged_basket_still_records_its_prices(db, clock, monkeypatch):
+    """A company added after the basket last changed is priced from the unchanged file."""
+    recorded = []
+
+    async def _record(_db, basket, currency):
+        recorded.append((basket.fund_isin, currency))
+        return {"recorded": 0, "verified": None}
+
+    monkeypatch.setattr(refresh_mod, "record_constituent_prices", _record)
+    await _hold(db, 1, IWDA, "IWDA")
+    await _basket(db, IWDA, "blackrock", age_days=3)
+    parser = _parser(as_of=TODAY - timedelta(days=2))
+    await _evening(db, clock, TODAY - timedelta(days=1), _Fetcher(), parser)
+    unchanged = await _evening(db, clock, TODAY, _Fetcher(), parser)
+    assert [r["symbol"] for r in unchanged["unchanged"]] == ["IWDA"]
+    assert recorded == [(IWDA, "USD"), (IWDA, "USD")]
+
+
+@pytest.mark.asyncio
 async def test_an_unchanged_basket_is_not_rewritten_and_starts_no_identity_pass(
     db, clock, monkeypatch
 ):

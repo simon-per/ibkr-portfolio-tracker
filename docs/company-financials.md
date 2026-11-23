@@ -952,8 +952,9 @@ what the app already fetches (`constituent_prices`, `_other_closes`), in this or
    until the next report.
 2. **The iShares basket files** the evening refresh downloads anyway: every row carries
    `unitPrice` and `unitsHeld`, and `record_constituent_prices` keeps each day's price of every
-   company of another regulator (migration `f7a9c1e3b5d8`). History accumulates from the first
-   refresh after the deploy.
+   company of another regulator (migration `f7a9c1e3b5d8`), from an unchanged file too
+   (2026-11-21: a company added since the basket last changed is priced that evening; one row
+   per ISIN and day). History accumulates from the first refresh after the deploy.
    - **The price is in the fund's base currency, not the listing's.** On IWDA's file of
      2026-11-18, units × price equalled each row's market value, Apple's 352.45 sat beside its
      356.27 USD weekly close, and Toyota's 21.29 is dollars, not yen. The payload names only the
