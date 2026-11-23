@@ -281,6 +281,47 @@ def test_net_sales_of_goods_are_an_ifrs_filers_revenue_without_a_total():
     )
 
 
+def test_a_share_count_tagged_as_eps_is_no_eps_and_votes_no_split():
+    # NU's FY2021 20-F tagged 1,137,931 as 2019's diluted EPS beside a loss of 92.5m.
+    def row(end, val, accn):
+        return {"start": f"{end[:4]}-01-01", "end": end, "val": val, "accn": accn,
+                "filed": "2022-04-01" if accn == "a21" else "2023-04-01", "form": "20-F"}
+
+    facts = {"entityName": "NU", "facts": {"ifrs-full": {
+        "ProfitLossAttributableToOwnersOfParent": {"units": {"USD": [
+            row("2019-12-31", -92_531_000, "a21"), row("2021-12-31", -165_000_000, "a21"),
+            row("2021-12-31", -165_000_000, "a22"), row("2022-12-31", -365_000_000, "a22"),
+        ]}},
+        "DilutedEarningsLossPerShare": {"units": {"USD/shares": [
+            row("2019-12-31", 1_137_931, "a21"), row("2021-12-31", 1_602_126, "a21"),
+            row("2021-12-31", -0.103, "a22"), row("2022-12-31", -0.08, "a22"),
+        ]}},
+        "AdjustedWeightedAverageShares": {"units": {"shares": [
+            row("2019-12-31", 306_210_000, "a21"), row("2019-12-31", 306_210_000, "a22"),
+            row("2021-12-31", 334_436_000, "a21"),
+            # The restated count, which the sound EPS bears out, stays.
+            row("2021-12-31", 1_602_126_000, "a22"), row("2022-12-31", 4_500_000_000, "a22"),
+        ]}},
+    }}}
+    rows = normalise(facts).rows
+    of = lambda metric: {r["fiscal_year"]: r["value"] for r in rows if r["metric"] == metric}
+    assert 2019 not in of("eps_diluted") and 2019 not in of("diluted_shares")
+    assert of("eps_diluted")[2021] == pytest.approx(-0.103)
+    assert of("diluted_shares")[2021] == pytest.approx(1_602_126_000)
+
+
+def test_the_ordinary_holders_profit_stands_before_total_profit():
+    # HSBC tags its ordinary shareholders' profit, and no owners' total.
+    facts = {"entityName": "HSBC", "facts": {"ifrs-full": {
+        "ProfitLoss": {"units": {"USD": [_fy("2025-12-31", 23_131_000_000)]}},
+        "ProfitLossAttributableToOrdinaryEquityHoldersOfParentEntity": {
+            "units": {"USD": [_fy("2025-12-31", 21_102_000_000)]}
+        },
+    }}}
+    rows = normalise(facts).rows
+    assert [r["value"] for r in rows if r["metric"] == "net_income"] == [21_102_000_000]
+
+
 def test_a_40f_is_an_annual_report():
     """RBC, TD and Thomson Reuters file a 40-F in IFRS (2026-11-19); until then they read as
     holding nothing."""

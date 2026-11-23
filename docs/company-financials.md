@@ -1568,6 +1568,14 @@ page (its 20-F).
 - **Prices**: Taiwan sits in EMIM, whose basket prices are not kept (too few SEC companies to
   check its currency), and neither is held, so their pages show figures without multiples.
 
+### European dividends (2026-11-23)
+
+ESEF's `DividendsRecognisedAsDistributionsToOwnersPerShare` has no one meaning: the year's whole
+dividend (Shell, Prysmian), the interim alone (Santander, Iberdrola), or cents tagged as euros
+(Terna, Santander's 2023). `esef_sync.witnessed_dividends` keeps a year's figure only within
+`DIVIDEND_WITNESS_TOLERANCE` of the dividends paid over the diluted shares; otherwise the
+dividend and its yield are absent. A filer paying partly in shares (Iberdrola) has no witness.
+
 ### Japan (EDINET)
 
 Built 2026-11-20, live 2026-11-21 with the owner's key (`EDINET_API_KEY`, the FSA's free

@@ -72,8 +72,12 @@ REFUSED_OVER = "refused_over"
 #: twins): 1 until 2026-11-19 (NULL), 2 with continuing EPS and operating cash flow, net
 #: interest income and discontinued profit (Shell's EPS, National Grid's cash flow, HSBC's
 #: and Santander's top line), 3 with the discontinued operations' EPS, 4 with the shares
-#: outstanding (2026-11-21). A report read under an older set is read once more.
-READER = 4
+#: outstanding (2026-11-21), 5 with the ordinary shareholders' profit and the dividends paid
+#: to the parent's holders (2026-11-23). A report read under an older set is read once more.
+READER = 5
+#: A year's dividend per share stands when the dividends paid over its diluted shares are this
+#: near it (`witnessed_dividends`).
+DIVIDEND_WITNESS_TOLERANCE = 0.15
 
 
 def stale_read(report) -> bool:
@@ -96,6 +100,37 @@ def handled(report) -> bool:
         and not retry_larger(report)
         and not stale_read(report)
     )
+
+
+def witnessed_dividends(rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """
+    The rows less each dividend per share the year's cash does not bear out. ESEF's tag has no
+    one meaning (measured over the eleven filers, 2026-11-23): the year's whole dividend
+    (Shell, Prysmian), the interim alone (Santander's 0.115 of 0.24, Iberdrola's 0.253 of
+    0.685), or euro cents tagged as euros (Terna's 11.92, Santander's 2023 8.1). Its yield read
+    as a figure either way, so without the witness it is absent. The shares: the diluted
+    count, else those outstanding, else profit over EPS (Shell tags neither count).
+    """
+    by = {(r["period_end"], r["metric"]): r["value"] for r in rows}
+
+    def shares_at(end):
+        count = by.get((end, "diluted_shares")) or by.get((end, "shares_outstanding"))
+        if count:
+            return count
+        income, eps = by.get((end, "net_income")), by.get((end, "eps_diluted"))
+        return income / eps if income and eps and income / eps > 0 else None
+
+    kept = []
+    for row in rows:
+        if row["metric"] == "dividends_per_share":
+            paid = by.get((row["period_end"], "dividends_paid"))
+            shares = shares_at(row["period_end"])
+            if not paid or not shares or not row["value"]:
+                continue
+            if abs(row["value"] / (abs(paid) / shares) - 1) > DIVIDEND_WITNESS_TOLERANCE:
+                continue
+        kept.append(row)
+    return kept
 
 
 def is_european(isin: str) -> bool:
@@ -364,7 +399,8 @@ class EuropeFinancialsSync:
         if not result.rows:
             await self.db.commit()
             return "no figures"
-        await self.repo.replace_company_rows(company, result.rows, now)
+        rows = witnessed_dividends(result.rows)
+        await self.repo.replace_company_rows(company, rows, now)
         await self.db.commit()
-        summary["rows_written"] += len(result.rows)
+        summary["rows_written"] += len(rows)
         return "written"

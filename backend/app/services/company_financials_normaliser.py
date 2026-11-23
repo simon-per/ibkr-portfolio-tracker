@@ -487,6 +487,11 @@ SCALE_SLIPS: Tuple[Fraction, ...] = (
 # beside three filings' -0.21) while its years stayed right, so no one factor for the filing
 # held both, and the older filings were voted a million times up to match it. Dropped before
 # the filings are walked (`_drop_lone_slips`). Only these factors: a split's is far smaller.
+#: An EPS whose filing's profit over it leaves fewer shares than this is a share count tagged
+#: as a per-share figure (NU's FY2021 20-F: 1,137,931 beside a loss of 92.5m).
+MIN_IMPLIED_SHARES = 1000
+#: A diluted count of such a period stands when a sound EPS's profit over it is this near.
+IMPLIED_COUNT_TOLERANCE = 0.10
 LONE_SLIP_MIN_AGREEING = 2
 # Loose on purpose: the factors are a thousand apart, and a small EPS is cent-rounded.
 LONE_SLIP_TOLERANCE = 0.25
@@ -650,6 +655,11 @@ IFRS_TWINS: Dict[str, str] = {
     "RevenueFromContractsWithCustomers": "RevenueFromContractWithCustomerExcludingAssessedTax",
     "RevenueFromSaleOfGoods": "RevenueFromSaleOfGoods",
     "ProfitLossAttributableToOwnersOfParent": "NetIncomeLoss",
+    # A filer with other equity holders tags the ordinary shareholders' share and no owners'
+    # total: HSBC's, what its EPS is computed on (2026-11-23: its page read `ProfitLoss`).
+    "ProfitLossAttributableToOrdinaryEquityHoldersOfParentEntity": (
+        "NetIncomeLossAvailableToCommonStockholdersBasic"
+    ),
     "ProfitLoss": "ProfitLoss",
     "DilutedEarningsLossPerShare": "EarningsPerShareDiluted",
     # One figure for both (2026-11-19, ESEF), and the continuing figure, which is the EPS only
@@ -678,6 +688,9 @@ IFRS_TWINS: Dict[str, str] = {
     "AdjustedWeightedAverageShares": "WeightedAverageNumberOfDilutedSharesOutstanding",
     "DividendsRecognisedAsDistributionsToOwnersPerShare": "CommonStockDividendsPerShareDeclared",
     "DividendsPaidClassifiedAsFinancingActivities": "PaymentsOfDividends",
+    "DividendsPaidToEquityHoldersOfParentClassifiedAsFinancingActivities": (
+        "PaymentsOfDividendsCommonStock"
+    ),
     "PaymentsToAcquireOrRedeemEntitysShares": "PaymentsForRepurchaseOfCommonStock",
     "CashAndCashEquivalents": "CashAndCashEquivalentsAtCarryingValue",
     "EquityAttributableToOwnersOfParent": "StockholdersEquity",
@@ -911,6 +924,56 @@ def _tolerance(f: Fact, g: Fact) -> Optional[float]:
         return VALUE_TOLERANCE
     tol = VALUE_TOLERANCE + CENT_ROUNDING / abs(f.val) + CENT_ROUNDING / abs(g.val)
     return tol if tol <= MAX_VOTE_TOLERANCE else None
+
+
+def _drop_counts_tagged_as_eps(facts: List[Fact]) -> List[Fact]:
+    """
+    The facts less each diluted EPS its own filing's profit proves is no EPS
+    (`MIN_IMPLIED_SHARES`), and every filing's diluted count of that period, which the same
+    note states on another basis (NU's 2019-2020: 7.7bn and 10.1bn beside 1.1bn and 1.3bn
+    weighted shares, a later 20-F repeating them), unless a sound EPS of the period bears the
+    count out (NU's restated 2021: 1,602m). An unknown is absent; left in, the value also
+    votes a false split onto the whole filing, and the count makes a false EPS.
+    """
+    eps = ("EarningsPerShareDiluted", "EarningsPerShareBasicAndDiluted", CONTINUING_EPS)
+    profit = {
+        (f.accn, f.start, f.end): f.val
+        for f in facts
+        if f.concept in ("NetIncomeLoss", "NetIncomeLossAvailableToCommonStockholdersBasic")
+    }
+    wrong = {
+        (f.accn, f.start, f.end)
+        for f in facts
+        if f.concept in eps
+        and f.val
+        and (f.accn, f.start, f.end) in profit
+        and abs(profit[(f.accn, f.start, f.end)] / f.val) < MIN_IMPLIED_SHARES
+    }
+    if not wrong:
+        return facts
+    periods = {(start, end) for _, start, end in wrong}
+    implied: Dict[Tuple[Optional[date], date], List[float]] = defaultdict(list)
+    for f in facts:
+        key = (f.accn, f.start, f.end)
+        if f.concept in eps and f.val and key in profit and key not in wrong:
+            implied[(f.start, f.end)].append(abs(profit[key] / f.val))
+
+    def borne_out(f: Fact) -> bool:
+        return any(
+            abs(f.val / count - 1) <= IMPLIED_COUNT_TOLERANCE
+            for count in implied.get((f.start, f.end), ())
+        )
+
+    return [
+        f
+        for f in facts
+        if not (f.concept in eps and (f.accn, f.start, f.end) in wrong)
+        and not (
+            f.concept == "WeightedAverageNumberOfDilutedSharesOutstanding"
+            and (f.start, f.end) in periods
+            and not borne_out(f)
+        )
+    ]
 
 
 def _drop_lone_slips(facts: List[Fact]) -> List[Fact]:
@@ -2521,7 +2584,9 @@ def normalise(
     own_concepts = [f for f in filing_facts if "metric" in f]
     segment_facts = [f for f in filing_facts if "axis" in f]
     plain = [f for f in filing_facts if "metric" not in f and "axis" not in f]
-    facts = _drop_lone_slips(base + _filing_facts(base, plain, reporting))
+    facts = _drop_lone_slips(
+        _drop_counts_tagged_as_eps(base + _filing_facts(base, plain, reporting))
+    )
     if not facts:
         return result
     events: List[Dict[str, Any]] = []
