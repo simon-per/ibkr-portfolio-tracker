@@ -115,8 +115,10 @@ code trace; all of them shipped that evening (waves 1–3, the product issues #7
   next SEC fetch, Sunday 2026-12-06 (fetched by hand 11-23, so not due on the 29th).
 - **Known and left as stated:** Prysmian's revenue is its "total sales and income" tag (1-3%
   high); ABB's, Siemens' and Roche's growth crosses a change of perimeter in the vendor's data.
-  Coverage on production 2026-11-21: 207 of 209 companies with a page, 200 fully backfilled; BRK
-  and Iberdrola EPS, Nestlé/Roche vendor holes and Prysmian/Terna FY2025 have no free source.
+  Coverage on production 2026-11-23: 206 of 208 companies with a page, 197 fully backfilled. Of
+  the nine short, Allianz's revenue waits for vendor credits; Siemens' and Hydro One's gaps are
+  the bad years the audit removed; BRK and Iberdrola EPS, Nestlé/Roche vendor holes and
+  Prysmian/Terna FY2025 have no free source.
 
 ## Watch after the next deploy
 
