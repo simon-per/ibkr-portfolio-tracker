@@ -335,9 +335,22 @@ def _derive(point: Point) -> None:
         "deposits": b.get("deposits"),
         "loans": b.get("loans"),
         # Equity per share outstanding at the period end; a count tagged per class (BRK) is
-        # none, so no figure.
-        "book_value_per_share": _ratio(b.get("equity"), b.get("shares_outstanding")),
+        # none, and one far from the diluted count covers part of the company (BHP's Limited
+        # alone beside the whole dual-listed group's equity), so no figure.
+        "book_value_per_share": _ratio(
+            b.get("equity"), _whole_company_count(b.get("shares_outstanding"), shares)
+        ),
     }
+
+
+def _whole_company_count(
+    outstanding: Optional[float], diluted: Optional[float]
+) -> Optional[float]:
+    """The shares outstanding, unless the diluted count shows they are only part of the
+    company (`MARKET_CAP_SHARE_TOLERANCE`, the market cap's own check)."""
+    if outstanding and diluted and abs(outstanding / diluted - 1) > MARKET_CAP_SHARE_TOLERANCE:
+        return None
+    return outstanding
 
 
 def _sum(*values: Optional[float]) -> Optional[float]:

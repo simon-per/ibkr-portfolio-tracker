@@ -2409,6 +2409,36 @@ def _flat_rate_years(values, keys, calendar, latest, totals, mapping) -> None:
             break
 
 
+def _year_from_four_quarters(values, keys, calendar) -> None:
+    """
+    A fiscal year with no dividend per share whose four quarters each state one: their sum.
+    TSMC's 20-F moved to quarterly dividends in 2019 and tags no year after it, so its annual
+    series stopped at FY2018 while the dividends paid went on (2026-11-23).
+    """
+    dps = values["dividends_per_share"]
+    for year in calendar:
+        key = (ANNUAL, year.end)
+        if key in dps:
+            continue
+        found = [
+            o
+            for k, o in dps.items()
+            if k[0] == "Q" and year.start < k[1] <= year.end and not o.derived
+        ]
+        if len(found) != len(QUARTERS):
+            continue
+        keys.setdefault(key, (year.name, ANNUAL))
+        dps[key] = Obs(
+            value=sum(o.value for o in found),
+            filed=max(o.filed for o in found),
+            start=year.start,
+            end=year.end,
+            unit=found[0].unit,
+            concept=f"{found[0].concept} four quarters",
+            derived=True,
+        )
+
+
 def _dividend_payments(values, keys, calendar, latest) -> None:
     """
     A fiscal year with no dividend per share whose 10-K tags one on each payment date
@@ -2670,6 +2700,7 @@ def normalise(
 
     _flat_rate_years(values, keys, calendar, latest, totals, mapping)
     _dividend_payments(values, keys, calendar, latest)
+    _year_from_four_quarters(values, keys, calendar)
     _drop_unbalanced_first_quarters(values, keys, calendar)
     _total_only_when_current(values)
     _continuing_eps_alone(values)

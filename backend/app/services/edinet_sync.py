@@ -34,7 +34,9 @@ beside FY2022's 110.54) and its dividends are as declared (Tokyo Electron's 1,71
 (`_split_factors`), so each year's per-share figures are put on the report's latest basis:
 the dividend always, the EPS when its profit over EPS sits nearer the year's issued count
 than the count times the split. Reports `HISTORY_YEARS` (4) apart share a year, so the
-normaliser's own vote links an older report's basis to the newer one.
+normaliser's own vote links an older report's basis to the newer one. The year of a share
+consolidation has no dividend (`_consolidation_years`): its summary adds an interim on the
+old basis to a final on the new (Hitachi's 8 + 50 of 2018, really 40 + 50).
 
 **A split after the annual report** (`restated_eps`): Tokyo Electron's 5:1 of 2026-10-01 left
 its June report's EPS and share count on the old basis beside post-split basket prices, a
@@ -90,9 +92,9 @@ FIRST_LOOKBACK_DAYS = 400
 #: What a read keeps: 1 until 2026-11-21 (NULL); 2 with per-share figures on the latest
 #: share basis, a transition year's IFRS spelling, basic EPS for a blank diluted one, and an
 #: IFRS filer's operating profit and total equity from its summary; 3 with the shares
-#: outstanding at the year end (`OUTSTANDING`). A report read under an older one is read once
-#: more, by its document id (`_reread`).
-READER = 3
+#: outstanding at the year end (`OUTSTANDING`); 4 with no dividend for a consolidation's year.
+#: A report read under an older one is read once more, by its document id (`_reread`).
+READER = 4
 #: Four years apart, so two reports' five-year summaries share a year (*Splits*); three
 #: reports give thirteen fiscal years.
 HISTORY_YEARS = 4
@@ -453,6 +455,18 @@ def _split_factors(issued: Dict[str, float]) -> Dict[str, Fraction]:
     return factors
 
 
+def _consolidation_years(issued: Dict[str, float]) -> set:
+    """The year ends whose issued count fell by a whole consolidation ratio from the year
+    before (Hitachi's 1:5 and Fujitsu's 1:10 of October 2018)."""
+    ends = sorted(issued)
+    out = set()
+    for before, end in zip(ends, ends[1:]):
+        step = _snap(issued[end] / issued[before], NEIGHBOUR_RATIOS, NEIGHBOUR_TOLERANCE)
+        if step is not None and step < 1:
+            out.add(end)
+    return out
+
+
 def _on_latest_basis(
     facts: List[Dict[str, Any]], issued: Dict[str, float]
 ) -> List[Dict[str, Any]]:
@@ -461,9 +475,11 @@ def _on_latest_basis(
     dividend is as declared, so always divided by the split; an EPS only when its profit
     over EPS sits nearer that year's issued count than the count times the split (the
     summary restates some years and not others). An EPS whose basis cannot be told (no
-    profit, no count, opposite signs) is left out: an unknown is absent.
+    profit, no count, opposite signs) is left out, and so is the dividend of a consolidation's
+    year, which adds two bases (`_consolidation_years`): an unknown is absent.
     """
     factors = _split_factors(issued)
+    consolidated = _consolidation_years(issued)
     profit = {
         f["end"]: f["val"]
         for f in facts
@@ -471,6 +487,8 @@ def _on_latest_basis(
     }
     out = []
     for f in facts:
+        if f["concept"] == DPS and f["end"] in consolidated:
+            continue
         factor = float(factors.get(f["end"], 1))
         if factor == 1 or f["concept"] not in (EPS, DPS):
             out.append(f)

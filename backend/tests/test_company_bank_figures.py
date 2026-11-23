@@ -12,7 +12,7 @@ from datetime import date
 import pytest
 
 from app.services.company_financials_normaliser import normalise
-from app.services.company_financials_service import build_series
+from app.services.company_financials_service import _whole_company_count, build_series
 from tests.test_company_financials_service import _quarter_ends, _rows
 
 
@@ -52,6 +52,13 @@ BANK = {
     "equity": lambda i: 300.0,
     "shares_outstanding": lambda i: 10.0,
 }
+
+
+def test_book_value_needs_a_count_of_the_whole_company():
+    # BHP's cover page counts the Limited line alone, beside the dual-listed group's equity.
+    assert _whole_company_count(2_945e6, 5_069e6) is None
+    assert _whole_company_count(5_062e6, 5_069e6) == 5_062e6
+    assert _whole_company_count(5_062e6, None) == 5_062e6
 
 
 def test_the_service_derives_the_efficiency_ratio_and_book_value_per_share():

@@ -310,6 +310,24 @@ def test_a_share_count_tagged_as_eps_is_no_eps_and_votes_no_split():
     assert of("diluted_shares")[2021] == pytest.approx(1_602_126_000)
 
 
+def test_a_filers_quarterly_dividends_make_its_year():
+    # TSMC's 20-F tags each quarter's dividend and no year from 2019.
+    def quarter(start, end, val):
+        return {"start": start, "end": end, "val": val, "accn": "a-24",
+                "filed": "2025-04-17", "form": "20-F"}
+
+    doc = {"entityName": "TSMC", "facts": {"ifrs-full": {
+        "Revenue": {"units": {"TWD": [_fy("2024-12-31", 2.89e12, accn="a-24")]}},
+        "DividendsRecognisedAsDistributionsToOwnersPerShare": {"units": {"TWD/shares": [
+            quarter("2024-01-01", "2024-03-31", 4.0), quarter("2024-04-01", "2024-06-30", 4.0),
+            quarter("2024-07-01", "2024-09-30", 4.5), quarter("2024-10-01", "2024-12-31", 4.5),
+        ]}},
+    }}}
+    dps = [r["value"] for r in normalise(doc).rows
+           if r["metric"] == "dividends_per_share" and r["fiscal_period"] == "FY"]
+    assert dps == [17.0]
+
+
 def test_the_ordinary_holders_profit_stands_before_total_profit():
     # HSBC tags its ordinary shareholders' profit, and no owners' total.
     facts = {"entityName": "HSBC", "facts": {"ifrs-full": {

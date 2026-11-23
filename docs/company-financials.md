@@ -1615,6 +1615,10 @@ after Taiwan; `tests/test_company_edinet_vendor.py`. Hitachi, Fujitsu, NEC, Toky
   by the split always, the EPS when its profit over EPS sits nearer the issued count than the
   count times the split. Reports four years apart share a year, so the normaliser's split vote
   carries an older report onto the newer basis.
+- **A consolidation's year has no dividend** (`_consolidation_years`, 2026-11-23): Hitachi's 1:5
+  and Fujitsu's 1:10 of October 2018 left that year's summary adding an interim on the old basis
+  to a final on the new (Hitachi's 8 + 50, really 40 + 50). Its issued count falls by a whole
+  ratio, and only that year's dividend is left out.
 - **A split after the annual report** (`restated_eps`, 2026-11-23): Tokyo Electron's 5:1 of
   2026-10-01 left its June report's EPS (1,250.88) and share count on the old basis beside
   post-split basket prices, so its P/E read a fifth of the real one, its yield five times. The

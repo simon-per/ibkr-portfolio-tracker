@@ -159,6 +159,18 @@ def test_a_summarys_per_share_figures_go_on_its_latest_share_basis():
     assert eps["2022-03-31"] == 92.30
 
 
+def test_a_consolidations_year_has_no_dividend():
+    # Hitachi's 1:5 of October 2018: its year adds an interim on the old basis to a final on
+    # the new, so that year alone is left out.
+    issued = {"2018-03-31": 4_833e6, "2019-03-31": 966e6, "2020-03-31": 967e6}
+    facts = [
+        {"concept": edinet_sync.DPS, "end": end, "val": val}
+        for end, val in (("2018-03-31", 15.0), ("2019-03-31", 58.0), ("2020-03-31", 95.0))
+    ]
+    kept = {f["end"] for f in edinet_sync._on_latest_basis(facts, issued)}
+    assert kept == {"2018-03-31", "2020-03-31"}
+
+
 def test_a_transition_years_ifrs_figure_wins_and_basic_eps_fills_a_blank_diluted():
     # NEC's FY2017 report (IFRS adopted): FY2016 in both standards, its diluted EPS blank.
     instance = _instance().replace(
