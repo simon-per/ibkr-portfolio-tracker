@@ -1374,7 +1374,11 @@ industrial's cash & debt (a bank's deposits and borrowing are its business, not 
 - **Derived** (`company_financials_service._derive`): the **efficiency ratio**, non-interest
   expense over net interest plus non-interest income (lower is better; no growth rate), and
   **book value per share**, equity over the shares outstanding at the period end (a count tagged
-  per class, IBKR's or BRK's, gives none). Served as series like any other.
+  per class, IBKR's or BRK's, gives none, and so does one far from the diluted count, BHP's
+  Limited line beside the dual-listed group's equity). Served as series like any other, **but no
+  bank draws its card** (owner, 2026-11-23): a bank's equity holds preferred capital, which
+  JPMorgan, BofA and TD do not tag in a form to subtract, so it read 8-10% above their published
+  figures.
 - **Measured** over the 132 companies: adding the chains added rows only — 886 net interest income,
   310 non-interest expense, 612 provisions, 258 non-interest income, 232 loans, 201 deposits — and
   no figure that existed moved. BAC, JPM, SOFI and IBKR carry net interest income, non-interest

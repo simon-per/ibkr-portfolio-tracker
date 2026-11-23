@@ -39,9 +39,6 @@ code trace; all of them shipped that evening (waves 1–3, the product issues #7
   stored, with no vendor credit for a rewrite. The SEC-side changes land with the Sunday
   `company_financials_refresh`, which also reads BHP's FY2026 20-F (companyfacts lacks it, and
   the overdue check fires from 2026-11-27) and PDD's capex. After that, re-read the audited pages.
-- **Decide: bank book value per share.** JPMorgan's and TD's read 8-10% high because equity
-  includes preferred capital, and banks tag it too unevenly to subtract (BAC and TD not at all).
-  Keep the approximate figure or hide it on bank pages.
 - **Known and left as stated:** Prysmian's revenue is its "total sales and income" tag (1-3%
   high); ABB's, Siemens' and Roche's growth crosses a change of perimeter in the vendor's data.
   Coverage on production 2026-11-21: 207 of 209 companies with a page, 200 fully backfilled

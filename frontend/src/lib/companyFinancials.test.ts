@@ -132,7 +132,8 @@ describe('visibleCharts by business model', () => {
       profile: { ...FIXTURE_PROFILE, business_model: 'bank' }, series: bankSeries,
     })
     const ids = visibleCharts(bank).map((c) => c.id)
-    expect(ids).toEqual(expect.arrayContaining(['bank-revenue', 'efficiency', 'deposits-loans', 'book-value']))
+    expect(ids).toEqual(expect.arrayContaining(['bank-revenue', 'efficiency', 'deposits-loans']))
+    expect(ids).not.toContain('book-value') // its equity holds preferred capital
     expect(ids).not.toContain('credit-provision') // none tagged: no card
     expect(ids).not.toContain('cash-debt') // a bank's borrowing is its business
   })

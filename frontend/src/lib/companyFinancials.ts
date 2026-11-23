@@ -99,7 +99,9 @@ export const COMPANY_CHARTS: readonly CompanyChartDef[] = [
       { key: 'deposits', name: 'Deposits' },
       { key: 'loans', name: 'Loans' },
     ] } },
-  { id: 'book-value', kind: 'bar', header: 'growth', only: ['bank', 'insurer'],
+  // Not a bank's (owner, 2026-11-23): its equity holds preferred capital it tags too unevenly
+  // to subtract, so the figure read 8-10% high (docs/company-financials.md, *A bank's figures*).
+  { id: 'book-value', kind: 'bar', header: 'growth', only: ['insurer'],
     total: { title: 'Book value per share', format: 'perShare',
       series: [{ key: 'book_value_per_share', name: 'Book value' }] } },
   { id: 'fcf', kind: 'bar', header: 'growth',
