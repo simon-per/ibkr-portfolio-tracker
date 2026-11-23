@@ -1572,6 +1572,21 @@ page (its 20-F).
 - **Prices**: Taiwan sits in EMIM, whose basket prices are not kept (too few SEC companies to
   check its currency), and neither is held, so their pages show figures without multiples.
 
+### Debt counts all borrowings (owner, 2026-11-23)
+
+`company_financials_service._debt`: the long-term debt with its current maturities, plus
+commercial paper and other short-term borrowings (`short_term_borrowings`). A filer's own total of
+everything current (`DebtCurrent`, `debt_current_total`) beside the noncurrent debt caps the sum,
+so short-term borrowings that hold the maturities count once. A long-term total tagged again as
+the noncurrent half (Chevron) is not a half (`_total_is_not_a_half`). Until a company's next SEC
+fetch its rows lack these lines and its debt stays the term debt. Before this, annual figures left
+short-term borrowings out while a quarter whose filer tagged no current maturities counted them.
+
+A short-term line equal to the current maturities is one line tagged twice (IBM, AMD) and counts
+once. A balance-sheet share count more than `COVER_COUNT_GAP` from the cover page's yields to the
+cover when that sits nearer the diluted count (`_cover_count_when_nearer`: Disney tags its 1,900m
+issued shares as outstanding, beside 1,708m on the cover).
+
 ### Dividends the cash contradicts (2026-11-23)
 
 Some 10-Ks tag one quarter's rate on the year's context (Visa's FY2021 0.32 of 1.28, Applied

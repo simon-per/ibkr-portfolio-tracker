@@ -357,6 +357,25 @@ METRICS: Dict[str, MetricSpec] = {
             "ConvertibleDebtCurrent",
         ),
     ),
+    # What the debt figure adds up from (owner, 2026-11-23: debt counts all borrowings,
+    # `company_financials_service._debt`): the current maturities alone, the commercial paper
+    # and other short-term borrowings, and a filer's total of everything current.
+    "current_maturities": MetricSpec(
+        MONETARY,
+        INSTANT,
+        (
+            "LongTermDebtCurrent",
+            "LongTermDebtAndCapitalLeaseObligationsCurrent",
+            "ConvertibleNotesPayableCurrent",
+            "ConvertibleDebtCurrent",
+        ),
+    ),
+    "short_term_borrowings": MetricSpec(
+        MONETARY,
+        INSTANT,
+        ("ShortTermBorrowings", "CommercialPaper", "OtherShortTermBorrowings"),
+    ),
+    "debt_current_total": MetricSpec(MONETARY, INSTANT, ("DebtCurrent",)),
     # The balance sheet's count at the period end, for the market cap. A company with several
     # classes tags it per class, which companyfacts leaves out: none is read for it.
     "shares_outstanding": MetricSpec(
@@ -503,6 +522,9 @@ SCALE_SLIPS: Tuple[Fraction, ...] = (
 #: An EPS whose filing's profit over it leaves fewer shares than this is a share count tagged
 #: as a per-share figure (NU's FY2021 20-F: 1,137,931 beside a loss of 92.5m).
 MIN_IMPLIED_SHARES = 1000
+#: A balance-sheet share count this far from the cover page's is one of them misread
+#: (`_cover_count_when_nearer`).
+COVER_COUNT_GAP = 0.05
 #: A diluted count of such a period stands when a sound EPS's profit over it is this near.
 IMPLIED_COUNT_TOLERANCE = 0.10
 SAME_QUARTER_DAYS = 7
@@ -2065,7 +2087,12 @@ def _quarters_and_years(
                     for q in _distinct_quarters(
                         q
                         for q in direct.values()
-                        if q.start is not None and q.start >= start and q.end <= rung.end
+                        if q.start is not None
+                        and q.start >= start
+                        and q.end <= rung.end
+                        # Money a later filing recast: GE's FY2022 revenue of 29bn after two
+                        # spin-offs beside quarters first filed on the whole company.
+                        and (kind != MONETARY or q.filed >= rung.filed)
                     )
                 )
                 if (
@@ -2085,7 +2112,12 @@ def _quarters_and_years(
                 if (
                     year is not None
                     and year.start == start
-                    and any(r.end < rung.end and r.value > year.value for r in rungs)
+                    and any(
+                        r.end < rung.end
+                        and r.value > year.value
+                        and (kind != MONETARY or r.filed >= year.filed)
+                        for r in rungs
+                    )
                 ):
                     del years[rung.end]
         cumulative = kind == PER_SHARE and (
@@ -2400,6 +2432,47 @@ def _year_count(values, key) -> Optional[float]:
         if k[0] == ANNUAL and o.value > 0
     ]
     return min(years)[1] if years else None
+
+
+def _cover_count_when_nearer(values, instants) -> None:
+    """
+    The cover page's count in place of a balance-sheet count `COVER_COUNT_GAP` away from it
+    when it sits nearer the diluted count: Disney tags its 1,900m issued shares as outstanding
+    beside 1,708m on the cover and 1,760m diluted, a market cap about a tenth too high. A split
+    between the year end and the cover leaves the balance-sheet count the nearer one.
+    """
+    cover = instants.get(COVER_SHARES) or {}
+    for key, own in list(values["shares_outstanding"].items()):
+        stated = cover.get(key[1])
+        diluted = values["diluted_shares"].get(key)
+        if (
+            stated is None
+            or diluted is None
+            or own.concept == COVER_SHARES
+            or not own.value
+            or abs(stated.value / own.value - 1) <= COVER_COUNT_GAP
+        ):
+            continue
+        if abs(stated.value - diluted.value) < abs(own.value - diluted.value):
+            values["shares_outstanding"][key] = stated
+
+
+def _total_is_not_a_half(values) -> None:
+    """
+    A noncurrent figure that is the very total tagged as including current maturities is that
+    total, not a half to add them to: Chevron tags one 39,781 as both, and the 2,345 of current
+    maturities inside it counted twice.
+    """
+    noncurrent = values["debt_noncurrent"]
+    for key, total in values["debt_total"].items():
+        half = noncurrent.get(key)
+        if (
+            half is not None
+            and total.concept == "LongTermDebtAndCapitalLeaseObligationsIncludingCurrentMaturities"
+            and total.value
+            and abs(half.value / total.value - 1) <= SAME_VALUE
+        ):
+            del noncurrent[key]
 
 
 def _drop_dividends_cash_contradicts(values, companyfacts) -> None:
@@ -2873,6 +2946,8 @@ def normalise(
     _fill_eps_from_shares(values, keys)
     _drop_implausible_dividends(values)
     _drop_dividends_cash_contradicts(values, companyfacts)
+    _cover_count_when_nearer(values, instants)
+    _total_is_not_a_half(values)
 
     cash = values["cash"]
     if cash:

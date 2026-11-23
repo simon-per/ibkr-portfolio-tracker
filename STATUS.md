@@ -107,16 +107,20 @@ code trace; all of them shipped that evening (waves 1–3, the product issues #7
   `total_net_revenue`, `net_interest_income`). Siemens' and Infineon's FY2026 come from Sunday
   2026-12-27 (`REPORT_RECHECK`), the other pages after their 90 days, Allianz's revenue
   (insurer template) on that re-read.
-- **The KPI audit's fixes (2026-11-23, 48 pages against public filings, 41 of 68 findings
-  confirmed), deployed and re-read:** seen on the live pages: Tokyo Electron's split, TSMC's
-  dividends, NU's EPS, HSBC's profit, the vendor's bad years, Tencent's EPS, the dividends no cash
-  bears out now blank. **Still to see:** Sunday 2026-11-29 reads BHP's FY2026 20-F (companyfacts
-  lacks it; the overdue check fires from 11-27). PDD's free cash flow from FY2021 returns with its
-  next SEC fetch, Sunday 2026-12-06 (fetched by hand 11-23, so not due on the 29th). The same
-  fetch brings Teradyne's FY2011-12 and ON Semiconductor's FY2012 revenue (a quarter stated on
-  two ends had outweighed its year) and drops Visa's and Applied Materials' quarter rates read
-  as a year's dividend. All 206 pages were screened against themselves on 2026-11-23; the
-  remaining flags are real events (IPOs, specials, reverse splits, Sandisk's 8:1 of 11-20).
+- **The KPI audits' fixes (2026-11-23: 88 pages against public filings, 68 of 109 findings
+  confirmed; all 206 screened against themselves, the remaining flags real events such as IPOs,
+  specials, reverse splits and Sandisk's 8:1 of 11-20), deployed.** Seen live: Tokyo Electron's
+  split, TSMC's dividends, NU's EPS, HSBC's profit, the vendor's bad years, Tencent's EPS, BHP's
+  FY2026, PDD's free cash flow, Teradyne's and ON's revenue, the dividends no cash bears out now
+  blank. **Still to see, with each company's next SEC fetch (Sunday 2026-12-06, every page was
+  fetched by 11-23):** debt counting all borrowings (owner's choice; net cash and EV move on about
+  40 pages, Walmart's debt up 17%, Cisco's 29%), Disney's market cap from its cover count, GE's
+  FY2022 and RTX's FY2018 recast revenue, Visa's older dividend years blank.
+- **Left as they are after the audits:** a TTM across a recast comparative (BofA's revenue about
+  2% high; CrowdStrike's near-zero EPS, so its P/E); P&G's FY2017 dividend (its FY2019 10-K tags
+  3.00); Exxon's and Philip Morris's revenue before a change of basis; older years' dividends left
+  blank (Chevron, Disney, Amgen, Intel's FY2017); a blank net cash where short-term investments
+  stopped being tagged (Lilly, CrowdStrike).
 - **Known and left as stated:** Prysmian's revenue is its "total sales and income" tag (1-3%
   high); ABB's, Siemens' and Roche's growth crosses a change of perimeter in the vendor's data.
   Coverage on production 2026-11-23: 206 of 208 companies with a page, 197 fully backfilled. Of

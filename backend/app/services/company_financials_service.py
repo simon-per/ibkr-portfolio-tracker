@@ -165,6 +165,9 @@ BALANCES = (
     "debt_total",
     "debt_noncurrent",
     "debt_current",
+    "current_maturities",
+    "short_term_borrowings",
+    "debt_current_total",
     "equity",
     "shares_outstanding",
     "cash_and_short_term",
@@ -194,6 +197,8 @@ FILED_SPLIT_RATIO_TOLERANCE = 0.02
 # The market cap's share count must sit this near the diluted average: a filer that tags one
 # class of several without its class (half of GOOGL's, 87% of META's) is no company's count.
 MARKET_CAP_SHARE_TOLERANCE = 0.10
+#: Short-term borrowings this near the current maturities are the same line (`_debt`).
+SAME_DEBT_LINE = 0.01
 #: A filer quoted in another currency than it reports in is priced by a held listing of its
 #: ordinary share (`_ordinary_closes`) when the receipt's close, converted at the day's rate,
 #: stands within this of a whole number of that listing's closes (`NEIGHBOUR_RATIOS`: ASML's
@@ -280,19 +285,44 @@ def _ratio(numerator: Optional[float], denominator: Optional[float]) -> Optional
 
 def _debt(base: Dict[str, Optional[float]]) -> Optional[float]:
     """
-    The tagged total, else the noncurrent and current halves added when both are tagged.
-    A total of exactly zero is a tagging slip, not a debt-free company (ORCL's FY2022 and
-    AMD's FY2021 10-Ks tag a 0 beside billions of notes); a company without debt tags none.
-    And a "total" smaller than its own halves is one of them under the total's concept
-    (review item CO7, 2026-11-08: AMD's FY2021 year end read 1M against 313M of notes, and
-    the next year's debt grew "+246,600%"): the halves win.
+    All borrowings (owner, 2026-11-23): the long-term debt with its current maturities, plus
+    commercial paper and other short-term borrowings. The term debt is the tagged total, else
+    the noncurrent and current halves added when both are tagged. A total of exactly zero is
+    a tagging slip, not a debt-free company (ORCL's FY2022 and AMD's FY2021 10-Ks tag a 0
+    beside billions of notes); a company without debt tags none. And a "total" smaller than
+    its own halves is one of them under the total's concept (review item CO7, 2026-11-08:
+    AMD's FY2021 year end read 1M against 313M of notes): the halves win.
+
+    A filer's own total of everything current (`DebtCurrent`) beside the noncurrent debt caps
+    the sum, so short-term borrowings that already hold the current maturities count once.
+    A short-term line equal to the current maturities is that one line tagged twice (IBM's,
+    AMD's). Rows read before these lines existed have none of them, and keep the term debt.
     """
     total = base.get("debt_total")
     noncurrent, current = base.get("debt_noncurrent"), base.get("debt_current")
-    halves = noncurrent + current if noncurrent is not None and current is not None else None
-    if halves is not None and (not total or halves > total):
-        return halves
-    return total or None
+    maturities = base.get("current_maturities")
+    short = base.get("short_term_borrowings")
+    all_current = base.get("debt_current_total")
+    if maturities is None and short is None and all_current is None:
+        halves = (
+            noncurrent + current if noncurrent is not None and current is not None else None
+        )
+        if halves is not None and (not total or halves > total):
+            return halves
+        return total or None
+    if short and maturities and abs(short / maturities - 1) <= SAME_DEBT_LINE:
+        short = 0.0
+    halves = noncurrent + (maturities or 0.0) if noncurrent is not None else None
+    term = halves if halves is not None and (not total or halves > total) else (total or None)
+    if term is None:
+        return None
+    summed = term + (short or 0.0)
+    if noncurrent is None or all_current is None:
+        return summed
+    whole = noncurrent + all_current
+    if not total:
+        return whole
+    return min(summed, whole) if short else max(summed, whole)
 
 
 def _derive(point: Point) -> None:
