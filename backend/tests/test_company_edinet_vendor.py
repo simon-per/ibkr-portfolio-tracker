@@ -8,7 +8,7 @@ and financials. Offline: fakes of both.
 
 import io
 import zipfile
-from datetime import date
+from datetime import date, datetime
 
 import httpx
 import pytest
@@ -26,7 +26,7 @@ from app.services.edinet_sync import (
     sec_code,
     summary_facts,
 )
-from app.services.vendor_sync import VendorFinancialsSync, facts_of
+from app.services.vendor_sync import VendorFinancialsSync, facts_of, sound_years
 
 HITACHI = NamedCompany("HITACHI LTD", ["JP3788600009"], ticker="6501")
 
@@ -631,6 +631,91 @@ def test_a_banks_vendor_lines():
     assert by["CashAndCashEquivalents"] == (1e10, "AUD")
 
 
+def _year(year, revenue=None, cash=None, eps=None, shares=None, capex=None):
+    start, end = f"{year - 1}-01-01", f"{year - 1}-12-31"
+    lines = {
+        "Revenue": ("EUR", revenue), "CashAndCashEquivalents": ("EUR", cash),
+        "DilutedEarningsLossPerShare": ("EUR/shares", eps),
+        "AdjustedWeightedAverageShares": ("shares", shares),
+        "PurchaseOfPropertyPlantAndEquipmentClassifiedAsInvestingActivities": ("EUR", capex),
+    }
+    return [
+        {"concept": c, "unit": u, "start": None if c.startswith("Cash") else start, "end": end,
+         "val": v, "accn": f"financialfilings:{year}", "filed": f"{year}-03-01",
+         "form": edinet_sync.REGULATOR_ANNUAL}
+        for c, (u, v) in lines.items()
+        if v is not None
+    ]
+
+
+def _ends(facts, concept):
+    return {f["end"][:4]: f["val"] for f in facts if f["concept"] == concept}
+
+
+def test_a_vendor_year_from_another_entitys_statements_is_left_out_whole():
+    # Siemens: the parent's 28bn and 22bn between the group's 83bn and 57bn.
+    facts = [f for y, r in ((2017, 83e9), (2018, 28e9), (2019, 22e9), (2020, 57e9), (2021, 62e9))
+             for f in _year(y, revenue=r, cash=9e9)]
+    assert sorted(_ends(sound_years(facts), "Revenue")) == ["2016", "2019", "2020"]
+    assert sorted(_ends(sound_years(facts), "CashAndCashEquivalents")) == ["2016", "2019", "2020"]
+
+
+def test_steady_growth_or_a_lasting_shrink_is_no_dip():
+    growth = [f for y in range(2010, 2016) for f in _year(y, revenue=1e9 * 2 ** (y - 2010))]
+    assert len(_ends(sound_years(growth), "Revenue")) == 6
+    # E.ON's 2015 spin-off: it never recovers, so no run has a year after it to dip under.
+    shrink = [f for y, r in ((2013, 122e9), (2014, 111e9), (2015, 42e9), (2016, 38e9), (2017, 38e9))
+              for f in _year(y, revenue=r)]
+    assert len(_ends(sound_years(shrink), "Revenue")) == 5
+
+
+def test_cash_in_the_wrong_unit_leaves_its_year_out_a_real_low_stays():
+    # Allianz's 141m beside 17bn; Hydro One's real 30m before 757m.
+    allianz = _year(2012, cash=141e6) + _year(2017, cash=17e9)
+    assert sorted(_ends(sound_years(allianz), "CashAndCashEquivalents")) == ["2016"]
+    hydro = _year(2019, cash=30e6) + _year(2020, cash=757e6)
+    assert len(_ends(sound_years(hydro), "CashAndCashEquivalents")) == 2
+
+
+def test_a_split_the_vendor_left_unrestated_and_its_capex():
+    # Tencent's 5:1 of 2014: 8.30 on 1,868m beside 2.54 on 9,357m.
+    facts = _year(2013, eps=8.30, shares=1_868e6, capex=1e9) + _year(2014, eps=2.54, shares=9_357e6)
+    out = sound_years(facts)
+    assert _ends(out, "DilutedEarningsLossPerShare")["2012"] == pytest.approx(1.66)
+    assert _ends(out, "AdjustedWeightedAverageShares")["2012"] == pytest.approx(9_340e6)
+    assert not _ends(out, "PurchaseOfPropertyPlantAndEquipmentClassifiedAsInvestingActivities")
+
+
+@pytest.mark.asyncio
+async def test_a_stored_vendor_answer_is_rewritten_without_a_request(db, monkeypatch):
+    monkeypatch.setattr(settings, "financialreports_api_key", "vendor-test-key", raising=False)
+
+    async def named(_db):
+        return []
+
+    def refuse(request):
+        raise AssertionError(f"asked {request.url}")
+
+    monkeypatch.setattr(vendor_sync, "named_companies", named)
+    repo = VendorFinancialsSync(db).repo
+    company = await repo.ensure_other_company("vendor", "47325", isin="CA4488112083", country="CA")
+    company.name = "HYDRO ONE LTD"
+    facts = [f for y, r in ((2016, 6.5e9), (2017, 1.4e9), (2018, 6.1e9), (2019, 6.5e9))
+             for f in _year(y, revenue=r)]
+    await repo.record_report(company.id, "financials-2026-11-20", status="read",
+                             read_at=datetime(2026, 11, 20), accn="financialfilings",
+                             filed=date(2026, 11, 20), facts=facts, tagged={})
+    await repo.replace_company_rows(company, [], datetime(2026, 11, 20))
+    await db.commit()
+    summary = await VendorFinancialsSync(
+        db, transport=httpx.MockTransport(refuse), sleep=_none
+    ).refresh()
+    assert summary["rewritten"] == 1 and summary["requests"] == 0
+    rows = (await db.execute(select(CompanyFinancial))).scalars().all()
+    assert sorted(r.period_end.year for r in rows if r.metric == "revenue") == [2015, 2017, 2018]
+    assert (await db.execute(select(CompanyReport))).scalars().one().reader == vendor_sync.READER
+
+
 class Vendor:
     def __init__(self, remaining=480):
         self.requests = []
@@ -697,8 +782,8 @@ async def test_the_vendor_fills_only_what_no_regulator_covers(db, monkeypatch):
     )
     revenue = [p["value"] for p in page["series"]["revenue"]["points"]]
     assert revenue == [78.914e9]
-    fcf = [p["value"] for p in page["series"]["fcf"]["points"]]
-    assert fcf == [13.257e9 - 2.445e9]
+    # The vendor's capex is not read (`UNPROVEN_CONCEPTS`), so no free cash flow.
+    assert [p["value"] for p in page["series"]["fcf"]["points"]] == [None]
 
     # Within the refresh interval: nothing asked, the page stays listed.
     fake.requests.clear()

@@ -20,6 +20,11 @@ once in `REFRESH_AFTER` a company, and only while the month's credits last
 IFRS concept the one normaliser reads — standardised statements, not a filing's tags, so a code
 `LINES` does not name is left out rather than guessed. Values are absolute decimals in the
 statement's currency.
+
+**Checked** (`sound_years`, the KPI audit of 2026-11-23): the vendor's extraction takes some
+years from the wrong statements (Siemens' FY2018-19 from the parent's, Hydro One's FY2017, Allianz's
+FY2011-12), leaves a split unrestated (Tencent's 5:1 of 2014) and misreads capex (Nestlé's, ABB's).
+A stored answer is rewritten through the check without asking the vendor again (`READER`).
 """
 
 import asyncio
@@ -35,7 +40,12 @@ from app.clock import utcnow
 from app.config import settings
 from app.models.company_financials import VENDOR_SCHEME
 from app.repositories.company_financials_repository import CompanyFinancialsRepository
-from app.services.company_financials_normaliser import REGULATOR_ANNUAL
+from app.services.company_financials_normaliser import (
+    NEIGHBOUR_RATIOS,
+    NEIGHBOUR_TOLERANCE,
+    REGULATOR_ANNUAL,
+    _snap,
+)
 from app.services.company_markets import NamedCompany, named_companies, sec_isins
 from app.services.edinet_sync import JAPAN_ISIN
 from app.services.regulator_facts import normalise_reports, one_value_each
@@ -56,6 +66,22 @@ FINANCIALS_COST = 41
 REQUEST_INTERVAL_S = 1.0
 READ = "read"
 YEAR_DAYS = (350, 380)
+#: What a stored answer has been through: 1 (NULL) nothing, 2 `sound_years`.
+READER = 2
+#: A run of up to `DIP_MAX_RUN` years whose revenue is under this share of the years on both
+#: sides is another entity's statements (Siemens' parent, 28bn and 22bn between 83bn and 57bn).
+#: A company that shrinks for good (E.ON's 2015 spin-off) has no recovery after the run.
+DIP_RATIO = 0.6
+DIP_MAX_RUN = 2
+#: Cash under this share of the next sound year's is a unit slip (Allianz's 1.48m and 141m
+#: beside 17bn). Hydro One's real 30m before 757m is 4%.
+CASH_SLIP_RATIO = 0.02
+#: The vendor's capex is left out: Nestlé's FY2023 and FY2025 and ABB's FY2025 match no line of
+#: their statements, so free cash flow is unknown on a vendor page.
+UNPROVEN_CONCEPTS = frozenset(
+    {"PurchaseOfPropertyPlantAndEquipmentClassifiedAsInvestingActivities"}
+)
+SHARE_COUNTS = ("AdjustedWeightedAverageShares", "NumberOfSharesOutstanding")
 
 MONEY, PER_SHARE, SHARES = "money", "per_share", "shares"
 FLOW, INSTANT = "flow", "instant"
@@ -235,6 +261,75 @@ def _eps_agrees(found: Dict[str, Dict[str, Any]]) -> bool:
     return 1 / EPS_CHECK_FACTOR <= ratio <= EPS_CHECK_FACTOR
 
 
+def _positive_by_end(facts: List[Dict[str, Any]], concept: str) -> Dict[str, float]:
+    return {f["end"]: f["val"] for f in facts if f["concept"] == concept and f["val"] > 0}
+
+
+def _unsound_ends(facts: List[Dict[str, Any]]) -> set:
+    """The year ends whose revenue dips out of the series or whose cash is a unit slip."""
+    revenue = _positive_by_end(facts, "Revenue")
+    ends = sorted(revenue)
+    bad = set()
+    for i in range(1, len(ends) - 1):
+        for run in range(1, DIP_MAX_RUN + 1):
+            after = i + run
+            if after >= len(ends):
+                break
+            edge = min(revenue[ends[i - 1]], revenue[ends[after]])
+            if all(revenue[e] < DIP_RATIO * edge for e in ends[i:after]):
+                bad.update(ends[i:after])
+                break
+    cash = _positive_by_end(facts, "CashAndCashEquivalents")
+    newer = None
+    for end in sorted(cash, reverse=True):
+        if end in bad:
+            continue
+        if newer is not None and cash[end] < CASH_SLIP_RATIO * newer:
+            bad.add(end)
+            continue
+        newer = cash[end]
+    return bad
+
+
+def _split_factors(facts: List[Dict[str, Any]]) -> Dict[str, float]:
+    """Each year end's factor to the newest share basis: the steps of the diluted count that
+    snap to a whole split of at least 2 (Tencent's 1,868m to 9,357m)."""
+    counts = _positive_by_end(facts, "AdjustedWeightedAverageShares")
+    factors: Dict[str, float] = {}
+    factor = 1.0
+    newer = None
+    for end in sorted(counts, reverse=True):
+        if newer is not None:
+            step = _snap(newer / counts[end], NEIGHBOUR_RATIOS, NEIGHBOUR_TOLERANCE)
+            if step is not None and step.denominator == 1 and step >= 2:
+                factor *= float(step)
+        factors[end] = factor
+        newer = counts[end]
+    return factors
+
+
+def sound_years(facts: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """
+    A stored answer's facts less each unsound year, whole (`DIP_RATIO`, `CASH_SLIP_RATIO`) and
+    the unproven lines (`UNPROVEN_CONCEPTS`), with the years before a split on the newest
+    share basis: the vendor's years share no period, so the normaliser's vote cannot see it.
+    """
+    bad = _unsound_ends(facts)
+    kept = [
+        f for f in facts if f["end"] not in bad and f["concept"] not in UNPROVEN_CONCEPTS
+    ]
+    factors = _split_factors(kept)
+    out = []
+    for f in kept:
+        factor = factors.get(f["end"], 1.0)
+        if factor != 1.0 and f["concept"] == "DilutedEarningsLossPerShare":
+            f = {**f, "val": f["val"] / factor}
+        elif factor != 1.0 and f["concept"] in SHARE_COUNTS:
+            f = {**f, "val": f["val"] * factor}
+        out.append(f)
+    return out
+
+
 class VendorStop(Exception):
     """The vendor refused the key, the plan or the month's credits: the pass stops."""
 
@@ -303,6 +398,7 @@ class VendorFinancialsSync:
             if company.fetched_at and (company.isin or "").strip().upper() in isins:
                 company.universe_seen_at = now
         await self.db.commit()
+        summary["rewritten"] = await self._rewrite_stored(now)
         async with httpx.AsyncClient(
             transport=self._transport,
             timeout=httpx.Timeout(60.0),
@@ -342,6 +438,29 @@ class VendorFinancialsSync:
         if warnings:
             summary["warnings"] = warnings
         return summary
+
+    async def _rewrite_stored(self, now: datetime) -> int:
+        """Each page's stored answer from before `READER`, through `sound_years`: no request,
+        no credit."""
+        rewritten = 0
+        for company in await self.repo.other_companies(VENDOR_SCHEME):
+            reports = await self.repo.company_reports(company.id)
+            newest = max(
+                (r for r in reports.values() if r.status == READ),
+                key=lambda r: r.read_at,
+                default=None,
+            )
+            if newest is None or (newest.reader or 1) >= READER:
+                continue
+            result = normalise_reports(
+                company.name, sound_years(newest.facts or []), SOURCE, newest.tagged or {}
+            )
+            newest.reader = READER
+            if result.rows:
+                await self.repo.replace_company_rows(company, result.rows, now)
+                rewritten += 1
+            await self.db.commit()
+        return rewritten
 
     async def _get(
         self, client: httpx.AsyncClient, path: str, **params: str
@@ -425,8 +544,9 @@ class VendorFinancialsSync:
             filed=now.date(),
             facts=facts,
             tagged=tagged,
+            reader=READER,
         )
-        result = normalise_reports(existing.name, facts, SOURCE, tagged)
+        result = normalise_reports(existing.name, sound_years(facts), SOURCE, tagged)
         if not result.rows:
             await self.db.commit()
             return "no figures"

@@ -1628,6 +1628,15 @@ after Taiwan; `tests/test_company_edinet_vendor.py`. Hitachi, Fujitsu, NEC, Toky
 
 ### Vendor fallback (financialfilings.com)
 
+**Checked before it is shown** (`vendor_sync.sound_years`, the KPI audit of 2026-11-23). A year
+whose revenue dips under `DIP_RATIO` of the years on both sides (Siemens' FY2018-19, its parent's
+statements; Hydro One's FY2017) or whose cash is a unit slip (Allianz's FY2011-12) is left out
+whole. A whole-number step in the diluted count restates the years before it (Tencent's 5:1 of
+2014). The vendor's capex is not read: Nestlé's and ABB's match no line of their statements, so a
+vendor page has no free cash flow. Stored answers are rewritten once (`READER`), with no credit.
+Left as stated: a perimeter change between years (ABB's Robotics, Siemens' Innomotics, Roche's
+sales against revenue).
+
 Owner's choice 2026-11-20, **waiting for the owner's free-tier key**
 (`FINANCIALREPORTS_API_KEY`, sent as `X-API-Key`; without it nothing). `vendor_sync`,
 `vendor:<the vendor's company id>` keys, `--source vendor`, last in the weekly markets job;
