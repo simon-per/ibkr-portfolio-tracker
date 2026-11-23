@@ -70,6 +70,8 @@ CREDIT_FLOOR = 45
 FINANCIALS_COST = 41
 REQUEST_INTERVAL_S = 1.0
 READ = "read"
+#: The vendor answered for the company with no figure: asked again on the same schedule.
+NONE = "none"
 YEAR_DAYS = (350, 380)
 #: What a stored answer has been through: 1 (NULL) nothing, 2 `sound_years`, 3 with a year
 #: that has no share count on its neighbours' split basis.
@@ -448,14 +450,18 @@ class VendorFinancialsSync:
         return summary
 
     async def _due(self, company, now: datetime) -> bool:
-        """Whether a page already asked is asked again: `REFRESH_AFTER` passed, or its next
-        annual report should be out and it was not asked in `REPORT_RECHECK`."""
+        """Whether a page already asked is asked again: never answered (the month's credits
+        ran out before its figures: Commonwealth Bank's and China Construction Bank's of
+        2026-11-20, stamped then and so not asked for 90 days), `REFRESH_AFTER` passed, or its
+        next annual report should be out and it was not asked in `REPORT_RECHECK`."""
+        reports = await self.repo.company_reports(company.id)
+        if not reports:
+            return True
         asked = company.profile_checked_at
         if asked <= now - REFRESH_AFTER:
             return True
         if asked > now - REPORT_RECHECK:
             return False
-        reports = await self.repo.company_reports(company.id)
         ends = [
             f["end"]
             for r in reports.values()
@@ -549,16 +555,27 @@ class VendorFinancialsSync:
                 ticker=named.ticker,
             )
         existing.name = named.name or existing.name
-        existing.profile_checked_at = now
         await self.db.commit()
         if self.remaining is not None and self.remaining < FINANCIALS_COST:
             raise VendorStop("the month's credits are spent")
         body = await self._get(
             client, f"/companies/{vendor_id}/financials/", fiscal_period="FY"
         )
+        # Stamped once the vendor has answered, never for a pass that ran out of credits.
+        existing.profile_checked_at = now
         summary["asked"] += 1
         facts, tagged = facts_of(body or {})
         if not facts:
+            await self.repo.record_report(
+                existing.id,
+                f"financials-{now.date().isoformat()}",
+                status=NONE,
+                read_at=now,
+                accn=SOURCE,
+                filed=now.date(),
+                reader=READER,
+            )
+            await self.db.commit()
             return "no figures"
         await self.repo.record_report(
             existing.id,

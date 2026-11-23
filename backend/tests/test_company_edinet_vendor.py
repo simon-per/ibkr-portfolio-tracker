@@ -844,6 +844,42 @@ async def test_the_vendor_asks_a_japanese_company_last(db, monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_a_company_the_credits_ran_out_on_is_asked_next_month(db, monkeypatch):
+    monkeypatch.setattr(settings, "financialreports_api_key", "vendor-test-key", raising=False)
+
+    async def named(_db):
+        return [NamedCompany("Siemens", ["DE0007236101"])]
+
+    monkeypatch.setattr(vendor_sync, "named_companies", named)
+    fake = Vendor(remaining=30)
+    await VendorFinancialsSync(db, transport=httpx.MockTransport(fake.handler), sleep=_none).refresh()
+    assert not [u for u in fake.requests if "/financials/" in u]
+    company = (await db.execute(select(Company))).scalars().one()
+    assert company.profile_checked_at is None
+
+    fake.remaining = 480
+    summary = await VendorFinancialsSync(
+        db, transport=httpx.MockTransport(fake.handler), sleep=_none
+    ).refresh()
+    assert summary["companies"] == 1 and [u for u in fake.requests if "/financials/" in u]
+
+
+@pytest.mark.asyncio
+async def test_a_company_stamped_before_any_answer_is_due_and_an_empty_answer_is_not(db):
+    sync = VendorFinancialsSync(db)
+    company = await sync.repo.ensure_other_company("vendor", "10459", isin="AU000000CBA7", country="AU")
+    company.profile_checked_at = datetime(2026, 11, 20)  # as the old pass left it
+    await db.commit()
+    assert await sync._due(company, datetime(2026, 11, 29))
+    await sync.repo.record_report(company.id, "financials-2026-11-29", status=vendor_sync.NONE,
+                                  read_at=datetime(2026, 11, 29), accn="financialfilings",
+                                  filed=date(2026, 11, 29))
+    company.profile_checked_at = datetime(2026, 11, 29)
+    await db.commit()
+    assert not await sync._due(company, datetime(2026, 12, 6))
+
+
+@pytest.mark.asyncio
 async def test_spent_credits_or_a_refused_key_stop_the_vendor_pass(db, monkeypatch):
     monkeypatch.setattr(
         settings, "financialreports_api_key", "vendor-test-key", raising=False

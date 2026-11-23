@@ -1657,7 +1657,8 @@ sales against revenue).
 
 **Asked again** after `REFRESH_AFTER` (90 days), or sooner once the next annual report should be
 out (`NEXT_REPORT_AFTER`, a year and six weeks past the newest year end), at most every
-`REPORT_RECHECK` (30 days).
+`REPORT_RECHECK` (30 days). A company is stamped only once the vendor has answered for it: one
+the month's credits ran out on is asked the next time they allow.
 
 Owner's choice 2026-11-20, **waiting for the owner's free-tier key**
 (`FINANCIALREPORTS_API_KEY`, sent as `X-API-Key`; without it nothing). `vendor_sync`,
