@@ -329,6 +329,11 @@ def test_a_quarters_rate_on_the_years_context_is_no_annual_dividend():
     # The whole year's rate stands.
     whole = {**lines, "CommonStockDividendsPerShareDeclared": ("USD/shares", 1.28)}
     assert dps({"entityName": "V", "facts": {"us-gaap": _gaap_year("2021-09-30", **whole)}}) == [1.28]
+    # With no diluted count, profit over EPS is the count (Visa's classes).
+    uncounted = {k: v for k, v in lines.items()
+                 if k != "WeightedAverageNumberOfDilutedSharesOutstanding"}
+    uncounted["EarningsPerShareDiluted"] = ("USD/shares", 5.45)
+    assert dps({"entityName": "V", "facts": {"us-gaap": _gaap_year("2021-09-30", **uncounted)}}) == []
     # A bank's paid total holds its preferred dividends: no measure of the common one.
     bank = {**lines, "DividendsPreferredStock": ("USD", 2e9)}
     assert dps({"entityName": "B", "facts": {"us-gaap": _gaap_year("2021-09-30", **bank)}}) == [0.32]

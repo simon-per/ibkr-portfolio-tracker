@@ -242,10 +242,11 @@ SKIPPED_LOOKBACK = timedelta(days=730)
 MAX_QUARTER_DAYS = 120
 #: Newest figures older than this mean a filing is due that companyfacts has not served:
 #: a 10-Q is due 40-45 days after its quarter, a 10-K 60-90 days after the year
-#: (`company_financials_sync.FIGURES_STALE_AFTER`), and an annual-only filer's 20-F a year
-#: and four months after its last one.
+#: (`company_financials_sync.FIGURES_STALE_AFTER`), and an annual-only filer's 20-F four months
+#: after its year end, so a year and 130 days past the last (BHP's FY2026 20-F of 2026-08-18,
+#: which companyfacts never took in, went unread at 150).
 STALE_QUARTERLY = timedelta(days=150)
-STALE_ANNUAL = timedelta(days=365 + 150)
+STALE_ANNUAL = timedelta(days=365 + 130)
 
 
 def companyfacts_accns(companyfacts: Dict[str, Any]) -> set:

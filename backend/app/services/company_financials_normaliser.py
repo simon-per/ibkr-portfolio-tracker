@@ -2395,11 +2395,20 @@ def _drop_dividends_cash_contradicts(values, companyfacts) -> None:
     for key, obs in list(dps.items()):
         if key[0] != ANNUAL or obs.value <= 0:
             continue
-        shares = values["diluted_shares"].get(key)
         paid = values["dividends_paid"].get(key)
-        if shares is None or shares.value <= 0 or paid is None or paid.value <= 0:
+        if paid is None or paid.value <= 0:
             continue
-        ratio = obs.value * shares.value / paid.value
+        # The diluted count, else profit over EPS: Visa tags no count across its classes.
+        shares = values["diluted_shares"].get(key)
+        count = shares.value if shares is not None else None
+        if not count or count <= 0:
+            income, eps = values["net_income"].get(key), values["eps_diluted"].get(key)
+            if income is None or eps is None or not eps.value:
+                continue
+            count = income.value / eps.value
+            if count <= 0:
+                continue
+        ratio = obs.value * count / paid.value
         if ratio > DPS_CASH_FACTOR or ratio < 1 / DPS_CASH_FACTOR:
             del dps[key]
 
