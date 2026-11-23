@@ -60,6 +60,11 @@ SOURCE = "financialfilings"
 NOT_CONFIGURED = "FINANCIALREPORTS_API_KEY is not set; companies no regulator covers were not refreshed."
 BASE = "https://api.financialreports.eu"
 REFRESH_AFTER = timedelta(days=90)
+#: Sooner once the next annual report should be out (a year and six weeks past the newest year
+#: end), at most every `REPORT_RECHECK`: Siemens' and Infineon's FY2026, published within days
+#: of the first read, would otherwise wait out the 90 days.
+NEXT_REPORT_AFTER = timedelta(days=365 + 45)
+REPORT_RECHECK = timedelta(days=30)
 #: Stop asking below this many monthly credits: one company costs 41.
 CREDIT_FLOOR = 45
 FINANCIALS_COST = 41
@@ -439,6 +444,23 @@ class VendorFinancialsSync:
             summary["warnings"] = warnings
         return summary
 
+    async def _due(self, company, now: datetime) -> bool:
+        """Whether a page already asked is asked again: `REFRESH_AFTER` passed, or its next
+        annual report should be out and it was not asked in `REPORT_RECHECK`."""
+        asked = company.profile_checked_at
+        if asked <= now - REFRESH_AFTER:
+            return True
+        if asked > now - REPORT_RECHECK:
+            return False
+        reports = await self.repo.company_reports(company.id)
+        ends = [
+            f["end"]
+            for r in reports.values()
+            if r.status == READ
+            for f in r.facts or ()
+        ]
+        return bool(ends) and now.date() >= date.fromisoformat(max(ends)) + NEXT_REPORT_AFTER
+
     async def _rewrite_stored(self, now: datetime) -> int:
         """Each page's stored answer from before `READER`, through `sound_years`: no request,
         no credit."""
@@ -496,7 +518,7 @@ class VendorFinancialsSync:
             if (
                 not force
                 and existing.profile_checked_at
-                and existing.profile_checked_at > now - REFRESH_AFTER
+                and not await self._due(existing, now)
             ):
                 return "unchanged"
         vendor_id = existing.native_id if existing is not None else None

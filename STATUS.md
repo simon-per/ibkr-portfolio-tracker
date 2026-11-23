@@ -29,17 +29,25 @@ code trace; all of them shipped that evening (waves 1–3, the product issues #7
 
 ## Needs a human
 
-- **Push `main`, then run `fetch_company_markets --source edinet`.** Committed 2026-11-23, not
-  pushed: a split after a Japanese annual report read from the half-year report, and basket
-  prices recorded from an unchanged file. **Until then Tokyo Electron's live page is wrong:**
-  its 5:1 split of 2026-10-01 puts a post-split price beside pre-split figures, so its P/E and
-  market cap read a fifth of the real ones and its dividend yield five times. The pass lists
-  about 55 days and reads four half-year reports once; checked on the real reports, only Tokyo
-  Electron's figures move. Not yet done: the planned KPI audit of the 48 non-SEC and
-  foreign-currency pages. Coverage on production 2026-11-21: 207 of 209 companies with a page,
-  200 fully backfilled (Allianz revenue, CBA and CCB wait for the vendor's next month of
-  credits; BRK and Iberdrola EPS, Nestlé/Roche vendor holes and Prysmian/Terna FY2025 have no
-  free source).
+- **Push `main`, then run `fetch_company_markets` with `--source edinet`, `esef` and `vendor`.**
+  The fixes of the 2026-11-23 KPI audit (48 pages against public filings, 41 of 68 findings
+  confirmed) are committed, not pushed, because the session's permission check refused the push.
+  **Until then these live figures are wrong:** Tokyo Electron's P/E, market cap and yield
+  (post-split price, pre-split figures); Santander's and Iberdrola's yield (interim dividend
+  only); HSBC's profit; NU's FY2019-20 EPS; Siemens', Hydro One's and Allianz's bad vendor years;
+  Tencent's EPS before 2014; TSMC's dividends after FY2018. The three passes re-read what they
+  stored, with no vendor credit for a rewrite. The SEC-side changes land with the Sunday
+  `company_financials_refresh`, which also reads BHP's FY2026 20-F (companyfacts lacks it, and
+  the overdue check fires from 2026-11-27) and PDD's capex. After that, re-read the audited pages.
+- **Decide: bank book value per share.** JPMorgan's and TD's read 8-10% high because equity
+  includes preferred capital, and banks tag it too unevenly to subtract (BAC and TD not at all).
+  Keep the approximate figure or hide it on bank pages.
+- **Known and left as stated:** Prysmian's revenue is its "total sales and income" tag (1-3%
+  high); ABB's, Siemens' and Roche's growth crosses a change of perimeter in the vendor's data.
+  Coverage on production 2026-11-21: 207 of 209 companies with a page, 200 fully backfilled
+  (Allianz revenue, CBA and CCB wait for the vendor's next month of credits, as do Siemens' and
+  Infineon's FY2026; BRK and Iberdrola EPS, Nestlé/Roche vendor holes and Prysmian/Terna FY2025
+  have no free source).
 
 - **Confirm the Alpha Vantage key's tier.** The Company tab's statement fill and the price
   fallback now share one budget of 25 calls a UTC day (`alpha_vantage.DAILY_LIMIT`, the free
@@ -653,9 +661,10 @@ Rough priority. Re-verify each `path:line` in code before fixing; lines move.
 
 One line each, newest first; drop the oldest.
 
-- **2026-11-23 (a split after the annual report)** — Tokyo Electron's post-split price beside
-  pre-split figures, found on the live screener; fixed from EDINET's half-year report through
-  the normaliser's own split vote, checked on all four Japanese companies' real reports.
+- **2026-11-23 (the KPI audit)** — 48 pages audited against public filings with an adversarial
+  check per finding; fixed Tokyo Electron's post-listing split, European dividends proven by
+  cash, HSBC's profit, NU's mis-tagged EPS, the vendor's bad years, TSMC's quarterly dividends
+  and consolidation years, each checked on the real filings. Committed; the push was refused.
 
 - **2026-11-20 (the vendor fallback live)** — the owner's financialfilings.com key; the line
   mapping rebuilt on the vendor's own codes after Siemens' live answer (OCF and equity missed,

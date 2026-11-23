@@ -1641,6 +1641,10 @@ vendor page has no free cash flow. Stored answers are rewritten once (`READER`),
 Left as stated: a perimeter change between years (ABB's Robotics, Siemens' Innomotics, Roche's
 sales against revenue).
 
+**Asked again** after `REFRESH_AFTER` (90 days), or sooner once the next annual report should be
+out (`NEXT_REPORT_AFTER`, a year and six weeks past the newest year end), at most every
+`REPORT_RECHECK` (30 days).
+
 Owner's choice 2026-11-20, **waiting for the owner's free-tier key**
 (`FINANCIALREPORTS_API_KEY`, sent as `X-API-Key`; without it nothing). `vendor_sync`,
 `vendor:<the vendor's company id>` keys, `--source vendor`, last in the weekly markets job;

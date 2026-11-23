@@ -699,6 +699,25 @@ def test_a_split_the_vendor_left_unrestated_and_its_capex():
 
 
 @pytest.mark.asyncio
+async def test_a_vendor_page_is_asked_again_once_its_next_report_is_due(db):
+    sync = VendorFinancialsSync(db)
+    company = await sync.repo.ensure_other_company("vendor", "390", isin="DE0007236101", country="DE")
+    await sync.repo.record_report(company.id, "financials-2026-11-20", status="read",
+                                  read_at=datetime(2026, 11, 20), accn="financialfilings",
+                                  filed=date(2026, 11, 20), tagged={},
+                                  facts=_year(2026, revenue=78.9e9))  # year to 2025-12-31
+    company.profile_checked_at = datetime(2026, 11, 20)
+    await db.commit()
+    # Within the recheck; then its next report is not yet due; then it is.
+    assert not await sync._due(company, datetime(2026, 12, 10))
+    assert not await sync._due(company, datetime(2027, 1, 10))
+    assert await sync._due(company, datetime(2027, 2, 15))
+    # Past the 90 days whatever the year end.
+    company.profile_checked_at = datetime(2026, 1, 1)
+    assert await sync._due(company, datetime(2026, 4, 2))
+
+
+@pytest.mark.asyncio
 async def test_a_stored_vendor_answer_is_rewritten_without_a_request(db, monkeypatch):
     monkeypatch.setattr(settings, "financialreports_api_key", "vendor-test-key", raising=False)
 
