@@ -1576,8 +1576,10 @@ page (its 20-F).
 
 Some 10-Ks tag one quarter's rate on the year's context (Visa's FY2021 0.32 of 1.28, Applied
 Materials' FY2009 0.06 of 0.24). `_drop_dividends_cash_contradicts` leaves a year's dividend per
-share out when it times the diluted shares is more than `DPS_CASH_FACTOR` (3) from the dividends
-paid. Not for a company tagging preferred dividends (`PREFERRED_DIVIDENDS`), whose paid total
+share out when it times the shares is more than `DPS_CASH_FACTOR` (3) from the dividends paid.
+The shares are the year's diluted count, else profit over EPS, else the nearest year's count
+(`_year_count`; Visa has none before FY2020). Not for a company tagging preferred dividends
+(`PREFERRED_DIVIDENDS`), whose paid total
 holds them too. Measured over every SEC page's companyfacts: Applied Materials' two years and
 S&P's FY2012 (its regular 1.02 beside a 2.50 special) leave; Visa's, whose count comes from its
 filings, on production.

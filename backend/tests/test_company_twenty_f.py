@@ -334,6 +334,17 @@ def test_a_quarters_rate_on_the_years_context_is_no_annual_dividend():
                  if k != "WeightedAverageNumberOfDilutedSharesOutstanding"}
     uncounted["EarningsPerShareDiluted"] = ("USD/shares", 5.45)
     assert dps({"entityName": "V", "facts": {"us-gaap": _gaap_year("2021-09-30", **uncounted)}}) == []
+    # With no count that year at all, the nearest year's weighs it (Visa before FY2020).
+    older = {"Revenues": ("USD", 12e9), "NetIncomeLoss": ("USD", 5e9),
+             "PaymentsOfDividends": ("USD", 864e6),
+             "CommonStockDividendsPerShareDeclared": ("USD/shares", 0.0825)}
+    gaap = _gaap_year("2021-09-30", **whole)
+    for name, body in _gaap_year("2013-09-30", **older).items():
+        units = gaap.setdefault(name, {"units": {}})["units"]
+        for unit, rows in body["units"].items():
+            units.setdefault(unit, []).extend(rows)
+    rows = normalise({"entityName": "V", "facts": {"us-gaap": gaap}}).rows
+    assert [r["fiscal_year"] for r in rows if r["metric"] == "dividends_per_share"] == [2021]
     # A bank's paid total holds its preferred dividends: no measure of the common one.
     bank = {**lines, "DividendsPreferredStock": ("USD", 2e9)}
     assert dps({"entityName": "B", "facts": {"us-gaap": _gaap_year("2021-09-30", **bank)}}) == [0.32]

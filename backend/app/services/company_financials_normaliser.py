@@ -2382,6 +2382,26 @@ def _drop_implausible_dividends(values) -> None:
             del dps[key]
 
 
+def _year_count(values, key) -> Optional[float]:
+    """
+    A year's share count to weigh its dividend by: its diluted count, else profit over EPS,
+    else the nearest year's diluted count, all on the newest split basis. Visa tags no count
+    across its classes before FY2020; `DPS_CASH_FACTOR` is wide enough for a few years' buybacks.
+    """
+    shares = values["diluted_shares"].get(key)
+    if shares is not None and shares.value > 0:
+        return shares.value
+    income, eps = values["net_income"].get(key), values["eps_diluted"].get(key)
+    if income is not None and eps is not None and eps.value and income.value / eps.value > 0:
+        return income.value / eps.value
+    years = [
+        (abs((k[1] - key[1]).days), o.value)
+        for k, o in values["diluted_shares"].items()
+        if k[0] == ANNUAL and o.value > 0
+    ]
+    return min(years)[1] if years else None
+
+
 def _drop_dividends_cash_contradicts(values, companyfacts) -> None:
     """
     A year's dividend per share the dividends paid contradict by `DPS_CASH_FACTOR` either way:
@@ -2398,16 +2418,9 @@ def _drop_dividends_cash_contradicts(values, companyfacts) -> None:
         paid = values["dividends_paid"].get(key)
         if paid is None or paid.value <= 0:
             continue
-        # The diluted count, else profit over EPS: Visa tags no count across its classes.
-        shares = values["diluted_shares"].get(key)
-        count = shares.value if shares is not None else None
-        if not count or count <= 0:
-            income, eps = values["net_income"].get(key), values["eps_diluted"].get(key)
-            if income is None or eps is None or not eps.value:
-                continue
-            count = income.value / eps.value
-            if count <= 0:
-                continue
+        count = _year_count(values, key)
+        if count is None:
+            continue
         ratio = obs.value * count / paid.value
         if ratio > DPS_CASH_FACTOR or ratio < 1 / DPS_CASH_FACTOR:
             del dps[key]
